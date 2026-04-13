@@ -1,0 +1,25 @@
+# Messages for EnthusiaCommend (rep system only).
+# Teleport-related commands now live in the EnthusiaTeleport plugin.
+
+rep:
+  give-success: "&6You gave {amount} rep to &e{target}&6 for &e{category}&6. New rep: {rep}"
+  receive: "&e{giver}&6 gave you {amount} rep for &e{category}&6. New total: {rep}"
+  cooldown: "&cYou can edit your commendation for this player again in &e{hours}h&c."
+  self: "&cYou cannot give rep to yourself."
+  playtime-short: "&cYou need at least &e{hours_required}h&c of active playtime. You have &e{hours_have}h&c."
+  category-invalid: "&cUnknown category. Use one of: &e{list}"
+  not-found: "&cPlayer not found: {name}"
+  no-permission: "&cYou do not have permission."
+
+stalk:
+  not-stalkable: "&cThat player is not stalkable (rep must be &e-12&c or lower)."
+  no-economy: "&cEconomy not set up; cannot buy stalk subscription."
+  not-enough: "&cYou need ${cost} to stalk for {days} day(s)."
+  purchased: "&6You are now stalking &e{target}&6 for &e{days}&6 day(s)."
+  cancelled: "&6Cancelled stalk on &e{target}&6."
+  list-empty: "&7You are not stalking anyone."
+
+admin:
+  revoked: "&cRemoved commendation from &e{giver}&c to &e{target}&c."
+  reset: "&6Cleared all commendations for &e{target}&6."
+  resolve: "&6Marked alt case for &e{target}&6 as resolved."

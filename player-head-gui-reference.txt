@@ -1,0 +1,128 @@
+Player Head GUI Reference
+=========================
+
+This file is only a copied reference. It does not change plugin behavior.
+
+Primary GUI helper
+------------------
+File:
+src/main/java/org/enthusia/rep/gui/HeadUtil.java
+
+Purpose:
+Creates player head ItemStacks for the GUI and stores the target UUID in the
+PersistentDataContainer under the "owner-uuid" key.
+
+Code:
+
+package org.enthusia.rep.gui;
+
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.skin.SkinCache;
+
+import java.util.UUID;
+
+/**
+ * Helper for creating player heads that keep their owner data for persistence.
+ */
+public final class HeadUtil {
+
+    private HeadUtil() {
+    }
+
+    public static ItemStack createPlayerHead(CommendPlugin plugin, UUID uuid, String displayName) {
+        SkinCache cache = plugin.getSkinCache();
+        ItemStack head = (cache != null)
+                ? cache.createHead(uuid, displayName)
+                : new ItemStack(Material.PLAYER_HEAD);
+
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        if (meta != null) {
+            NamespacedKey key = new NamespacedKey(plugin, "owner-uuid");
+            meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, uuid.toString());
+            head.setItemMeta(meta);
+        }
+        return head;
+    }
+}
+
+
+GUI call sites
+--------------
+File:
+src/main/java/org/enthusia/rep/gui/RepGuiManager.java
+
+The GUI uses HeadUtil.createPlayerHead(...) in these places:
+
+1. Profile head
+
+ItemStack head = HeadUtil.createPlayerHead(plugin, targetId, color + target.getName());
+
+2. Commendation giver head
+
+ItemStack head = HeadUtil.createPlayerHead(plugin, c.getGiver(),
+        ChatColor.YELLOW + repService.nameOf(c.getGiver()));
+
+3. Removed-log remover head
+
+ItemStack item = removerId != null
+        ? HeadUtil.createPlayerHead(plugin, removerId, ChatColor.YELLOW + r.id())
+        : item(Material.BARRIER, ChatColor.RED + "Unknown");
+
+4. Target head in removed entry view
+
+ItemStack item = HeadUtil.createPlayerHead(plugin, c.getTarget(), ChatColor.YELLOW + repService.nameOf(c.getTarget()));
+
+
+Supporting skin cache
+---------------------
+File:
+src/main/java/org/enthusia/rep/skin/SkinCache.java
+
+Purpose:
+Caches player heads with baked skins so offline players still render correctly.
+
+Relevant code:
+
+public void cacheFromOnline(Player player) {
+    ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+    SkullMeta meta = (SkullMeta) head.getItemMeta();
+    meta.setOwningPlayer(player);
+    head.setItemMeta(meta);
+
+    cache.put(player.getUniqueId(), head);
+}
+
+public ItemStack createHead(UUID uuid, String displayName) {
+    ItemStack head = cache.get(uuid);
+
+    if (head != null && head.getType() == Material.PLAYER_HEAD) {
+        head = head.clone(); // don't mutate cached
+    } else {
+        head = new ItemStack(Material.PLAYER_HEAD);
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        OfflinePlayer offline = Bukkit.getOfflinePlayer(uuid);
+        meta.setOwningPlayer(offline);
+        head.setItemMeta(meta);
+    }
+
+    if (displayName != null) {
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        meta.setDisplayName(displayName);
+        head.setItemMeta(meta);
+    }
+
+    return head;
+}
+
+
+Summary
+-------
+If you want to reuse this in another plugin, the main code to copy is:
+1. HeadUtil.createPlayerHead(...)
+2. SkinCache.createHead(...) if you also want offline-player skins to render well
+3. The PersistentDataContainer "owner-uuid" write if you need to track ownership

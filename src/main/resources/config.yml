@@ -1,0 +1,67 @@
+# src/main/resources/config.yml
+
+rep:
+  # player must have at least this many hours of ACTIVE playtime to give rep
+  minActivePlaytimeHours: 12
+  # how long between editing the same commend
+  editCooldownHours: 24
+  # text input mode for leaving rep:
+  # ANVIL (default, players can choose anvil or chat), CHAT, or BOOK
+  inputMode: ANVIL
+
+  negative:
+    "-5":
+      movement_speed_percent: -1
+    "-6":
+      pearl_cooldown_seconds: 3
+      firework_duration_percent: -5
+    "-7":
+      movement_speed_percent: -3
+      windcharge_cooldown_seconds: 2
+      firework_duration_percent: -10
+    "-10":
+      movement_speed_percent: -5
+      pearl_cooldown_seconds: 5
+      glow: true
+    "-12":
+      stalkable: true
+      potion_duration_percent: -10
+    "-15":
+      pearl_cooldown_seconds: 7
+      windcharge_cooldown_seconds: 5
+      firework_duration_percent: -15
+    "-20":
+      pearl_cooldown_seconds: 10
+      windcharge_cooldown_seconds: 10
+      movement_speed_percent: -10
+      potion_duration_percent: -15
+      firework_duration_percent: -25
+      glow: true
+      glow_color: RED
+
+  positive:
+    "5":
+      movement_speed_percent: 1
+    "10":
+      movement_speed_percent: 3
+      potion_duration_percent: 5
+      cashback_percent: 3
+    "15":
+      movement_speed_percent: 5
+      potion_duration_percent: 10
+      cashback_percent: 5
+
+stalk:
+  cost: 100.0           # how much it costs to stalk someone
+  durationDays: 1       # how long the subscription lasts in days
+
+regions:
+  # Simple cuboid regions. Adjust coords to your spawn/warzone.
+  spawn:
+    - world: world
+      min: -50, 0, -50
+      max: 50, 256, 50
+  warzone:
+    - world: world
+      min: -500, 0, -500
+      max: 500, 256, 500

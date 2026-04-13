@@ -1,0 +1,52 @@
+name: EnthusiaCommend
+main: org.enthusia.rep.CommendPlugin
+version: 1.0.0
+api-version: '1.21'
+author: Enthusia
+depend: [Vault, ProtocolLib]
+softdepend: [PlaceholderAPI, EnthusiaTeleport]
+
+commands:
+  rep:
+    description: View and manage reputation.
+    aliases: [reputation]
+    usage: /rep
+    permission: enthusiacommend.rep.view
+
+permissions:
+  enthusiacommend.*:
+    description: All EnthusiaCommend permissions.
+    default: false
+    children:
+      enthusiacommend.rep.*: true
+
+  enthusiacommend.rep.*:
+    description: All rep-related permissions.
+    default: false
+    children:
+      enthusiacommend.rep.view: true
+      enthusiacommend.rep.admin: true
+      enthusiacommend.rep.stalk: true
+      enthusiacommend.rep.testpay: true
+
+  enthusiacommend.rep.view:
+    description: Use /rep to view reputation.
+    default: true
+
+  enthusiacommend.rep.admin:
+    description: Admin functions for rep (/rep admin ...).
+    default: op
+    children:
+      enthusiacommend.rep.alert: true
+
+  enthusiacommend.rep.stalk:
+    description: Use /rep stalk <player>.
+    default: true
+
+  enthusiacommend.rep.testpay:
+    description: Test cashback payments.
+    default: op
+
+  enthusiacommend.rep.alert:
+    description: Receive alerts for suspicious rep activity.
+    default: op
