@@ -214,6 +214,9 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleLeaderboard(CommandSender sender, int limit, boolean lowest) {
+        if (sender instanceof Player p) {
+            Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationLeaderboardViewedEvent(p.getUniqueId()));
+        }
         sender.sendMessage(ChatColor.GOLD + (lowest ? "--- Lowest Rep ---" : "--- Top Rep ---"));
         int rank = 1;
         for (var entry : repService.top(limit, lowest)) {

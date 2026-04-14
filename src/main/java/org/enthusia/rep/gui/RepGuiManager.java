@@ -216,6 +216,8 @@ public class RepGuiManager implements Listener {
     }
 
     public void openProfile(Player viewer, OfflinePlayer target, int page) {
+        Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationProfileViewedEvent(
+                viewer.getUniqueId(), target.getUniqueId()));
         UUID targetId = target.getUniqueId();
         int score = repService.getScore(targetId);
         ChatColor color = getRepColor(score);

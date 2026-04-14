@@ -133,7 +133,12 @@ public class RepService {
     }
 
     public void adjustScore(UUID uuid, int delta) {
-        repMap.put(uuid, getScore(uuid) + delta);
+        int oldScore = getScore(uuid);
+        int newScore = oldScore + delta;
+        repMap.put(uuid, newScore);
+        if (oldScore != newScore) {
+            Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.RepMilestoneReachedEvent(uuid, oldScore, newScore));
+        }
     }
 
     public Commendation getCommendation(UUID giver, UUID target) {
@@ -179,6 +184,8 @@ public class RepService {
             logAltRecord(ipHash, giver, target, positive, now);
             removalCooldown.remove(key(giver, target));
             notifyTeleport(target);
+            Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationGivenEvent(giver, target, positive));
+            Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationReceivedEvent(target, giver, positive, getScore(target)));
             return CommendationResult.created(c);
         }
 
@@ -202,6 +209,7 @@ public class RepService {
             notifyTeleport(target);
         }
         removalCooldown.remove(key(giver, target));
+        Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationEditedEvent(giver, target, positive));
         return CommendationResult.updated(existing, delta);
     }
 
