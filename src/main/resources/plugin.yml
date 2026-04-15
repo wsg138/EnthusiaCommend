@@ -3,8 +3,8 @@ main: org.enthusia.rep.CommendPlugin
 version: 1.0.0
 api-version: '1.21'
 author: Enthusia
-depend: [Vault, ProtocolLib]
-softdepend: [PlaceholderAPI, EnthusiaTeleport]
+depend: [Vault]
+softdepend: [PlaceholderAPI, EnthusiaTeleport, ProtocolLib]
 
 commands:
   rep:
@@ -27,6 +27,7 @@ permissions:
       enthusiacommend.rep.view: true
       enthusiacommend.rep.admin: true
       enthusiacommend.rep.stalk: true
+      enthusiacommend.rep.alert: true
       enthusiacommend.rep.testpay: true
 
   enthusiacommend.rep.view:
@@ -40,13 +41,13 @@ permissions:
       enthusiacommend.rep.alert: true
 
   enthusiacommend.rep.stalk:
-    description: Use /rep stalk <player>.
+    description: Use /rep stalk.
     default: true
-
-  enthusiacommend.rep.testpay:
-    description: Test cashback payments.
-    default: op
 
   enthusiacommend.rep.alert:
     description: Receive alerts for suspicious rep activity.
+    default: op
+
+  enthusiacommend.rep.testpay:
+    description: Reserved for economy test hooks.
     default: op

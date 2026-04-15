@@ -2,158 +2,100 @@ package org.enthusia.rep.stalk;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
-import org.enthusia.rep.CommendPlugin;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
-import org.enthusia.rep.stalk.StalkSubscription;
+import org.enthusia.rep.storage.PluginDataSnapshot;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
-public class StalkManager implements Listener {
+public final class StalkManager implements Listener {
 
-    private final CommendPlugin plugin;
-    private final RegionManager regions;
+    private final RegionManager regionManager;
     private final RepService repService;
-    private final File dataFile;
+    private final Runnable dirtyMarker;
 
-    private static class Subscription {
-        final UUID stalker;
-        final long expiresAt;
+    private RepConfig config;
 
-        Subscription(UUID stalker, long expiresAt) {
-            this.stalker = stalker;
-            this.expiresAt = expiresAt;
+    private final Map<UUID, Map<UUID, Long>> subscriptionsByTarget = new HashMap<>();
+    private final Map<UUID, RegionManager.ZoneType> lastKnownZones = new HashMap<>();
+
+    public StalkManager(RegionManager regionManager, RepService repService, RepConfig config, Runnable dirtyMarker) {
+        this.regionManager = regionManager;
+        this.repService = repService;
+        this.config = config;
+        this.dirtyMarker = dirtyMarker;
+    }
+
+    public void load(PluginDataSnapshot snapshot) {
+        subscriptionsByTarget.clear();
+        long now = System.currentTimeMillis();
+        for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {
+            if (entry.expiresAt() <= now) {
+                continue;
+            }
+            subscriptionsByTarget
+                    .computeIfAbsent(entry.targetId(), ignored -> new HashMap<>())
+                    .put(entry.stalkerId(), entry.expiresAt());
         }
     }
 
-    // target -> list of subscriptions
-    private final Map<UUID, List<Subscription>> byTarget = new ConcurrentHashMap<>();
-
-    // track last known warzone state
-    private final Map<UUID, Boolean> lastInWarzone = new ConcurrentHashMap<>();
-
-    public StalkManager(CommendPlugin plugin, RegionManager regions) {
-        this.plugin = plugin;
-        this.regions = regions;
-        this.repService = plugin.getRepService();
-        this.dataFile = new File(plugin.getDataFolder(), "stalks.yml");
-        load();
-        Bukkit.getPluginManager().registerEvents(this, plugin);
+    public void reload(RepConfig config) {
+        this.config = config;
     }
 
-    public void addSubscription(UUID stalker, UUID target, long durationMillis) {
-        long expires = System.currentTimeMillis() + durationMillis;
-        byTarget.compute(target, (id, list) -> {
-            if (list == null) list = new ArrayList<>();
-            boolean updated = false;
-            for (int i = 0; i < list.size(); i++) {
-                Subscription s = list.get(i);
-                if (s.stalker.equals(stalker)) {
-                    list.set(i, new Subscription(stalker, expires));
-                    updated = true;
-                    break;
+    public List<PluginDataSnapshot.StalkEntry> snapshotEntries() {
+        long now = System.currentTimeMillis();
+        List<PluginDataSnapshot.StalkEntry> entries = new ArrayList<>();
+        for (Map.Entry<UUID, Map<UUID, Long>> targetEntry : subscriptionsByTarget.entrySet()) {
+            for (Map.Entry<UUID, Long> stalkerEntry : targetEntry.getValue().entrySet()) {
+                if (stalkerEntry.getValue() > now) {
+                    entries.add(new PluginDataSnapshot.StalkEntry(stalkerEntry.getKey(), targetEntry.getKey(), stalkerEntry.getValue()));
                 }
             }
-            if (!updated) {
-                list.add(new Subscription(stalker, expires));
-            }
-            return list;
-        });
-        save();
-    }
-
-    public List<Subscription> getSubscriptionsOf(UUID target) {
-        return byTarget.getOrDefault(target, Collections.emptyList());
-    }
-
-    public void cancelSubscription(UUID stalker, UUID target) {
-        List<Subscription> list = byTarget.get(target);
-        if (list == null) return;
-        list.removeIf(s -> s.stalker.equals(stalker));
-        if (list.isEmpty()) {
-            byTarget.remove(target);
-        } else {
-            byTarget.put(target, list);
         }
-        save();
+        return entries;
     }
 
-    public boolean isStalkable(UUID target) {
-        return repService.getScore(target) <= -12;
+    public void addSubscription(UUID stalkerId, UUID targetId, long durationMillis) {
+        long expiresAt = System.currentTimeMillis() + durationMillis;
+        subscriptionsByTarget.computeIfAbsent(targetId, ignored -> new HashMap<>()).put(stalkerId, expiresAt);
+        dirtyMarker.run();
     }
 
-    private void load() {
-        if (!dataFile.exists()) return;
-        YamlConfiguration cfg = YamlConfiguration.loadConfiguration(dataFile);
-        if (!cfg.isConfigurationSection("subs")) return;
+    public void cancelSubscription(UUID stalkerId, UUID targetId) {
+        Map<UUID, Long> entries = subscriptionsByTarget.get(targetId);
+        if (entries == null) {
+            return;
+        }
+        entries.remove(stalkerId);
+        if (entries.isEmpty()) {
+            subscriptionsByTarget.remove(targetId);
+        }
+        dirtyMarker.run();
+    }
+
+    public boolean isStalkable(UUID targetId) {
+        return repService.getScore(targetId) <= config.getEffectThresholds().stalkableAt;
+    }
+
+    public List<StalkSubscription> getSubscriptionsByStalker(UUID stalkerId) {
         long now = System.currentTimeMillis();
-        for (String key : cfg.getConfigurationSection("subs").getKeys(false)) {
-            UUID target = UUID.fromString(cfg.getString("subs." + key + ".target"));
-            UUID stalker = UUID.fromString(cfg.getString("subs." + key + ".stalker"));
-            long expires = cfg.getLong("subs." + key + ".expiresAt");
-            if (expires > now) {
-                addSubscription(stalker, target, expires - now);
-            }
-        }
-    }
-
-    private void save() {
-        YamlConfiguration cfg = new YamlConfiguration();
-        int idx = 0;
-        for (Map.Entry<UUID, List<Subscription>> e : byTarget.entrySet()) {
-            for (Subscription s : e.getValue()) {
-                String path = "subs." + (idx++);
-                cfg.set(path + ".target", e.getKey().toString());
-                cfg.set(path + ".stalker", s.stalker.toString());
-                cfg.set(path + ".expiresAt", s.expiresAt);
-            }
-        }
-        try {
-            cfg.save(dataFile);
-        } catch (IOException ex) {
-            plugin.getLogger().warning("Failed to save stalks.yml: " + ex.getMessage());
-        }
-    }
-
-    private List<UUID> getActiveStalkers(UUID target) {
-        List<Subscription> list = byTarget.get(target);
-        if (list == null || list.isEmpty()) return Collections.emptyList();
-
-        long now = System.currentTimeMillis();
-        List<Subscription> still = new ArrayList<>();
-        List<UUID> result = new ArrayList<>();
-
-        for (Subscription s : list) {
-            if (s.expiresAt > now) {
-                still.add(s);
-                result.add(s.stalker);
-            }
-        }
-
-        if (still.isEmpty()) {
-            byTarget.remove(target);
-        } else {
-            byTarget.put(target, still);
-        }
-        return result;
-    }
-
-    public List<StalkSubscription> getSubscriptionsByStalker(UUID stalker) {
         List<StalkSubscription> result = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        for (Map.Entry<UUID, List<Subscription>> e : byTarget.entrySet()) {
-            for (Subscription s : e.getValue()) {
-                if (s.stalker.equals(stalker) && s.expiresAt > now) {
-                    result.add(new StalkSubscription(e.getKey(), s.expiresAt));
-                }
+        for (Map.Entry<UUID, Map<UUID, Long>> entry : subscriptionsByTarget.entrySet()) {
+            Long expiresAt = entry.getValue().get(stalkerId);
+            if (expiresAt != null && expiresAt > now) {
+                result.add(new StalkSubscription(entry.getKey(), expiresAt));
             }
         }
         return result;
@@ -161,38 +103,73 @@ public class StalkManager implements Listener {
 
     @EventHandler
     public void onPlayerMove(PlayerMoveEvent event) {
-        Player player = event.getPlayer();
-        UUID id = player.getUniqueId();
-
-        boolean wasIn = lastInWarzone.getOrDefault(id, false);
-        boolean nowIn = regions.isInWarzone(event.getTo());
-
-        if (wasIn == nowIn) {
-            return; // no change
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (to == null) {
+            return;
+        }
+        if (from.getWorld() == to.getWorld()
+                && from.getBlockX() == to.getBlockX()
+                && from.getBlockY() == to.getBlockY()
+                && from.getBlockZ() == to.getBlockZ()) {
+            return;
         }
 
-        lastInWarzone.put(id, nowIn);
+        Player target = event.getPlayer();
+        UUID targetId = target.getUniqueId();
+        RegionManager.ZoneType previousZone = lastKnownZones.getOrDefault(targetId, regionManager.resolveZone(from));
+        RegionManager.ZoneType newZone = regionManager.resolveZone(to);
 
-        List<UUID> stalkers = getActiveStalkers(id);
-        if (stalkers.isEmpty()) return;
+        if (previousZone == newZone) {
+            return;
+        }
+        lastKnownZones.put(targetId, newZone);
 
-        String msg;
-        if (nowIn) {
-            msg = ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + player.getName()
+        if (newZone == RegionManager.ZoneType.WARZONE && previousZone != RegionManager.ZoneType.WARZONE) {
+            notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
                     + ChatColor.GOLD + " entered Warzone at "
-                    + ChatColor.YELLOW + player.getLocation().getBlockX() + " "
-                    + player.getLocation().getBlockY() + " "
-                    + player.getLocation().getBlockZ();
-        } else {
-            msg = ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + player.getName()
-                    + ChatColor.GOLD + " left Warzone.";
+                    + ChatColor.YELLOW + to.getBlockX() + " " + to.getBlockY() + " " + to.getBlockZ());
+            return;
         }
 
-        for (UUID stalkerId : stalkers) {
-            Player stalker = Bukkit.getPlayer(stalkerId);
-            if (stalker != null && stalker.isOnline()) {
-                stalker.sendMessage(msg);
+        if (previousZone == RegionManager.ZoneType.WARZONE && newZone != RegionManager.ZoneType.WARZONE) {
+            notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
+                    + ChatColor.GOLD + " left Warzone.");
+        }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        lastKnownZones.remove(event.getPlayer().getUniqueId());
+    }
+
+    private void notifyStalkers(UUID targetId, String message) {
+        Map<UUID, Long> entries = subscriptionsByTarget.get(targetId);
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        List<UUID> expired = new ArrayList<>();
+        for (Map.Entry<UUID, Long> entry : entries.entrySet()) {
+            if (entry.getValue() <= now) {
+                expired.add(entry.getKey());
+                continue;
             }
+            Player stalker = Bukkit.getPlayer(entry.getKey());
+            if (stalker != null && stalker.isOnline()) {
+                stalker.sendMessage(message);
+            }
+        }
+
+        if (!expired.isEmpty()) {
+            for (UUID stalkerId : expired) {
+                entries.remove(stalkerId);
+            }
+            if (entries.isEmpty()) {
+                subscriptionsByTarget.remove(targetId);
+            }
+            dirtyMarker.run();
         }
     }
 }

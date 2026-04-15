@@ -1,56 +1,81 @@
 package org.enthusia.rep.playtime;
 
 import me.clip.placeholderapi.PlaceholderAPI;
+import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
-import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.config.RepConfig;
 
-/**
- * Fetches active playtime (in hours) using PlaceholderAPI placeholders.
- * Falls back to 0 if PAPI or the placeholder is unavailable.
- */
-public class PlaytimeService {
+public final class PlaytimeService {
 
-    private final CommendPlugin plugin;
+    private volatile RepConfig config;
 
-    public PlaytimeService(CommendPlugin plugin) {
-        this.plugin = plugin;
+    public PlaytimeService(RepConfig config) {
+        this.config = config;
+    }
+
+    public void reload(RepConfig config) {
+        this.config = config;
+    }
+
+    public boolean isAvailable() {
+        return Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null;
     }
 
     public double getActiveHours(OfflinePlayer player) {
-        if (player == null) return 0.0;
+        if (player == null || !isAvailable()) {
+            return 0.0D;
+        }
+
         Player online = player.getPlayer();
-        if (online == null) return 0.0;
+        if (online == null) {
+            return 0.0D;
+        }
+
+        String rawPrimary = PlaceholderAPI.setPlaceholders(online, config.getPlaytimePrimaryPlaceholder());
+        Double seconds = parseDouble(rawPrimary);
+        if (seconds != null) {
+            return seconds / 3600.0D;
+        }
+
+        String rawFallback = PlaceholderAPI.setPlaceholders(online, config.getPlaytimeFallbackPlaceholder());
+        return parseFormattedHours(rawFallback);
+    }
+
+    private Double parseDouble(String value) {
+        if (value == null || value.isBlank() || value.contains("%")) {
+            return null;
+        }
         try {
-            String raw = PlaceholderAPI.setPlaceholders(online, "%playtime_active%");
-            double seconds = Double.parseDouble(raw);
-            return seconds / 3600.0;
-        } catch (Exception ex) {
-            try {
-                String formatted = PlaceholderAPI.setPlaceholders(online, "%playtime_active_formatted%");
-                // formatted like "15h 3m" or "12h"
-                return parseFormatted(formatted);
-            } catch (Exception ignored) {
-                return 0.0;
-            }
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
-    private double parseFormatted(String formatted) {
-        if (formatted == null) return 0.0;
-        double hours = 0.0;
-        String[] parts = formatted.split("\\s+");
-        for (String p : parts) {
-            if (p.endsWith("h")) {
-                try {
-                    hours += Double.parseDouble(p.replace("h", ""));
-                } catch (NumberFormatException ignored) {}
-            } else if (p.endsWith("m")) {
-                try {
-                    hours += Double.parseDouble(p.replace("m", "")) / 60.0;
-                } catch (NumberFormatException ignored) {}
+    private double parseFormattedHours(String formatted) {
+        if (formatted == null || formatted.isBlank()) {
+            return 0.0D;
+        }
+
+        double hours = 0.0D;
+        for (String token : formatted.split("\\s+")) {
+            if (token.endsWith("h")) {
+                hours += safeNumber(token.substring(0, token.length() - 1));
+            } else if (token.endsWith("m")) {
+                hours += safeNumber(token.substring(0, token.length() - 1)) / 60.0D;
+            } else if (token.endsWith("s")) {
+                hours += safeNumber(token.substring(0, token.length() - 1)) / 3600.0D;
             }
         }
         return hours;
+    }
+
+    private double safeNumber(String raw) {
+        try {
+            return Double.parseDouble(raw);
+        } catch (NumberFormatException ignored) {
+            return 0.0D;
+        }
     }
 }

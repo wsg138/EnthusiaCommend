@@ -2,17 +2,15 @@ package org.enthusia.rep.placeholder;
 
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
-import org.enthusia.rep.config.RepConfig;
-import org.enthusia.rep.rep.RepService;
+import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.effects.RepAppliedEffects;
 
-public class RepPlaceholderExpansion extends PlaceholderExpansion {
+public final class RepPlaceholderExpansion extends PlaceholderExpansion {
 
-    private final RepService repService;
-    private final RepConfig config;
+    private final CommendPlugin plugin;
 
-    public RepPlaceholderExpansion(RepService repService, RepConfig config) {
-        this.repService = repService;
-        this.config = config;
+    public RepPlaceholderExpansion(CommendPlugin plugin) {
+        this.plugin = plugin;
     }
 
     @Override
@@ -22,12 +20,12 @@ public class RepPlaceholderExpansion extends PlaceholderExpansion {
 
     @Override
     public String getAuthor() {
-        return "Lincoln";
+        return "Enthusia";
     }
 
     @Override
     public String getVersion() {
-        return "1.0.0";
+        return plugin.getPluginMeta().getVersion();
     }
 
     @Override
@@ -37,24 +35,22 @@ public class RepPlaceholderExpansion extends PlaceholderExpansion {
 
     @Override
     public String onRequest(OfflinePlayer player, String params) {
-        if (player == null || player.getUniqueId() == null) return "";
-        int score = repService.getScore(player.getUniqueId());
-
-        if (params.equalsIgnoreCase("score")) {
-            return String.valueOf(score);
+        if (player == null || player.getUniqueId() == null) {
+            return "";
         }
-        if (params.equalsIgnoreCase("score_colored")) {
-            return config.formatColoredScore(score);
-        }
-        if (params.equalsIgnoreCase("score_raw")) {
+        int score = plugin.getRepService().getScore(player.getUniqueId());
+        if (params.equalsIgnoreCase("score") || params.equalsIgnoreCase("score_raw")) {
             return Integer.toString(score);
         }
-        if (params.equalsIgnoreCase("glowcolor")) {
-            if (score <= -20) return "&c"; // red
-            return "&f"; // white for all other scores
+        if (params.equalsIgnoreCase("score_colored")) {
+            return plugin.getRepConfig().formatColoredScore(score);
         }
         if (params.equalsIgnoreCase("color")) {
-            return config.colorForScore(score).toString();
+            return plugin.getRepConfig().colorForScore(score).toString();
+        }
+        if (params.equalsIgnoreCase("glowcolor")) {
+            RepAppliedEffects effects = plugin.getRepConfig().resolveEffects(score);
+            return effects.glowColor() != null ? effects.glowColor().toString() : "&f";
         }
         return null;
     }

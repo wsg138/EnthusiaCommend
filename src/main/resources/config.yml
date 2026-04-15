@@ -1,66 +1,80 @@
-# src/main/resources/config.yml
-
 rep:
-  # player must have at least this many hours of ACTIVE playtime to give rep
+  # Minimum active playtime hours required before a player can leave rep.
   minActivePlaytimeHours: 12
-  # how long between editing the same commend
+
+  # Cooldown between editing or re-submitting rep for the same target.
   editCooldownHours: 24
-  # text input mode for leaving rep:
-  # ANVIL (default, players can choose anvil or chat), CHAT, or BOOK
-  inputMode: ANVIL
 
-  negative:
-    "-5":
-      movement_speed_percent: -1
-    "-6":
-      pearl_cooldown_seconds: 3
-      firework_duration_percent: -5
-    "-7":
-      movement_speed_percent: -3
-      windcharge_cooldown_seconds: 2
-      firework_duration_percent: -10
-    "-10":
-      movement_speed_percent: -5
-      pearl_cooldown_seconds: 5
-      glow: true
-    "-12":
-      stalkable: true
-      potion_duration_percent: -10
-    "-15":
-      pearl_cooldown_seconds: 7
-      windcharge_cooldown_seconds: 5
-      firework_duration_percent: -15
-    "-20":
-      pearl_cooldown_seconds: 10
-      windcharge_cooldown_seconds: 10
-      movement_speed_percent: -10
-      potion_duration_percent: -15
-      firework_duration_percent: -25
-      glow: true
-      glow_color: RED
+  input:
+    # Default GUI text-entry mode after a category is chosen.
+    # Valid values: ANVIL or CHAT
+    default: ANVIL
 
-  positive:
-    "5":
-      movement_speed_percent: 1
-    "10":
-      movement_speed_percent: 3
-      potion_duration_percent: 5
-      cashback_percent: 3
-    "15":
-      movement_speed_percent: 5
-      potion_duration_percent: 10
-      cashback_percent: 5
+    # Maximum number of characters stored for the reason text.
+    maxReasonLength: 256
+
+    # How long a player can sit in chat-entry mode before it auto-cancels.
+    timeoutSeconds: 60
+
+  effects:
+    # Effect values are fixed in code for consistency.
+    # You edit only the rep score at which each effect turns on.
+    penalties:
+      moveSpeedMinus1PercentAt: -5
+      pearlCooldown3SecondsAt: -6
+      fireworkDurationMinus5PercentAt: -6
+      moveSpeedMinus3PercentAt: -7
+      windChargeCooldown2SecondsAt: -7
+      fireworkDurationMinus10PercentAt: -7
+      moveSpeedMinus5PercentAt: -10
+      glowAt: -10
+      stalkableAt: -12
+      potionDurationMinus10PercentAt: -12
+      pearlCooldown7SecondsAt: -15
+      windChargeCooldown5SecondsAt: -15
+      fireworkDurationMinus15PercentAt: -15
+      pearlCooldown10SecondsAt: -20
+      windChargeCooldown10SecondsAt: -20
+      moveSpeedMinus10PercentAt: -20
+      potionDurationMinus15PercentAt: -20
+      fireworkDurationMinus25PercentAt: -20
+      redGlowAt: -20
+
+    benefits:
+      moveSpeedPlus1PercentAt: 5
+      moveSpeedPlus3PercentAt: 10
+      potionDurationPlus5PercentAt: 10
+      cashback3PercentAt: 10
+      moveSpeedPlus5PercentAt: 15
+      potionDurationPlus10PercentAt: 15
+      cashback5PercentAt: 15
 
 stalk:
-  cost: 100.0           # how much it costs to stalk someone
-  durationDays: 1       # how long the subscription lasts in days
+  # Cost per purchased day of stalking.
+  costPerDay: 100.0
+
+  # Maximum duration a player can buy in one command.
+  maxDays: 7
+
+storage:
+  # Autosave interval for in-memory data.
+  autoSaveSeconds: 60
+
+playtime:
+  # Primary PlaceholderAPI placeholder expected to return active seconds.
+  primaryPlaceholder: "%playtime_active%"
+
+  # Fallback PlaceholderAPI placeholder expected to return formatted text like "12h 30m".
+  fallbackFormattedPlaceholder: "%playtime_active_formatted%"
 
 regions:
-  # Simple cuboid regions. Adjust coords to your spawn/warzone.
+  # Players inside spawn or warzone receive rep-based effects.
   spawn:
     - world: world
       min: -50, 0, -50
       max: 50, 256, 50
+
+  # Stalk notifications fire when players enter or leave warzone.
   warzone:
     - world: world
       min: -500, 0, -500

@@ -2,6 +2,9 @@ package org.enthusia.rep.integration;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.rep.RepService;
@@ -9,126 +12,150 @@ import org.enthusia.rep.rep.RepService;
 import java.lang.reflect.Method;
 import java.util.UUID;
 
-public class TeleportIntegration {
+public final class TeleportIntegration implements Listener {
 
     private final CommendPlugin plugin;
     private final RepService repService;
 
-    private Object teleportApi;
-    private Method warmupMethod;
-    private Method cooldownMethod;
-    private boolean warnedMissing = false;
+    private Object api;
+    private Method setWarmupModifierMethod;
+    private Method setCooldownModifierMethod;
+    private boolean warnedMissing;
 
     public TeleportIntegration(CommendPlugin plugin, RepService repService) {
         this.plugin = plugin;
         this.repService = repService;
     }
 
-    public void tick() {
-        if (teleportApi == null) {
-            tryHook();
-            if (teleportApi == null) {
-                return;
-            }
-        }
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            UUID id = player.getUniqueId();
-            int rep = repService.getScore(id);
-
-            invokeTeleport(warmupMethod, id, computeWarmupModifier(rep));
-            invokeTeleport(cooldownMethod, id, computeCooldownModifier(rep));
-        }
+    public void register() {
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
     public void refresh() {
+        clearAllWithCurrentHook();
+        api = null;
+        setWarmupModifierMethod = null;
+        setCooldownModifierMethod = null;
         warnedMissing = false;
-        teleportApi = null;
-        warmupMethod = null;
-        cooldownMethod = null;
         tryHook();
+        applyToAllOnlinePlayers();
     }
 
-    public void updatePlayer(UUID id) {
-        if (teleportApi == null) {
-            tryHook();
+    public void updatePlayer(UUID playerId) {
+        if (!ensureHooked()) {
+            return;
         }
-        if (teleportApi == null) return;
-        int rep = repService.getScore(id);
-        invokeTeleport(warmupMethod, id, computeWarmupModifier(rep));
-        invokeTeleport(cooldownMethod, id, computeCooldownModifier(rep));
+        int score = repService.getScore(playerId);
+        invoke(setWarmupModifierMethod, playerId, computeWarmupModifier(score));
+        invoke(setCooldownModifierMethod, playerId, computeCooldownModifier(score));
+    }
+
+    public void clearPlayer(UUID playerId) {
+        if (!ensureHooked()) {
+            return;
+        }
+        invoke(setWarmupModifierMethod, playerId, 1.0D);
+        invoke(setCooldownModifierMethod, playerId, 1.0D);
+    }
+
+    public void shutdown() {
+        clearAllWithCurrentHook();
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        updatePlayer(event.getPlayer().getUniqueId());
+    }
+
+    private void applyToAllOnlinePlayers() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            updatePlayer(player.getUniqueId());
+        }
+    }
+
+    private void clearAllWithCurrentHook() {
+        if (api == null || setWarmupModifierMethod == null || setCooldownModifierMethod == null) {
+            return;
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            invoke(setWarmupModifierMethod, player.getUniqueId(), 1.0D);
+            invoke(setCooldownModifierMethod, player.getUniqueId(), 1.0D);
+        }
+    }
+
+    private boolean ensureHooked() {
+        if (api != null) {
+            return true;
+        }
+        tryHook();
+        return api != null;
     }
 
     private void tryHook() {
         Class<?> apiClass;
         try {
             apiClass = Class.forName("org.enthusia.teleport.api.TeleportApi");
-        } catch (ClassNotFoundException e) {
-            if (!warnedMissing) {
-                plugin.getLogger().warning("EnthusiaTeleport API not on classpath; rep teleport modifiers disabled.");
-                warnedMissing = true;
-            }
+        } catch (ClassNotFoundException ignored) {
+            warnOnce("EnthusiaTeleport API not found; teleport reputation modifiers disabled.");
             return;
         }
 
-        RegisteredServiceProvider<?> provider =
-                Bukkit.getServicesManager().getRegistration(apiClass);
-
+        RegisteredServiceProvider<?> provider = Bukkit.getServicesManager().getRegistration(apiClass);
         if (provider == null) {
-            if (!warnedMissing) {
-                plugin.getLogger().warning("EnthusiaTeleport not found; rep teleport modifiers disabled.");
-                warnedMissing = true;
-            }
-            teleportApi = null;
+            warnOnce("EnthusiaTeleport service is not registered; teleport reputation modifiers disabled.");
             return;
         }
 
         try {
-            Object api = provider.getProvider();
+            Object resolvedApi = provider.getProvider();
             Method warmup = apiClass.getMethod("setWarmupModifier", UUID.class, double.class);
             Method cooldown = apiClass.getMethod("setCooldownModifier", UUID.class, double.class);
-
-            teleportApi = api;
-            warmupMethod = warmup;
-            cooldownMethod = cooldown;
-            plugin.getLogger().info("Linked to EnthusiaTeleport for rep-based cooldowns/warmups.");
-            warnedMissing = false;
-        } catch (NoSuchMethodException e) {
-            plugin.getLogger().warning("EnthusiaTeleport API methods missing; rep teleport modifiers disabled.");
-            teleportApi = null;
+            this.api = resolvedApi;
+            this.setWarmupModifierMethod = warmup;
+            this.setCooldownModifierMethod = cooldown;
+            this.warnedMissing = false;
+            plugin.getLogger().info("Linked EnthusiaCommend to EnthusiaTeleport.");
         } catch (Exception ex) {
-            plugin.getLogger().warning("Failed to hook EnthusiaTeleport: " + ex.getMessage());
-            teleportApi = null;
+            warnOnce("Failed to hook EnthusiaTeleport: " + ex.getMessage());
+            this.api = null;
         }
     }
 
-    private void invokeTeleport(Method method, UUID playerId, double modifier) {
-        if (teleportApi == null || method == null) return;
+    private void invoke(Method method, UUID playerId, double value) {
+        if (api == null || method == null) {
+            return;
+        }
         try {
-            method.invoke(teleportApi, playerId, modifier);
+            method.invoke(api, playerId, value);
         } catch (Exception ex) {
-            if (!warnedMissing) {
-                plugin.getLogger().warning("Failed to call EnthusiaTeleport API: " + ex.getMessage());
-                warnedMissing = true;
-            }
-            teleportApi = null;
+            warnOnce("Teleport modifier call failed: " + ex.getMessage());
+            api = null;
+            setWarmupModifierMethod = null;
+            setCooldownModifierMethod = null;
         }
     }
 
-    private double computeWarmupModifier(int rep) {
-        if (rep >= 15) return 0.5;   // 5s -> 2.5s
-        if (rep >= 5) return 0.8;    // 5s -> 4s
-        if (rep <= -25) return 2.0;  // 5s -> 10s
-        if (rep <= -15) return 1.6;  // 5s -> 8s
-        if (rep <= -10) return 1.4;  // 5s -> 7s
-        return 1.0;
+    private void warnOnce(String message) {
+        if (!warnedMissing) {
+            warnedMissing = true;
+            plugin.getLogger().warning(message);
+        }
     }
 
-    private double computeCooldownModifier(int rep) {
-        if (rep >= 20) return 0.5;          // 60s -> 30s
-        if (rep >= 15) return 40.0 / 60.0;  // 60s -> 40s
-        if (rep >= 10) return 45.0 / 60.0;  // 60s -> 45s
-        if (rep >= 5) return 50.0 / 60.0;   // 60s -> 50s
-        return 1.0;
+    private double computeWarmupModifier(int score) {
+        if (score >= 15) return 0.5D;
+        if (score >= 5) return 0.8D;
+        if (score <= -25) return 2.0D;
+        if (score <= -15) return 1.6D;
+        if (score <= -10) return 1.4D;
+        return 1.0D;
+    }
+
+    private double computeCooldownModifier(int score) {
+        if (score >= 20) return 0.5D;
+        if (score >= 15) return 40.0D / 60.0D;
+        if (score >= 10) return 45.0D / 60.0D;
+        if (score >= 5) return 50.0D / 60.0D;
+        return 1.0D;
     }
 }

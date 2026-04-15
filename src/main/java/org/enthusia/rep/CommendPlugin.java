@@ -8,6 +8,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
@@ -21,37 +22,47 @@ import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.skin.SkinCache;
 import org.enthusia.rep.skin.SkinListener;
 import org.enthusia.rep.stalk.StalkManager;
+import org.enthusia.rep.storage.PluginDataSnapshot;
+import org.enthusia.rep.storage.PluginDataStore;
+import org.enthusia.rep.storage.YamlPluginDataStore;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class CommendPlugin extends JavaPlugin {
 
-    private static CommendPlugin instance;
-
     private RepConfig repConfig;
+    private Messages messages;
     private RegionManager regionManager;
+    private PlaytimeService playtimeService;
     private RepService repService;
     private RepEffectManager effectManager;
-    private Economy economy;
     private StalkManager stalkManager;
-    private Messages messages;
     private RepGuiManager repGuiManager;
     private TeleportIntegration teleportIntegration;
-    private PlaytimeService playtimeService;
     private SkinCache skinCache;
-
-    public static CommendPlugin getInstance() {
-        return instance;
-    }
+    private Economy economy;
+    private PluginDataStore dataStore;
+    private BukkitTask autoSaveTask;
+    private final AtomicBoolean dirty = new AtomicBoolean(false);
+    private final Object saveLock = new Object();
 
     public RepConfig getRepConfig() {
         return repConfig;
     }
 
+    public Messages getMessages() {
+        return messages;
+    }
+
     public RegionManager getRegionManager() {
         return regionManager;
+    }
+
+    public PlaytimeService getPlaytimeService() {
+        return playtimeService;
     }
 
     public RepService getRepService() {
@@ -66,14 +77,6 @@ public final class CommendPlugin extends JavaPlugin {
         return stalkManager;
     }
 
-    public Economy getEconomy() {
-        return economy;
-    }
-
-    public Messages getMessages() {
-        return messages;
-    }
-
     public RepGuiManager getRepGuiManager() {
         return repGuiManager;
     }
@@ -82,162 +85,201 @@ public final class CommendPlugin extends JavaPlugin {
         return teleportIntegration;
     }
 
-    public PlaytimeService getPlaytimeService() {
-        return playtimeService;
-    }
-
     public SkinCache getSkinCache() {
         return skinCache;
     }
 
+    public Economy getEconomy() {
+        return economy;
+    }
+
     @Override
     public void onEnable() {
-        instance = this;
-
-        // Config + messages
         saveDefaultConfig();
-        boolean configUpdated = mergeMissingConfigDefaults();
+        mergeMissingConfigDefaults();
+
         this.repConfig = new RepConfig(getConfig());
         this.messages = new Messages(this);
         this.messages.reload();
-        if (configUpdated) {
-            getLogger().info("config.yml was missing settings and has been updated with defaults.");
-        }
+        this.dataStore = new YamlPluginDataStore(this);
 
-        // Core services
+        PluginDataSnapshot snapshot = dataStore.load();
         this.regionManager = new RegionManager(this);
-        this.repService = new RepService(this);
+        this.playtimeService = new PlaytimeService(repConfig);
+        this.repService = new RepService(this, repConfig, snapshot, this::markDirty, this::handleScoreChanged);
+        this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
+        this.stalkManager.load(snapshot);
         this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService);
-        this.stalkManager = new StalkManager(this, regionManager);
+        this.teleportIntegration = new TeleportIntegration(this, repService);
         this.skinCache = new SkinCache(this);
         this.skinCache.load();
+        this.repGuiManager = new RepGuiManager(this, repService, effectManager);
+
         getServer().getPluginManager().registerEvents(new SkinListener(skinCache), this);
-        this.repGuiManager = new RepGuiManager(this, repService, effectManager); // also registers its own listeners
-        this.teleportIntegration = new TeleportIntegration(this, repService);
-        this.teleportIntegration.refresh();
-        this.playtimeService = new PlaytimeService(this);
+        getServer().getPluginManager().registerEvents(stalkManager, this);
+        getServer().getPluginManager().registerEvents(repGuiManager, this);
+        effectManager.register(getServer().getPluginManager());
+        teleportIntegration.register();
 
-        // Economy (Vault)
-        if (!setupEconomy()) {
-            getLogger().warning("Vault/Economy not found! Stalk/cashback money hooks may not work.");
-        }
+        setupEconomy();
+        registerCommands();
+        registerPlaceholderExpansion();
 
-        // === REP COMMAND (/rep) ===
-        CommendCommand repCmd = new CommendCommand(this, repService);
-        PluginCommand repCommand = getCommand("rep");
-        if (repCommand != null) {
-            repCommand.setExecutor(repCmd);
-            repCommand.setTabCompleter(repCmd);
-        } else {
-            getLogger().warning("Command 'rep' is not defined in plugin.yml – /rep will not work.");
-        }
-
-        // Periodic effect updater
-        Bukkit.getScheduler().runTaskTimer(this,
-                () -> {
-                    effectManager.tickEffects();
-                    if (teleportIntegration != null) {
-                        teleportIntegration.tick();
-                    }
-                },
-                20L, 20L);
-
-        // PlaceholderAPI
-        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new RepPlaceholderExpansion(repService, repConfig).register();
-            getLogger().info("Registered PlaceholderAPI expansion for EnthusiaRep.");
-        }
+        teleportIntegration.refresh();
+        effectManager.refreshAll();
+        startAutoSaveTask();
 
         getLogger().info("EnthusiaCommend enabled.");
     }
 
     @Override
     public void onDisable() {
+        if (autoSaveTask != null) {
+            autoSaveTask.cancel();
+            autoSaveTask = null;
+        }
+        if (repGuiManager != null) {
+            repGuiManager.shutdown();
+        }
+        if (teleportIntegration != null) {
+            teleportIntegration.shutdown();
+        }
         if (effectManager != null) {
             effectManager.clearAll();
         }
-        if (repService != null) {
-            repService.saveAll();
-        }
+        flushDataSync();
         if (skinCache != null) {
             skinCache.save();
         }
-        instance = null;
-    }
-
-    private boolean setupEconomy() {
-        if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
-            return false;
-        }
-        RegisteredServiceProvider<Economy> rsp =
-                Bukkit.getServicesManager().getRegistration(Economy.class);
-        if (rsp == null) {
-            return false;
-        }
-        economy = rsp.getProvider();
-        return economy != null;
     }
 
     public void reloadPluginConfig() {
+        if (repGuiManager != null) {
+            repGuiManager.cancelOpenAnvilSessions(org.bukkit.ChatColor.YELLOW + "Rep anvil input was closed because the plugin reloaded.");
+        }
         reloadConfig();
-        boolean configUpdated = mergeMissingConfigDefaults();
+        mergeMissingConfigDefaults();
         this.repConfig = new RepConfig(getConfig());
-        this.regionManager.reload(this);
+        this.messages.reload();
+        this.regionManager.reload(getConfig(), this);
+        this.playtimeService.reload(repConfig);
+        this.repService.reload(repConfig);
+        this.stalkManager.reload(repConfig);
         this.effectManager.reload(repConfig);
-        if (repService != null) {
-            repService.setRepConfig(repConfig);
+        this.teleportIntegration.refresh();
+    }
+
+    private void registerCommands() {
+        CommendCommand commendCommand = new CommendCommand(this, repService);
+        PluginCommand repCommand = getCommand("rep");
+        if (repCommand == null) {
+            getLogger().severe("Command 'rep' is missing from plugin.yml.");
+            return;
         }
-        if (messages != null) {
-            messages.reload();
-        }
-        if (teleportIntegration != null) {
-            teleportIntegration.refresh();
-        }
-        if (configUpdated) {
-            getLogger().info("config.yml was missing settings and has been updated with defaults.");
+        repCommand.setExecutor(commendCommand);
+        repCommand.setTabCompleter(commendCommand);
+    }
+
+    private void registerPlaceholderExpansion() {
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new RepPlaceholderExpansion(this).register();
         }
     }
 
-    private boolean mergeMissingConfigDefaults() {
-        FileConfiguration config = getConfig();
-        try (InputStream in = getResource("config.yml")) {
-            if (in == null) {
-                getLogger().warning("Default config.yml is missing from the jar; cannot merge defaults.");
-                return false;
+    private void setupEconomy() {
+        if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
+            getLogger().warning("Vault not found; economy-backed features are disabled.");
+            return;
+        }
+        RegisteredServiceProvider<Economy> provider = Bukkit.getServicesManager().getRegistration(Economy.class);
+        if (provider == null) {
+            getLogger().warning("Vault economy provider not found; economy-backed features are disabled.");
+            return;
+        }
+        this.economy = provider.getProvider();
+    }
+
+    private void startAutoSaveTask() {
+        autoSaveTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            if (!dirty.compareAndSet(true, false)) {
+                return;
             }
-            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
-                    new InputStreamReader(in, StandardCharsets.UTF_8));
-            boolean changed = mergeMissingSections(config, defaults);
-            if (changed) {
+            PluginDataSnapshot snapshot = buildSnapshot();
+            Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                synchronized (saveLock) {
+                    dataStore.save(snapshot);
+                }
+            });
+        }, repConfig.getAutoSaveIntervalTicks(), repConfig.getAutoSaveIntervalTicks());
+    }
+
+    private void flushDataSync() {
+        if (dataStore == null || repService == null || stalkManager == null) {
+            return;
+        }
+        synchronized (saveLock) {
+            dataStore.save(buildSnapshot());
+        }
+        dirty.set(false);
+    }
+
+    private PluginDataSnapshot buildSnapshot() {
+        PluginDataSnapshot stalkSnapshot = new PluginDataSnapshot(
+                java.util.Map.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                stalkManager.snapshotEntries()
+        );
+        return repService.snapshot(stalkSnapshot);
+    }
+
+    private void markDirty() {
+        dirty.set(true);
+    }
+
+    private void handleScoreChanged(java.util.UUID playerId) {
+        if (effectManager != null) {
+            effectManager.handleScoreChanged(playerId);
+        }
+        if (teleportIntegration != null) {
+            teleportIntegration.updatePlayer(playerId);
+        }
+        markDirty();
+    }
+
+    private void mergeMissingConfigDefaults() {
+        FileConfiguration config = getConfig();
+        try (InputStream inputStream = getResource("config.yml")) {
+            if (inputStream == null) {
+                return;
+            }
+            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+            if (mergeMissingSections(config, defaults)) {
                 saveConfig();
             }
-            return changed;
         } catch (Exception ex) {
-            getLogger().warning("Failed to merge default config.yml: " + ex.getMessage());
-            return false;
+            getLogger().warning("Failed to merge config defaults: " + ex.getMessage());
         }
     }
 
     private boolean mergeMissingSections(ConfigurationSection target, ConfigurationSection defaults) {
-        boolean updated = false;
+        boolean changed = false;
         for (String key : defaults.getKeys(false)) {
             ConfigurationSection defaultChild = defaults.getConfigurationSection(key);
             if (defaultChild != null) {
                 ConfigurationSection targetChild = target.getConfigurationSection(key);
                 if (targetChild == null) {
                     targetChild = target.createSection(key);
-                    updated = true;
+                    changed = true;
                 }
                 if (mergeMissingSections(targetChild, defaultChild)) {
-                    updated = true;
+                    changed = true;
                 }
-                continue;
-            }
-            if (!target.isSet(key)) {
+            } else if (!target.isSet(key)) {
                 target.set(key, defaults.get(key));
-                updated = true;
+                changed = true;
             }
         }
-        return updated;
+        return changed;
     }
 }

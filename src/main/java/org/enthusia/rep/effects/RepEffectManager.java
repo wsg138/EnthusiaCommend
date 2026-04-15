@@ -1,6 +1,7 @@
 package org.enthusia.rep.effects;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
@@ -12,408 +13,406 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.FireworkMeta;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
-import org.bukkit.ChatColor;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.config.RepConfig;
-import org.enthusia.rep.config.RepConfig.RepTierConfig;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 
-public class RepEffectManager implements Listener {
+public final class RepEffectManager implements Listener {
 
-    private static final String SPEED_MODIFIER_NAME = "enthusia-rep-speed";
+    private static final UUID MOVEMENT_MODIFIER_ID = UUID.fromString("5ae272fd-5fd0-48a7-b94d-38fdb332e313");
+    private static final String MOVEMENT_MODIFIER_NAME = "enthusia-rep-movement";
 
     private final CommendPlugin plugin;
-    private RepConfig config;
-    private final RegionManager regions;
+    private final RegionManager regionManager;
     private final RepService repService;
+    private final ProtocolGlowService protocolGlowService;
 
-    private final Map<UUID, Long> lastPearlMessage = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastWindMessage  = new ConcurrentHashMap<>();
+    private RepConfig config;
 
-    private final Map<UUID, Double> baseMoveSpeed = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastRocketUse = new ConcurrentHashMap<>();
+    private final Map<UUID, RepAppliedEffects> currentEffects = new HashMap<>();
+    private final Map<UUID, Integer> appliedMovementPercents = new HashMap<>();
+    private final Map<UUID, GlowState> glowStates = new HashMap<>();
+    private final Map<UUID, Long> lastPearlMessageAt = new HashMap<>();
+    private final Map<UUID, Long> lastWindMessageAt = new HashMap<>();
+    private final Map<UUID, Long> lastRocketUseAt = new HashMap<>();
 
-    private final Map<UUID, RepAppliedEffects> currentEffects = new ConcurrentHashMap<>();
-
-    private final Map<UUID, Boolean> lastGlowState = new ConcurrentHashMap<>();
-
-    public RepEffectManager(CommendPlugin plugin,
-                            RepConfig config,
-                            RegionManager regions,
-                            RepService repService) {
+    public RepEffectManager(CommendPlugin plugin, RepConfig config, RegionManager regionManager, RepService repService) {
         this.plugin = plugin;
         this.config = config;
-        this.regions = regions;
+        this.regionManager = regionManager;
         this.repService = repService;
-
-        PluginManager pm = plugin.getServer().getPluginManager();
-        pm.registerEvents(this, plugin);
+        this.protocolGlowService = isProtocolAvailable() ? new ProtocolGlowService(plugin) : null;
     }
 
-    public void reload(RepConfig newConfig) {
-        this.config = newConfig;
+    public void register(PluginManager pluginManager) {
+        pluginManager.registerEvents(this, plugin);
     }
 
-    public void clearAll() {
+    public void reload(RepConfig config) {
+        this.config = config;
+        refreshAll();
+    }
+
+    public void refreshAll() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            clearPlayer(player.getUniqueId());
+            applyEffects(player, true);
         }
-        currentEffects.clear();
-    }
-
-    public void clearPlayer(UUID uuid) {
-        Player player = Bukkit.getPlayer(uuid);
-        if (player == null) return;
-
-        resetMovementBase(uuid);
-        removeSpeedModifier(player);
-        setGlowState(player, false);
-        lastGlowState.remove(uuid);
-    }
-
-    public void resetMovementBase(UUID uuid) {
-        Player player = Bukkit.getPlayer(uuid);
-        if (player == null) return;
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
-
-        double def = 0.1; // vanilla default
-        baseMoveSpeed.put(uuid, def);
-        attr.setBaseValue(def);
-        removeSpeedModifier(player);
     }
 
     public void tickEffects() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            UUID id = player.getUniqueId();
-            int score = repService.getScore(id);
-            RepAppliedEffects effects = computeEffects(score);
-
-            // hard fallback: if they glow and are VERY low, but no color from config, force RED
-            if (effects.glow && effects.glowColor == null && score <= -20) {
-                effects.glowColor = ChatColor.RED;
-            }
-
-            currentEffects.put(id, effects);
-
-            boolean inCombatArea = regions.isInSpawnOrWarzone(player.getLocation());
-            applyMovementAndGlow(player, effects, inCombatArea);
+            applyEffects(player, false);
         }
     }
 
-    public RepAppliedEffects getCurrentEffects(UUID uuid) {
-        return currentEffects.getOrDefault(uuid, new RepAppliedEffects());
+    public RepAppliedEffects getCurrentEffects(UUID playerId) {
+        return currentEffects.getOrDefault(playerId, config.resolveEffects(repService.getScore(playerId)));
     }
 
-    public RepAppliedEffects computeEffects(int score) {
-        RepAppliedEffects out = new RepAppliedEffects();
-
-        if (score < 0) {
-            for (Map.Entry<Integer, RepTierConfig> e : config.getNegativeTiers().entrySet()) {
-                int threshold = e.getKey();
-                if (score <= threshold) {
-                    applyTier(out, e.getValue());
-                }
-            }
-        } else if (score > 0) {
-            for (Map.Entry<Integer, RepTierConfig> e : config.getPositiveTiers().entrySet()) {
-                int threshold = e.getKey();
-                if (score >= threshold) {
-                    applyTier(out, e.getValue());
-                }
-            }
+    public void clearAll() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            clearPlayer(player);
         }
-
-        return out;
-    }
-
-    private void applyTier(RepAppliedEffects out, RepTierConfig tier) {
-        if (tier.movementSpeedPercent != null) {
-            out.movementSpeedPercent = tier.movementSpeedPercent;
-        }
-        if (tier.potionDurationPercent != null) {
-            out.potionDurationPercent = tier.potionDurationPercent;
-        }
-        if (tier.fireworkDurationPercent != null) {
-            out.fireworkDurationPercent = tier.fireworkDurationPercent;
-        }
-        if (tier.pearlCooldownSeconds != null) {
-            out.pearlCooldownSeconds = tier.pearlCooldownSeconds;
-        }
-        if (tier.windCooldownSeconds != null) {
-            out.windCooldownSeconds = tier.windCooldownSeconds;
-        }
-        if (tier.glow != null) {
-            out.glow = tier.glow;
-        }
-        if (tier.glowColor != null) {
-            out.glowColor = tier.glowColor;
-        }
-        if (tier.stalkable != null) {
-            out.stalkable = tier.stalkable;
-        }
-        if (tier.cashbackPercent != null) {
-            out.cashbackPercent = tier.cashbackPercent;
+        currentEffects.clear();
+        appliedMovementPercents.clear();
+        glowStates.clear();
+        lastPearlMessageAt.clear();
+        lastWindMessageAt.clear();
+        lastRocketUseAt.clear();
+        if (protocolGlowService != null) {
+            protocolGlowService.clearAll();
         }
     }
 
-    /* ================= Movement / Glow ================= */
-
-    private void applyMovementAndGlow(Player player, RepAppliedEffects effects, boolean inCombatArea) {
-        applyMovement(player, effects, inCombatArea);
-        applyGlow(player, inCombatArea);
+    public void handleScoreChanged(UUID playerId) {
+        Player player = Bukkit.getPlayer(playerId);
+        if (player != null) {
+            applyEffects(player, true);
+        }
     }
 
-    private void applyMovement(Player player, RepAppliedEffects effects, boolean inCombatArea) {
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
+    private void applyEffects(Player player, boolean force) {
+        UUID playerId = player.getUniqueId();
+        RepAppliedEffects desired = config.resolveEffects(repService.getScore(playerId));
+        currentEffects.put(playerId, desired);
 
-        UUID id = player.getUniqueId();
+        boolean inEffectZone = regionManager.isInSpawnOrWarzone(player.getLocation());
+        applyMovement(player, inEffectZone ? desired.movementSpeedPercent() : 0, force);
+        applyGlow(player, inEffectZone && desired.glow(), desired.glowColor(), force);
+    }
 
-        baseMoveSpeed.computeIfAbsent(id, key -> {
-            double v = attr.getBaseValue();
-            if (v < 0.05) v = 0.1;
-            if (v > 1.0) v = 0.1;
-            return v;
-        });
-        double original = baseMoveSpeed.get(id);
+    private void applyMovement(Player player, int desiredPercent, boolean force) {
+        UUID playerId = player.getUniqueId();
+        Integer currentPercent = appliedMovementPercents.get(playerId);
+        if (!force && Objects.equals(currentPercent, desiredPercent)) {
+            return;
+        }
 
-        if (inCombatArea && effects.movementSpeedPercent != 0) {
-            double factor = 1.0 + (effects.movementSpeedPercent / 100.0);
-            if (factor < 0.05) factor = 0.05;
-            attr.setBaseValue(original * factor);
+        AttributeInstance attribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
+        if (attribute == null) {
+            return;
+        }
+
+        removeMovementModifier(attribute);
+        if (desiredPercent != 0) {
+            AttributeModifier modifier = new AttributeModifier(
+                    MOVEMENT_MODIFIER_ID,
+                    MOVEMENT_MODIFIER_NAME,
+                    desiredPercent / 100.0D,
+                    AttributeModifier.Operation.MULTIPLY_SCALAR_1
+            );
+            attribute.addModifier(modifier);
+            appliedMovementPercents.put(playerId, desiredPercent);
         } else {
-            attr.setBaseValue(original);
+            appliedMovementPercents.remove(playerId);
         }
-
-        removeSpeedModifier(player);
     }
 
-    private void removeSpeedModifier(Player player) {
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
-        for (AttributeModifier mod : new ArrayList<>(attr.getModifiers())) {
-            if (SPEED_MODIFIER_NAME.equals(mod.getName())) {
-                attr.removeModifier(mod);
+    private void removeMovementModifier(AttributeInstance attribute) {
+        for (AttributeModifier modifier : attribute.getModifiers()) {
+            if (MOVEMENT_MODIFIER_ID.equals(modifier.getUniqueId()) || MOVEMENT_MODIFIER_NAME.equals(modifier.getName())) {
+                attribute.removeModifier(modifier);
             }
         }
     }
 
-    private void applyGlow(Player player, boolean inCombatArea) {
-        int score = repService.getScore(player.getUniqueId());
-        boolean shouldGlow = inCombatArea && score <= -10;
-
-        Boolean prev = lastGlowState.get(player.getUniqueId());
-        if (Objects.equals(prev, shouldGlow)) return;
-
-        setGlowState(player, shouldGlow);
-        if (shouldGlow) {
-            lastGlowState.put(player.getUniqueId(), true);
-            plugin.getLogger().info("Glow enabled for " + player.getName() + " (score " + score + ")");
-        } else {
-            lastGlowState.remove(player.getUniqueId());
+    private void applyGlow(Player target, boolean shouldGlow, ChatColor glowColor, boolean force) {
+        GlowState desired = shouldGlow ? new GlowState(true, glowColor) : GlowState.OFF;
+        GlowState current = glowStates.getOrDefault(target.getUniqueId(), GlowState.OFF);
+        if (!force && current.equals(desired)) {
+            return;
         }
+
+        if (!shouldGlow) {
+            clearGlow(target);
+            glowStates.remove(target.getUniqueId());
+            return;
+        }
+
+        if (glowColor == ChatColor.RED && protocolGlowService != null) {
+            protocolGlowService.setGlow(target, ChatColor.RED, target.getWorld().getPlayers());
+            target.setGlowing(true);
+        } else {
+            if (protocolGlowService != null) {
+                protocolGlowService.clearGlow(target, Bukkit.getOnlinePlayers());
+            }
+            target.setGlowing(true);
+        }
+        glowStates.put(target.getUniqueId(), desired);
     }
 
-    private void setGlowState(Player player, boolean glowing) {
-        try {
-            player.setGlowing(glowing);
-        } catch (Exception ex) {
-            plugin.getLogger().warning("Failed to set glow state for " + player.getName() + ": " + ex.getMessage());
+    private void clearGlow(Player player) {
+        if (protocolGlowService != null) {
+            protocolGlowService.clearGlow(player, Bukkit.getOnlinePlayers());
         }
+        player.setGlowing(false);
+    }
+
+    private boolean isProtocolAvailable() {
+        return Bukkit.getPluginManager().getPlugin("ProtocolLib") != null;
+    }
+
+    private void clearPlayer(Player player) {
+        AttributeInstance attribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
+        if (attribute != null) {
+            removeMovementModifier(attribute);
+        }
+        clearGlow(player);
+        appliedMovementPercents.remove(player.getUniqueId());
+        glowStates.remove(player.getUniqueId());
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        lastGlowState.remove(event.getPlayer().getUniqueId());
+        Player player = event.getPlayer();
+        clearPlayer(player);
+        lastPearlMessageAt.remove(player.getUniqueId());
+        lastWindMessageAt.remove(player.getUniqueId());
+        lastRocketUseAt.remove(player.getUniqueId());
+        currentEffects.remove(player.getUniqueId());
+        if (protocolGlowService != null) {
+            protocolGlowService.clearViewer(player);
+        }
     }
 
-    /* ================= Cooldowns / Fireworks / Potions ================= */
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            applyEffects(event.getPlayer(), true);
+            refreshRedGlowForViewer(event.getPlayer());
+        });
+    }
 
-    private UUID uuid(Player p) {
-        return p.getUniqueId();
+    @EventHandler
+    public void onRespawn(PlayerRespawnEvent event) {
+        Bukkit.getScheduler().runTask(plugin, () -> applyEffects(event.getPlayer(), true));
+    }
+
+    @EventHandler
+    public void onChangedWorld(PlayerChangedWorldEvent event) {
+        if (protocolGlowService != null) {
+            protocolGlowService.clearViewer(event.getPlayer());
+        }
+        applyEffects(event.getPlayer(), true);
+        refreshRedGlowForViewer(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onTeleport(PlayerTeleportEvent event) {
+        if (event.getTo() != null) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (protocolGlowService != null) {
+                    protocolGlowService.clearViewer(event.getPlayer());
+                }
+                applyEffects(event.getPlayer(), true);
+                refreshRedGlowForViewer(event.getPlayer());
+            });
+        }
+    }
+
+    @EventHandler
+    public void onMove(PlayerMoveEvent event) {
+        if (event.getTo() == null) {
+            return;
+        }
+        if (event.getFrom().getWorld() == event.getTo().getWorld()
+                && event.getFrom().getBlockX() == event.getTo().getBlockX()
+                && event.getFrom().getBlockY() == event.getTo().getBlockY()
+                && event.getFrom().getBlockZ() == event.getTo().getBlockZ()) {
+            return;
+        }
+        boolean wasInZone = regionManager.isInSpawnOrWarzone(event.getFrom());
+        boolean isInZone = regionManager.isInSpawnOrWarzone(event.getTo());
+        if (wasInZone != isInZone) {
+            applyEffects(event.getPlayer(), true);
+        }
     }
 
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
-        if (!event.hasItem()) return;
+        if (!event.hasItem()) {
+            return;
+        }
+
         Player player = event.getPlayer();
         ItemStack item = event.getItem();
-        if (item == null) return;
+        if (item == null) {
+            return;
+        }
 
-        Material type = item.getType();
-        RepAppliedEffects effects = currentEffects.getOrDefault(uuid(player), new RepAppliedEffects());
-
-        if (type == Material.ENDER_PEARL && regions.isInSpawnOrWarzone(player.getLocation())) {
-            int repCooldownSeconds = effects.pearlCooldownSeconds;
-
-            if (repCooldownSeconds > 0) {
-                int currentTicks = player.getCooldown(Material.ENDER_PEARL);
-
-                if (currentTicks > 0) {
-                    long now = System.currentTimeMillis();
-                    long lastMsg = lastPearlMessage.getOrDefault(uuid(player), 0L);
-                    if (now - lastMsg > 750L) {
-                        int sec = (int) Math.ceil(currentTicks / 20.0);
-                        player.sendMessage(ChatColor.RED + "You can't throw another ender pearl for " + sec + "s (rep penalty).");
-                        lastPearlMessage.put(uuid(player), now);
-                    }
-                    event.setCancelled(true);
-                    return;
-                }
-
-                Bukkit.getScheduler().runTask(plugin, () ->
-                        player.setCooldown(Material.ENDER_PEARL, repCooldownSeconds * 20)
-                );
+        RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
+        if (regionManager.isInSpawnOrWarzone(player.getLocation())) {
+            if (item.getType() == Material.ENDER_PEARL) {
+                handleCooldownItem(event, player, Material.ENDER_PEARL, effects.pearlCooldownSeconds(), lastPearlMessageAt, "You can't throw another ender pearl for ");
+            } else if (item.getType() == Material.WIND_CHARGE) {
+                handleCooldownItem(event, player, Material.WIND_CHARGE, effects.windCooldownSeconds(), lastWindMessageAt, "You can't use another wind charge for ");
             }
         }
 
-        if (type == Material.WIND_CHARGE && regions.isInSpawnOrWarzone(player.getLocation())) {
-            int repCooldownSeconds = effects.windCooldownSeconds;
+        if (item.getType() == Material.FIREWORK_ROCKET && player.isGliding()) {
+            lastRocketUseAt.put(player.getUniqueId(), System.currentTimeMillis());
+        }
+    }
 
-            if (repCooldownSeconds > 0) {
-                int currentTicks = player.getCooldown(Material.WIND_CHARGE);
+    private void handleCooldownItem(
+            PlayerInteractEvent event,
+            Player player,
+            Material material,
+            int cooldownSeconds,
+            Map<UUID, Long> messageCache,
+            String messagePrefix
+    ) {
+        if (cooldownSeconds <= 0) {
+            return;
+        }
 
-                if (currentTicks > 0) {
-                    long now = System.currentTimeMillis();
-                    long lastMsg = lastWindMessage.getOrDefault(uuid(player), 0L);
-                    if (now - lastMsg > 750L) {
-                        int sec = (int) Math.ceil(currentTicks / 20.0);
-                        player.sendMessage(ChatColor.RED + "You can't use another wind charge for " + sec + "s (rep penalty).");
-                        lastWindMessage.put(uuid(player), now);
-                    }
-                    event.setCancelled(true);
-                    return;
-                }
-
-                Bukkit.getScheduler().runTask(plugin, () ->
-                        player.setCooldown(Material.WIND_CHARGE, repCooldownSeconds * 20)
-                );
+        int currentCooldownTicks = player.getCooldown(material);
+        if (currentCooldownTicks > 0) {
+            long now = System.currentTimeMillis();
+            long lastMessageAt = messageCache.getOrDefault(player.getUniqueId(), 0L);
+            if (now - lastMessageAt > 750L) {
+                int remainingSeconds = (int) Math.ceil(currentCooldownTicks / 20.0D);
+                player.sendMessage(ChatColor.RED + messagePrefix + remainingSeconds + "s (rep penalty).");
+                messageCache.put(player.getUniqueId(), now);
             }
+            event.setCancelled(true);
+            return;
         }
 
-        if (type == Material.FIREWORK_ROCKET && player.isGliding()) {
-            lastRocketUse.put(uuid(player), System.currentTimeMillis());
-        }
+        Bukkit.getScheduler().runTask(plugin, () -> player.setCooldown(material, cooldownSeconds * 20));
     }
 
     @EventHandler
     public void onEntitySpawn(EntitySpawnEvent event) {
-        if (!(event.getEntity() instanceof Firework firework)) return;
+        if (!(event.getEntity() instanceof Firework firework)) {
+            return;
+        }
 
         long now = System.currentTimeMillis();
+        Player closestPlayer = null;
+        double closestDistanceSquared = 0.0D;
+        int durationPercent = 0;
 
-        Player best = null;
-        double bestDist2 = 0.0;
-        int fireworkPercent = 0;
+        for (Player player : firework.getWorld().getPlayers()) {
+            Long lastUse = lastRocketUseAt.get(player.getUniqueId());
+            if (lastUse == null || now - lastUse > 500L || !player.isGliding()) {
+                continue;
+            }
 
-        for (Player p : firework.getWorld().getPlayers()) {
-            UUID id = p.getUniqueId();
-            Long last = lastRocketUse.get(id);
-            if (last == null) continue;
-            if (now - last > 500L) continue;
-            if (!p.isGliding()) continue;
+            RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
+            if (effects.fireworkDurationPercent() >= 0) {
+                continue;
+            }
 
-            double dist2 = p.getLocation().distanceSquared(firework.getLocation());
-            RepAppliedEffects eff = currentEffects.getOrDefault(id, new RepAppliedEffects());
-            if (eff.fireworkDurationPercent >= 0) continue;
-
-            if (best == null || dist2 < bestDist2) {
-                best = p;
-                bestDist2 = dist2;
-                fireworkPercent = eff.fireworkDurationPercent;
+            double distanceSquared = player.getLocation().distanceSquared(firework.getLocation());
+            if (closestPlayer == null || distanceSquared < closestDistanceSquared) {
+                closestPlayer = player;
+                closestDistanceSquared = distanceSquared;
+                durationPercent = effects.fireworkDurationPercent();
             }
         }
 
-        if (best == null || fireworkPercent >= 0) return;
-
-        double factor = 1.0 + (fireworkPercent / 100.0);
-        if (factor <= 0.1) factor = 0.1;
+        if (closestPlayer == null) {
+            return;
+        }
 
         FireworkMeta meta = firework.getFireworkMeta();
-        int power = meta.getPower();
-        int baseTicks = 20 * (power + 1);
-        long shortenedTicks = Math.max(1, Math.round(baseTicks * factor));
-
+        int baseTicks = 20 * (meta.getPower() + 1);
+        double factor = Math.max(0.1D, 1.0D + (durationPercent / 100.0D));
+        long lifetimeTicks = Math.max(1L, Math.round(baseTicks * factor));
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (!firework.isDead()) {
                 firework.detonate();
             }
-        }, shortenedTicks);
+        }, lifetimeTicks);
     }
 
     @EventHandler
-    public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
+    public void onPotionConsume(PlayerItemConsumeEvent event) {
         Player player = event.getPlayer();
-        if (!regions.isInSpawnOrWarzone(player.getLocation())) return;
-
-        ItemStack item = event.getItem();
-        if (item == null) return;
-        Material type = item.getType();
-
-        if (type != Material.POTION && type != Material.SPLASH_POTION && type != Material.LINGERING_POTION) {
+        if (!regionManager.isInSpawnOrWarzone(player.getLocation())) {
             return;
         }
-
-        RepAppliedEffects effects = currentEffects.getOrDefault(uuid(player), new RepAppliedEffects());
-        if (effects.potionDurationPercent == 0) return;
-
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            applyPotionDurationModifier(player, effects);
-        }, 5L);
+        Material material = event.getItem().getType();
+        if (material != Material.POTION && material != Material.SPLASH_POTION && material != Material.LINGERING_POTION) {
+            return;
+        }
+        RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
+        if (effects.potionDurationPercent() == 0) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> applyPotionDurationModifier(player, effects), 5L);
     }
 
     @EventHandler
     public void onPotionSplash(PotionSplashEvent event) {
         for (Entity entity : event.getAffectedEntities()) {
-            if (!(entity instanceof Player player)) continue;
-
-            if (!regions.isInSpawnOrWarzone(player.getLocation())) continue;
-
-            RepAppliedEffects effects = currentEffects.getOrDefault(uuid(player), new RepAppliedEffects());
-            if (effects.potionDurationPercent == 0) continue;
-
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                applyPotionDurationModifier(player, effects);
-            }, 5L);
+            if (entity instanceof Player player && regionManager.isInSpawnOrWarzone(player.getLocation())) {
+                RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
+                if (effects.potionDurationPercent() != 0) {
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> applyPotionDurationModifier(player, effects), 5L);
+                }
+            }
         }
     }
 
     private void applyPotionDurationModifier(Player player, RepAppliedEffects effects) {
-        if (effects.potionDurationPercent == 0) return;
-
-        List<PotionEffect> snapshot = new ArrayList<>(player.getActivePotionEffects());
-        for (PotionEffect eff : snapshot) {
-            if (!isBeneficial(eff.getType())) continue;
-
-            int original = eff.getDuration();
-            double factor = 1.0 + (effects.potionDurationPercent / 100.0);
-            int newDuration = (int) Math.max(1, original * factor);
-
-            PotionEffectType type = eff.getType();
-            player.removePotionEffect(type);
-
-            PotionEffect replaced = new PotionEffect(
-                    type,
-                    newDuration,
-                    eff.getAmplifier(),
-                    eff.isAmbient(),
-                    eff.hasParticles(),
-                    eff.hasIcon()
-            );
-            player.addPotionEffect(replaced, true);
+        List<PotionEffect> activeEffects = new ArrayList<>(player.getActivePotionEffects());
+        for (PotionEffect effect : activeEffects) {
+            if (!isBeneficial(effect.getType())) {
+                continue;
+            }
+            int adjustedDuration = (int) Math.max(1, Math.round(effect.getDuration() * (1.0D + effects.potionDurationPercent() / 100.0D)));
+            player.removePotionEffect(effect.getType());
+            player.addPotionEffect(new PotionEffect(
+                    effect.getType(),
+                    adjustedDuration,
+                    effect.getAmplifier(),
+                    effect.isAmbient(),
+                    effect.hasParticles(),
+                    effect.hasIcon()
+            ), true);
         }
     }
 
@@ -433,5 +432,24 @@ public class RepEffectManager implements Listener {
                 || type == PotionEffectType.CONDUIT_POWER
                 || type == PotionEffectType.DOLPHINS_GRACE
                 || type == PotionEffectType.HERO_OF_THE_VILLAGE;
+    }
+
+    private void refreshRedGlowForViewer(Player viewer) {
+        if (protocolGlowService == null) {
+            return;
+        }
+        for (Player target : viewer.getWorld().getPlayers()) {
+            if (target.equals(viewer)) {
+                continue;
+            }
+            GlowState state = glowStates.get(target.getUniqueId());
+            if (state != null && state.enabled() && state.color() == ChatColor.RED) {
+                protocolGlowService.setGlow(target, ChatColor.RED, List.of(viewer));
+            }
+        }
+    }
+
+    private record GlowState(boolean enabled, ChatColor color) {
+        private static final GlowState OFF = new GlowState(false, null);
     }
 }

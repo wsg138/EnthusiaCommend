@@ -10,93 +10,108 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class RegionManager {
+public final class RegionManager {
 
-    private final List<CuboidRegion> spawnRegions = new ArrayList<>();
-    private final List<CuboidRegion> warzoneRegions = new ArrayList<>();
+    private volatile List<CuboidRegion> spawnRegions = List.of();
+    private volatile List<CuboidRegion> warzoneRegions = List.of();
 
     public RegionManager(CommendPlugin plugin) {
-        reload(plugin);
+        reload(plugin.getConfig(), plugin);
     }
 
-    public void reload(CommendPlugin plugin) {
-        spawnRegions.clear();
-        warzoneRegions.clear();
-
-        FileConfiguration config = plugin.getConfig();
-
-        loadRegionList(config, "regions.spawn", spawnRegions);
-        loadRegionList(config, "regions.warzone", warzoneRegions);
-
-        plugin.getLogger().info("Loaded " + spawnRegions.size() + " spawn regions and "
-                + warzoneRegions.size() + " warzone regions.");
+    public void reload(FileConfiguration config, CommendPlugin plugin) {
+        List<CuboidRegion> spawn = new ArrayList<>();
+        List<CuboidRegion> warzone = new ArrayList<>();
+        loadRegionList(config, "regions.spawn", spawn);
+        loadRegionList(config, "regions.warzone", warzone);
+        this.spawnRegions = List.copyOf(spawn);
+        this.warzoneRegions = List.copyOf(warzone);
+        plugin.getLogger().info("Loaded " + spawnRegions.size() + " spawn regions and " + warzoneRegions.size() + " warzone regions.");
     }
 
     @SuppressWarnings("unchecked")
     private void loadRegionList(FileConfiguration config, String path, List<CuboidRegion> out) {
         List<Map<?, ?>> list = config.getMapList(path);
-        if (list == null || list.isEmpty()) return;
-
         for (Map<?, ?> map : list) {
-            if (map == null) continue;
-
-            Object worldObj = map.get("world");
-            Object minObj = map.get("min");
-            Object maxObj = map.get("max");
-
-            if (worldObj == null || minObj == null || maxObj == null) continue;
-
-            String worldName = String.valueOf(worldObj);
+            if (map == null) {
+                continue;
+            }
+            String worldName = String.valueOf(map.get("world"));
             World world = Bukkit.getWorld(worldName);
-            if (world == null) continue;
-
-            int[] min = parseCoord(String.valueOf(minObj));
-            int[] max = parseCoord(String.valueOf(maxObj));
-            if (min == null || max == null) continue;
-
-            CuboidRegion region = new CuboidRegion(
-                    world.getName(),
+            if (world == null) {
+                continue;
+            }
+            int[] min = parseCoord(String.valueOf(map.get("min")));
+            int[] max = parseCoord(String.valueOf(map.get("max")));
+            if (min == null || max == null) {
+                continue;
+            }
+            out.add(new CuboidRegion(
+                    worldName,
                     Math.min(min[0], max[0]),
                     Math.min(min[1], max[1]),
                     Math.min(min[2], max[2]),
                     Math.max(min[0], max[0]),
                     Math.max(min[1], max[1]),
                     Math.max(min[2], max[2])
-            );
-            out.add(region);
+            ));
         }
     }
 
     private int[] parseCoord(String value) {
         String[] parts = value.split(",");
-        if (parts.length != 3) return null;
+        if (parts.length != 3) {
+            return null;
+        }
         try {
-            int x = Integer.parseInt(parts[0].trim());
-            int y = Integer.parseInt(parts[1].trim());
-            int z = Integer.parseInt(parts[2].trim());
-            return new int[]{x, y, z};
-        } catch (NumberFormatException e) {
+            return new int[] {
+                    Integer.parseInt(parts[0].trim()),
+                    Integer.parseInt(parts[1].trim()),
+                    Integer.parseInt(parts[2].trim())
+            };
+        } catch (NumberFormatException ignored) {
             return null;
         }
     }
 
-    public boolean isInSpawn(Location loc) {
-        if (loc == null) return false;
-        for (CuboidRegion region : spawnRegions) {
-            if (region.contains(loc)) return true;
+    public ZoneType resolveZone(Location location) {
+        if (isInSpawn(location)) {
+            return ZoneType.SPAWN;
+        }
+        if (isInWarzone(location)) {
+            return ZoneType.WARZONE;
+        }
+        return ZoneType.WILDERNESS;
+    }
+
+    public boolean isInSpawn(Location location) {
+        return contains(spawnRegions, location);
+    }
+
+    public boolean isInWarzone(Location location) {
+        return contains(warzoneRegions, location);
+    }
+
+    public boolean isInSpawnOrWarzone(Location location) {
+        ZoneType zone = resolveZone(location);
+        return zone == ZoneType.SPAWN || zone == ZoneType.WARZONE;
+    }
+
+    private boolean contains(List<CuboidRegion> regions, Location location) {
+        if (location == null) {
+            return false;
+        }
+        for (CuboidRegion region : regions) {
+            if (region.contains(location)) {
+                return true;
+            }
         }
         return false;
     }
 
-    public boolean isInWarzone(Location loc) {
-        if (loc == null) return false;
-        for (CuboidRegion region : warzoneRegions) {
-            if (region.contains(loc)) return true;
-        }
-        return false;
-    }
-
-    public boolean isInSpawnOrWarzone(Location loc) {
-        return isInSpawn(loc) || isInWarzone(loc);
+    public enum ZoneType {
+        SPAWN,
+        WARZONE,
+        WILDERNESS
     }
 }
