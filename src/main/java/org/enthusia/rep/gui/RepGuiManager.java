@@ -29,6 +29,7 @@ import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.view.AnvilView;
 import org.bukkit.persistence.PersistentDataType;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.effects.RepAppliedEffects;
@@ -293,7 +294,7 @@ public final class RepGuiManager implements Listener {
         if (!(event.getInventory().getHolder() instanceof AnvilHolder session)) {
             return;
         }
-        String text = event.getInventory().getRenameText();
+        String text = event.getView() instanceof AnvilView anvilView ? anvilView.getRenameText() : event.getInventory().getRenameText();
         liveAnvilText.put(player.getUniqueId(), text == null ? "" : text);
         resetAnvilCosts(event.getInventory());
         String normalized = normalizeReason(text);
@@ -562,7 +563,7 @@ public final class RepGuiManager implements Listener {
         if (event.getRawSlot() != 2) {
             return;
         }
-        String text = normalizeReason(liveAnvilText.get(player.getUniqueId()));
+        String text = resolveAnvilReasonText(player, event);
         if (text.isEmpty()) {
             player.sendMessage(ChatColor.RED + "Type a message in the anvil first.");
             return;
@@ -636,6 +637,32 @@ public final class RepGuiManager implements Listener {
         pendingAnvils.put(player.getUniqueId(), new AnvilSession(targetId, category, returnPage));
         liveAnvilText.put(player.getUniqueId(), "");
         player.openInventory(inventory);
+    }
+
+    private String resolveAnvilReasonText(Player player, InventoryClickEvent event) {
+        String text = normalizeReason(liveAnvilText.get(player.getUniqueId()));
+        if (!text.isEmpty()) {
+            return text;
+        }
+        if (event.getView() instanceof AnvilView anvilView) {
+            text = normalizeReason(anvilView.getRenameText());
+            if (!text.isEmpty()) {
+                liveAnvilText.put(player.getUniqueId(), text);
+                return text;
+            }
+        }
+        ItemStack current = event.getCurrentItem();
+        if (current != null && current.hasItemMeta()) {
+            ItemMeta meta = current.getItemMeta();
+            if (meta != null && meta.hasDisplayName()) {
+                text = normalizeReason(ChatColor.stripColor(meta.getDisplayName()));
+                if (!text.isEmpty() && !"Type here".equalsIgnoreCase(text)) {
+                    liveAnvilText.put(player.getUniqueId(), text);
+                    return text;
+                }
+            }
+        }
+        return "";
     }
 
     private void openConfirmReason(Player player, UUID targetId, RepCategory category, int returnPage, String reason) {
