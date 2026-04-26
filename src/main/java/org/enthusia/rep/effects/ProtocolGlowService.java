@@ -10,7 +10,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
@@ -25,6 +24,7 @@ public class ProtocolGlowService {
 
     private final JavaPlugin plugin;
     private final ProtocolManager protocol;
+    private volatile boolean teamPacketsEnabled = true;
     // viewer -> (target -> teamName)
     private final Map<UUID, Map<UUID, String>> teamsByViewer = new ConcurrentHashMap<>();
 
@@ -34,13 +34,13 @@ public class ProtocolGlowService {
     }
 
     public void setGlow(Player target, ChatColor color, Collection<? extends Player> viewers) {
-        if (target == null || viewers == null || color == null) return;
+        if (target == null || viewers == null || color == null || !teamPacketsEnabled) return;
         String entry = target.getName();
         for (Player viewer : viewers) {
             if (viewer == null) continue;
             try {
                 applyToViewer(viewer, target, entry, color);
-            } catch (InvocationTargetException ex) {
+            } catch (Exception ex) {
                 plugin.getLogger().warning("Failed to apply glow via ProtocolLib to " + target.getName() + " for " + viewer.getName() + ": " + ex.getMessage());
             }
         }
@@ -73,7 +73,7 @@ public class ProtocolGlowService {
         teamsByViewer.clear();
     }
 
-    private void applyToViewer(Player viewer, Player target, String entry, ChatColor color) throws InvocationTargetException {
+    private void applyToViewer(Player viewer, Player target, String entry, ChatColor color) {
         Map<UUID, String> viewerTeams = teamsByViewer.computeIfAbsent(viewer.getUniqueId(), k -> new ConcurrentHashMap<>());
         UUID targetId = target.getUniqueId();
         String desiredTeam = buildTeamName(viewer.getUniqueId(), targetId, color);
@@ -81,7 +81,9 @@ public class ProtocolGlowService {
         if (previous != null && !previous.equals(desiredTeam)) {
             sendRemoveTeam(viewer, previous);
         }
-        sendCreateTeam(viewer, desiredTeam, color, entry);
+        if (!sendCreateTeam(viewer, desiredTeam, color, entry)) {
+            return;
+        }
         viewerTeams.put(targetId, desiredTeam);
     }
 
@@ -94,7 +96,10 @@ public class ProtocolGlowService {
         }
     }
 
-    private void sendCreateTeam(Player viewer, String teamName, ChatColor color, String entry) throws InvocationTargetException {
+    private boolean sendCreateTeam(Player viewer, String teamName, ChatColor color, String entry) {
+        if (!teamPacketsEnabled) {
+            return false;
+        }
         PacketContainer packet = protocol.createPacket(PacketType.Play.Server.SCOREBOARD_TEAM);
 
         var strings = packet.getStrings();
@@ -127,13 +132,20 @@ public class ProtocolGlowService {
                 optionals.writeSafely(0, Optional.of(params));
             }
         } catch (Exception ex) {
-            plugin.getLogger().warning("Failed to build team parameters: " + ex.getMessage());
+            disableTeamPackets("Failed to build team parameters", ex);
+            return false;
         }
 
         var collections = packet.getSpecificModifier(Collection.class);
         if (collections.size() > 0) collections.writeSafely(0, Collections.singletonList(entry));
 
-        protocol.sendServerPacket(viewer, packet);
+        try {
+            protocol.sendServerPacket(viewer, packet);
+            return true;
+        } catch (Exception ex) {
+            disableTeamPackets("Failed to send scoreboard team packet", ex);
+            return false;
+        }
     }
 
     private void sendRemoveTeam(Player viewer, String teamName) {
@@ -164,5 +176,14 @@ public class ProtocolGlowService {
         } catch (IllegalArgumentException ex) {
             return ChatFormatting.WHITE;
         }
+    }
+
+    private void disableTeamPackets(String context, Exception ex) {
+        if (!teamPacketsEnabled) {
+            return;
+        }
+        teamPacketsEnabled = false;
+        plugin.getLogger().severe(context + "; disabling ProtocolLib team coloring fallback. Players will keep normal glow without red team packets. Cause: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+        teamsByViewer.clear();
     }
 }

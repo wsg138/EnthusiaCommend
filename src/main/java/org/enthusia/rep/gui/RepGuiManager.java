@@ -101,7 +101,7 @@ public final class RepGuiManager implements Listener {
                 if (message != null && !message.isBlank()) {
                     player.sendMessage(message);
                 }
-                if (player.getOpenInventory().getTopInventory().getHolder() instanceof AnvilHolder) {
+                if (isActiveAnvilSession(player, player.getOpenInventory())) {
                     player.closeInventory();
                 }
             }
@@ -249,10 +249,18 @@ public final class RepGuiManager implements Listener {
         }
         Inventory topInventory = event.getView().getTopInventory();
         if (topInventory == null || topInventory.getHolder() == null) {
+            if (isActiveAnvilSession(player, event.getView())) {
+                event.setCancelled(true);
+                handleAnvilResultClick(player, event);
+            }
             return;
         }
         InventoryHolder holder = topInventory.getHolder();
         if (!(holder instanceof HolderMarker)) {
+            if (isActiveAnvilSession(player, event.getView())) {
+                event.setCancelled(true);
+                handleAnvilResultClick(player, event);
+            }
             return;
         }
 
@@ -274,14 +282,13 @@ public final class RepGuiManager implements Listener {
             handleReportsClick(player, reports, event.getRawSlot());
         } else if (holder instanceof ConfirmRestoreHolder restore) {
             handleRestoreClick(player, restore, event.getRawSlot());
-        } else if (holder instanceof AnvilHolder anvil) {
-            handleAnvilResultClick(player, anvil, event);
         }
     }
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getView().getTopInventory().getHolder() instanceof HolderMarker) {
+        if (event.getView().getTopInventory().getHolder() instanceof HolderMarker
+                || (event.getWhoClicked() instanceof Player player && isActiveAnvilSession(player, event.getView()))) {
             event.setCancelled(true);
         }
     }
@@ -291,7 +298,8 @@ public final class RepGuiManager implements Listener {
         if (!(event.getView().getPlayer() instanceof Player player)) {
             return;
         }
-        if (!(event.getInventory().getHolder() instanceof AnvilHolder session)) {
+        AnvilSession session = pendingAnvils.get(player.getUniqueId());
+        if (session == null || event.getInventory().getType() != org.bukkit.event.inventory.InventoryType.ANVIL) {
             return;
         }
         String text = event.getView() instanceof AnvilView anvilView ? anvilView.getRenameText() : event.getInventory().getRenameText();
@@ -310,7 +318,7 @@ public final class RepGuiManager implements Listener {
         if (!(event.getPlayer() instanceof Player player)) {
             return;
         }
-        if (event.getInventory().getHolder() instanceof AnvilHolder) {
+        if (pendingAnvils.containsKey(player.getUniqueId()) && event.getInventory().getType() == org.bukkit.event.inventory.InventoryType.ANVIL) {
             UUID playerId = player.getUniqueId();
             if (transitioningAnvil.remove(playerId)) {
                 return;
@@ -559,15 +567,36 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    private void handleAnvilResultClick(Player player, AnvilHolder anvil, InventoryClickEvent event) {
+    private void handleAnvilResultClick(Player player, InventoryClickEvent event) {
         if (event.getRawSlot() != 2) {
+            return;
+        }
+        AnvilSession anvil = pendingAnvils.get(player.getUniqueId());
+        if (anvil == null) {
             return;
         }
         String text = resolveAnvilReasonText(player, event);
         if (text.isEmpty()) {
+            Bukkit.getScheduler().runTask(plugin, () -> retryAnvilResultClick(player));
+            return;
+        }
+        completeAnvilReasonEntry(player, anvil, text);
+    }
+
+    private void retryAnvilResultClick(Player player) {
+        AnvilSession anvil = pendingAnvils.get(player.getUniqueId());
+        if (anvil == null || !isActiveAnvilSession(player, player.getOpenInventory())) {
+            return;
+        }
+        String text = resolveAnvilReasonText(player, player.getOpenInventory());
+        if (text.isEmpty()) {
             player.sendMessage(ChatColor.RED + "Type a message in the anvil first.");
             return;
         }
+        completeAnvilReasonEntry(player, anvil, text);
+    }
+
+    private void completeAnvilReasonEntry(Player player, AnvilSession anvil, String text) {
         transitioningAnvil.add(player.getUniqueId());
         pendingAnvils.remove(player.getUniqueId());
         liveAnvilText.remove(player.getUniqueId());
@@ -628,41 +657,64 @@ public final class RepGuiManager implements Listener {
     }
 
     private void openAnvilInput(Player player, UUID targetId, RepCategory category, int returnPage) {
-        Inventory inventory = Bukkit.createInventory(new AnvilHolder(targetId, category, returnPage), org.bukkit.event.inventory.InventoryType.ANVIL,
-                ChatColor.YELLOW + "Type your message");
+        pendingAnvils.put(player.getUniqueId(), new AnvilSession(targetId, category, returnPage));
+        liveAnvilText.put(player.getUniqueId(), "");
+        org.bukkit.inventory.InventoryView view = player.openAnvil(null, true);
+        if (view instanceof AnvilView anvilView) {
+            resetAnvilView(anvilView);
+        }
+        Inventory inventory = view.getTopInventory();
         inventory.setItem(0, simpleButton(materialFor(category.isPositive()), ChatColor.WHITE + "Type here", List.of()));
         if (inventory instanceof AnvilInventory anvilInventory) {
             resetAnvilCosts(anvilInventory);
         }
-        pendingAnvils.put(player.getUniqueId(), new AnvilSession(targetId, category, returnPage));
-        liveAnvilText.put(player.getUniqueId(), "");
-        player.openInventory(inventory);
     }
 
     private String resolveAnvilReasonText(Player player, InventoryClickEvent event) {
+        String text = resolveAnvilReasonText(player, event.getView());
+        if (!text.isEmpty()) {
+            return text;
+        }
+        return resolveAnvilTextFromItem(player, event.getCurrentItem());
+    }
+
+    private String resolveAnvilReasonText(Player player, org.bukkit.inventory.InventoryView view) {
         String text = normalizeReason(liveAnvilText.get(player.getUniqueId()));
         if (!text.isEmpty()) {
             return text;
         }
-        if (event.getView() instanceof AnvilView anvilView) {
+        if (view instanceof AnvilView anvilView) {
             text = normalizeReason(anvilView.getRenameText());
             if (!text.isEmpty()) {
                 liveAnvilText.put(player.getUniqueId(), text);
                 return text;
             }
         }
-        ItemStack current = event.getCurrentItem();
-        if (current != null && current.hasItemMeta()) {
-            ItemMeta meta = current.getItemMeta();
-            if (meta != null && meta.hasDisplayName()) {
-                text = normalizeReason(ChatColor.stripColor(meta.getDisplayName()));
-                if (!text.isEmpty() && !"Type here".equalsIgnoreCase(text)) {
-                    liveAnvilText.put(player.getUniqueId(), text);
-                    return text;
-                }
+        Inventory top = view.getTopInventory();
+        if (top != null) {
+            text = resolveAnvilTextFromItem(player, top.getItem(2));
+            if (!text.isEmpty()) {
+                return text;
             }
+            return resolveAnvilTextFromItem(player, top.getItem(0));
         }
         return "";
+    }
+
+    private String resolveAnvilTextFromItem(Player player, ItemStack item) {
+        if (item == null || !item.hasItemMeta()) {
+            return "";
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null || !meta.hasDisplayName()) {
+            return "";
+        }
+        String text = normalizeReason(ChatColor.stripColor(meta.getDisplayName()));
+        if (text.isEmpty() || "Type here".equalsIgnoreCase(text)) {
+            return "";
+        }
+        liveAnvilText.put(player.getUniqueId(), text);
+        return text;
     }
 
     private void openConfirmReason(Player player, UUID targetId, RepCategory category, int returnPage, String reason) {
@@ -1011,6 +1063,32 @@ public final class RepGuiManager implements Listener {
         }
     }
 
+    private void resetAnvilView(AnvilView anvilView) {
+        try {
+            anvilView.setRepairCost(0);
+        } catch (Throwable ignored) {
+        }
+        try {
+            anvilView.setRepairItemCountCost(0);
+        } catch (Throwable ignored) {
+        }
+        try {
+            anvilView.setMaximumRepairCost(0);
+        } catch (Throwable ignored) {
+        }
+        try {
+            anvilView.bypassEnchantmentLevelRestriction(true);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean isActiveAnvilSession(Player player, org.bukkit.inventory.InventoryView view) {
+        return pendingAnvils.containsKey(player.getUniqueId())
+                && view != null
+                && view.getTopInventory() != null
+                && view.getTopInventory().getType() == org.bukkit.event.inventory.InventoryType.ANVIL;
+    }
+
     private Material materialFor(boolean positive) {
         return positive ? Material.LIME_DYE : Material.RED_DYE;
     }
@@ -1028,7 +1106,7 @@ public final class RepGuiManager implements Listener {
         return ids.stream().map(repService::nameOf).collect(Collectors.joining(", "));
     }
 
-    private sealed interface HolderMarker permits ProfileHolder, ReasonHolder, InputChoiceHolder, ConfirmReasonHolder, ConfirmRemovalHolder, RemovedLogHolder, ActiveReportsHolder, ConfirmRestoreHolder, AnvilHolder {
+    private sealed interface HolderMarker permits ProfileHolder, ReasonHolder, InputChoiceHolder, ConfirmReasonHolder, ConfirmRemovalHolder, RemovedLogHolder, ActiveReportsHolder, ConfirmRestoreHolder {
     }
 
     private record ProfileHolder(UUID targetId, int page) implements InventoryHolder, HolderMarker {
@@ -1060,10 +1138,6 @@ public final class RepGuiManager implements Listener {
     }
 
     private record ConfirmRestoreHolder(String removalId, int returnPage) implements InventoryHolder, HolderMarker {
-        @Override public Inventory getInventory() { return null; }
-    }
-
-    private record AnvilHolder(UUID targetId, RepCategory category, int returnPage) implements InventoryHolder, HolderMarker {
         @Override public Inventory getInventory() { return null; }
     }
 
