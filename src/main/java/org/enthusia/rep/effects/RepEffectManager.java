@@ -28,6 +28,7 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.config.RepConfig;
+import org.enthusia.rep.integration.WarzoneDuelsHook;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
 
@@ -46,6 +47,7 @@ public final class RepEffectManager implements Listener {
     private final CommendPlugin plugin;
     private final RegionManager regionManager;
     private final RepService repService;
+    private final WarzoneDuelsHook warzoneDuelsHook;
     private final ProtocolGlowService protocolGlowService;
 
     private RepConfig config;
@@ -57,11 +59,18 @@ public final class RepEffectManager implements Listener {
     private final Map<UUID, Long> lastWindMessageAt = new HashMap<>();
     private final Map<UUID, Long> lastRocketUseAt = new HashMap<>();
 
-    public RepEffectManager(CommendPlugin plugin, RepConfig config, RegionManager regionManager, RepService repService) {
+    public RepEffectManager(
+            CommendPlugin plugin,
+            RepConfig config,
+            RegionManager regionManager,
+            RepService repService,
+            WarzoneDuelsHook warzoneDuelsHook
+    ) {
         this.plugin = plugin;
         this.config = config;
         this.regionManager = regionManager;
         this.repService = repService;
+        this.warzoneDuelsHook = warzoneDuelsHook;
         this.protocolGlowService = isProtocolAvailable() ? new ProtocolGlowService(plugin) : null;
     }
 
@@ -117,7 +126,8 @@ public final class RepEffectManager implements Listener {
         RepAppliedEffects desired = config.resolveEffects(repService.getScore(playerId));
         currentEffects.put(playerId, desired);
 
-        boolean inEffectZone = regionManager.isInSpawnOrWarzone(player.getLocation());
+        boolean duelExempt = warzoneDuelsHook.isDuelExempt(player);
+        boolean inEffectZone = !duelExempt && regionManager.isInSpawnOrWarzone(player.getLocation());
         applyMovement(player, inEffectZone ? desired.movementSpeedPercent() : 0, force);
         applyGlow(player, inEffectZone && desired.glow(), desired.glowColor(), force);
     }
@@ -282,7 +292,7 @@ public final class RepEffectManager implements Listener {
         }
 
         RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
-        if (regionManager.isInSpawnOrWarzone(player.getLocation())) {
+        if (!warzoneDuelsHook.isDuelExempt(player) && regionManager.isInSpawnOrWarzone(player.getLocation())) {
             if (item.getType() == Material.ENDER_PEARL) {
                 handleCooldownItem(event, player, Material.ENDER_PEARL, effects.pearlCooldownSeconds(), lastPearlMessageAt, "You can't throw another ender pearl for ");
             } else if (item.getType() == Material.WIND_CHARGE) {
@@ -341,7 +351,7 @@ public final class RepEffectManager implements Listener {
             }
 
             RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
-            if (effects.fireworkDurationPercent() >= 0) {
+            if (warzoneDuelsHook.isDuelExempt(player) || effects.fireworkDurationPercent() >= 0) {
                 continue;
             }
 
@@ -371,7 +381,7 @@ public final class RepEffectManager implements Listener {
     @EventHandler
     public void onPotionConsume(PlayerItemConsumeEvent event) {
         Player player = event.getPlayer();
-        if (!regionManager.isInSpawnOrWarzone(player.getLocation())) {
+        if (warzoneDuelsHook.isDuelExempt(player) || !regionManager.isInSpawnOrWarzone(player.getLocation())) {
             return;
         }
         Material material = event.getItem().getType();
@@ -388,7 +398,9 @@ public final class RepEffectManager implements Listener {
     @EventHandler
     public void onPotionSplash(PotionSplashEvent event) {
         for (Entity entity : event.getAffectedEntities()) {
-            if (entity instanceof Player player && regionManager.isInSpawnOrWarzone(player.getLocation())) {
+            if (entity instanceof Player player
+                    && !warzoneDuelsHook.isDuelExempt(player)
+                    && regionManager.isInSpawnOrWarzone(player.getLocation())) {
                 RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
                 if (effects.potionDurationPercent() != 0) {
                     Bukkit.getScheduler().runTaskLater(plugin, () -> applyPotionDurationModifier(player, effects), 5L);
@@ -440,6 +452,9 @@ public final class RepEffectManager implements Listener {
         }
         for (Player target : viewer.getWorld().getPlayers()) {
             if (target.equals(viewer)) {
+                continue;
+            }
+            if (warzoneDuelsHook.isDuelExempt(target)) {
                 continue;
             }
             GlowState state = glowStates.get(target.getUniqueId());

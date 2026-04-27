@@ -15,6 +15,7 @@ import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.gui.RepGuiManager;
 import org.enthusia.rep.integration.TeleportIntegration;
+import org.enthusia.rep.integration.WarzoneDuelsHook;
 import org.enthusia.rep.placeholder.RepPlaceholderExpansion;
 import org.enthusia.rep.playtime.PlaytimeService;
 import org.enthusia.rep.region.RegionManager;
@@ -42,6 +43,7 @@ public final class CommendPlugin extends JavaPlugin {
     private StalkManager stalkManager;
     private RepGuiManager repGuiManager;
     private TeleportIntegration teleportIntegration;
+    private WarzoneDuelsHook warzoneDuelsHook;
     private SkinCache skinCache;
     private Economy economy;
     private PluginDataStore dataStore;
@@ -85,6 +87,10 @@ public final class CommendPlugin extends JavaPlugin {
         return teleportIntegration;
     }
 
+    public WarzoneDuelsHook getWarzoneDuelsHook() {
+        return warzoneDuelsHook;
+    }
+
     public SkinCache getSkinCache() {
         return skinCache;
     }
@@ -109,7 +115,9 @@ public final class CommendPlugin extends JavaPlugin {
         this.repService = new RepService(this, repConfig, snapshot, this::markDirty, this::handleScoreChanged);
         this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
         this.stalkManager.load(snapshot);
-        this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService);
+        this.warzoneDuelsHook = new WarzoneDuelsHook(this);
+        this.warzoneDuelsHook.refresh();
+        this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService, warzoneDuelsHook);
         this.teleportIntegration = new TeleportIntegration(this, repService);
         this.skinCache = new SkinCache(this);
         this.skinCache.load();
@@ -166,6 +174,7 @@ public final class CommendPlugin extends JavaPlugin {
         this.repService.reload(repConfig);
         this.stalkManager.reload(repConfig);
         this.effectManager.reload(repConfig);
+        this.warzoneDuelsHook.refresh();
         this.teleportIntegration.refresh();
     }
 
