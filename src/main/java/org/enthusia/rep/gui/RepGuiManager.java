@@ -556,7 +556,7 @@ public final class RepGuiManager implements Listener {
 
     private void handleRestoreClick(Player player, ConfirmRestoreHolder restore, int slot) {
         if (slot == 11) {
-            if (repService.restoreRemoved(restore.removalId())) {
+            if (repService.restoreRemoved(restore.removalId(), player)) {
                 player.sendMessage(ChatColor.GREEN + "Restored rep entry " + restore.removalId() + ".");
             } else {
                 player.sendMessage(ChatColor.RED + "Could not restore that rep entry.");

@@ -6,7 +6,7 @@
 
     <groupId>org.enthusia</groupId>
     <artifactId>enthusia-commend</artifactId>
-    <version>2.10.2</version>
+    <version>2.11.0</version>
     <name>EnthusiaCommend</name>
 
     <properties>
@@ -33,6 +33,12 @@
         <repository>
             <id>placeholderapi-repo</id>
             <url>https://repo.extendedclip.com/content/repositories/placeholderapi/</url>
+        </repository>
+
+        <!-- Plan API -->
+        <repository>
+            <id>jitpack</id>
+            <url>https://jitpack.io</url>
         </repository>
     </repositories>
 
@@ -75,6 +81,14 @@
             <version>5.4.0</version>
             <scope>provided</scope>
         </dependency>
+
+        <!-- Plan Player Analytics API (optional at runtime) -->
+        <dependency>
+            <groupId>com.github.plan-player-analytics</groupId>
+            <artifactId>Plan</artifactId>
+            <version>5.5.2172</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -103,6 +117,14 @@
                                     <shadedPattern>org.enthusia.rep.shadow.glowingentities</shadedPattern>
                                 </relocation>
                             </relocations>
+                            <filters>
+                                <filter>
+                                    <artifact>com.github.plan-player-analytics:Plan</artifact>
+                                    <excludes>
+                                        <exclude>**</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>

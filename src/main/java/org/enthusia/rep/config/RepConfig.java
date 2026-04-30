@@ -18,6 +18,10 @@ public final class RepConfig {
     private final int stalkMaxDays;
     private final String playtimePrimaryPlaceholder;
     private final String playtimeFallbackPlaceholder;
+    private final boolean planIntegrationEnabled;
+    private final boolean planPageEnabled;
+    private final int analyticsRetentionDays;
+    private final int analyticsMaxRecords;
     private final EffectThresholds effectThresholds;
 
     public RepConfig(FileConfiguration config) {
@@ -31,6 +35,10 @@ public final class RepConfig {
         this.stalkMaxDays = Math.max(1, config.getInt("stalk.maxDays", 7));
         this.playtimePrimaryPlaceholder = config.getString("playtime.primaryPlaceholder", "%playtime_active%");
         this.playtimeFallbackPlaceholder = config.getString("playtime.fallbackFormattedPlaceholder", "%playtime_active_formatted%");
+        this.planIntegrationEnabled = config.getBoolean("integrations.plan.enabled", true);
+        this.planPageEnabled = config.getBoolean("integrations.plan.page.enabled", true);
+        this.analyticsRetentionDays = Math.max(1, config.getInt("analytics.retentionDays", 90));
+        this.analyticsMaxRecords = Math.max(100, config.getInt("analytics.maxRecords", 5000));
         this.effectThresholds = new EffectThresholds(config);
     }
 
@@ -72,6 +80,26 @@ public final class RepConfig {
 
     public String getPlaytimeFallbackPlaceholder() {
         return playtimeFallbackPlaceholder;
+    }
+
+    public boolean isPlanIntegrationEnabled() {
+        return planIntegrationEnabled;
+    }
+
+    public boolean isPlanPageEnabled() {
+        return planPageEnabled;
+    }
+
+    public int getAnalyticsRetentionDays() {
+        return analyticsRetentionDays;
+    }
+
+    public long getAnalyticsRetentionMillis() {
+        return analyticsRetentionDays * 24L * 60L * 60L * 1000L;
+    }
+
+    public int getAnalyticsMaxRecords() {
+        return analyticsMaxRecords;
     }
 
     public EffectThresholds getEffectThresholds() {

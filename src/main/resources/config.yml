@@ -60,6 +60,22 @@ storage:
   # Autosave interval for in-memory data.
   autoSaveSeconds: 60
 
+analytics:
+  # How long reputation change history is retained for Plan/reporting views.
+  retentionDays: 90
+
+  # Safety cap for retained reputation change records when using YAML storage.
+  maxRecords: 5000
+
+integrations:
+  plan:
+    # Optional Plan Player Analytics integration.
+    enabled: true
+
+    page:
+      # Adds a dedicated reputation dashboard page through Plan's PageExtension API.
+      enabled: true
+
 playtime:
   # Primary PlaceholderAPI placeholder expected to return active seconds.
   primaryPlaceholder: "%playtime_active%"

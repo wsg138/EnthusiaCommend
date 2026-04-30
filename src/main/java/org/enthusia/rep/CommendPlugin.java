@@ -10,12 +10,14 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.rep.command.CommendCommand;
+import org.enthusia.rep.analytics.ReputationAnalyticsService;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.gui.RepGuiManager;
 import org.enthusia.rep.integration.TeleportIntegration;
 import org.enthusia.rep.integration.WarzoneDuelsHook;
+import org.enthusia.rep.integration.plan.PlanIntegrationBootstrap;
 import org.enthusia.rep.placeholder.RepPlaceholderExpansion;
 import org.enthusia.rep.playtime.PlaytimeService;
 import org.enthusia.rep.region.RegionManager;
@@ -39,11 +41,13 @@ public final class CommendPlugin extends JavaPlugin {
     private RegionManager regionManager;
     private PlaytimeService playtimeService;
     private RepService repService;
+    private ReputationAnalyticsService analyticsService;
     private RepEffectManager effectManager;
     private StalkManager stalkManager;
     private RepGuiManager repGuiManager;
     private TeleportIntegration teleportIntegration;
     private WarzoneDuelsHook warzoneDuelsHook;
+    private PlanIntegrationBootstrap planIntegration;
     private SkinCache skinCache;
     private Economy economy;
     private PluginDataStore dataStore;
@@ -69,6 +73,10 @@ public final class CommendPlugin extends JavaPlugin {
 
     public RepService getRepService() {
         return repService;
+    }
+
+    public ReputationAnalyticsService getAnalyticsService() {
+        return analyticsService;
     }
 
     public RepEffectManager getEffectManager() {
@@ -112,7 +120,8 @@ public final class CommendPlugin extends JavaPlugin {
         PluginDataSnapshot snapshot = dataStore.load();
         this.regionManager = new RegionManager(this);
         this.playtimeService = new PlaytimeService(repConfig);
-        this.repService = new RepService(this, repConfig, snapshot, this::markDirty, this::handleScoreChanged);
+        this.analyticsService = new ReputationAnalyticsService(() -> this.repConfig, snapshot.reputationChanges(), this::markDirty);
+        this.repService = new RepService(this, repConfig, snapshot, this::markDirty, this::handleScoreChanged, analyticsService);
         this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
@@ -136,6 +145,7 @@ public final class CommendPlugin extends JavaPlugin {
         teleportIntegration.refresh();
         effectManager.refreshAll();
         startAutoSaveTask();
+        registerPlanIntegration();
 
         getLogger().info("EnthusiaCommend enabled.");
     }
@@ -155,6 +165,9 @@ public final class CommendPlugin extends JavaPlugin {
         if (effectManager != null) {
             effectManager.clearAll();
         }
+        if (planIntegration != null) {
+            planIntegration.shutdown();
+        }
         flushDataSync();
         if (skinCache != null) {
             skinCache.save();
@@ -172,10 +185,14 @@ public final class CommendPlugin extends JavaPlugin {
         this.regionManager.reload(getConfig(), this);
         this.playtimeService.reload(repConfig);
         this.repService.reload(repConfig);
+        if (this.analyticsService != null) {
+            this.analyticsService.pruneExpired(true);
+        }
         this.stalkManager.reload(repConfig);
         this.effectManager.reload(repConfig);
         this.warzoneDuelsHook.refresh();
         this.teleportIntegration.refresh();
+        registerPlanIntegration();
     }
 
     private void registerCommands() {
@@ -237,9 +254,17 @@ public final class CommendPlugin extends JavaPlugin {
                 java.util.Map.of(),
                 java.util.List.of(),
                 java.util.List.of(),
-                stalkManager.snapshotEntries()
+                stalkManager.snapshotEntries(),
+                java.util.List.of()
         );
-        return repService.snapshot(stalkSnapshot);
+        PluginDataSnapshot repSnapshot = repService.snapshot(stalkSnapshot);
+        return new PluginDataSnapshot(
+                repSnapshot.scores(),
+                repSnapshot.commendations(),
+                repSnapshot.removedEntries(),
+                repSnapshot.stalkEntries(),
+                analyticsService != null ? analyticsService.snapshot() : java.util.List.of()
+        );
     }
 
     private void markDirty() {
@@ -254,6 +279,19 @@ public final class CommendPlugin extends JavaPlugin {
             teleportIntegration.updatePlayer(playerId);
         }
         markDirty();
+    }
+
+    private void registerPlanIntegration() {
+        if (!repConfig.isPlanIntegrationEnabled()) {
+            if (planIntegration != null) {
+                planIntegration.shutdown();
+            }
+            return;
+        }
+        if (planIntegration == null) {
+            planIntegration = new PlanIntegrationBootstrap(this);
+        }
+        planIntegration.register();
     }
 
     private void mergeMissingConfigDefaults() {

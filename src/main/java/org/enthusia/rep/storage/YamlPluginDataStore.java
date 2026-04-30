@@ -3,6 +3,7 @@ package org.enthusia.rep.storage;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.analytics.ReputationChangeRecord;
 import org.enthusia.rep.rep.Commendation;
 import org.enthusia.rep.rep.RepService;
 
@@ -16,7 +17,7 @@ import java.util.UUID;
 
 public final class YamlPluginDataStore implements PluginDataStore {
 
-    private static final int DATA_VERSION = 2;
+    private static final int DATA_VERSION = 3;
 
     private final CommendPlugin plugin;
     private final File file;
@@ -37,6 +38,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
         List<Commendation> commendations = new ArrayList<>();
         List<RepService.RemovedRep> removedEntries = new ArrayList<>();
         List<PluginDataSnapshot.StalkEntry> stalkEntries = new ArrayList<>();
+        List<ReputationChangeRecord> reputationChanges = new ArrayList<>();
 
         ConfigurationSection players = config.getConfigurationSection("players");
         if (players != null) {
@@ -66,6 +68,13 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
+        for (Map<?, ?> rawChange : config.getMapList("reputationChanges")) {
+            ReputationChangeRecord change = ReputationChangeRecord.fromMap(rawChange);
+            if (change != null) {
+                reputationChanges.add(change);
+            }
+        }
+
         ConfigurationSection stalkSection = config.getConfigurationSection("stalks");
         if (stalkSection != null) {
             for (String key : stalkSection.getKeys(false)) {
@@ -79,7 +88,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
-        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries);
+        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges);
     }
 
     @Override
@@ -101,6 +110,12 @@ public final class YamlPluginDataStore implements PluginDataStore {
             removed.add(entry.serialize());
         }
         config.set("removed", removed);
+
+        List<Map<String, Object>> reputationChanges = new ArrayList<>();
+        for (ReputationChangeRecord entry : snapshot.reputationChanges()) {
+            reputationChanges.add(entry.serialize());
+        }
+        config.set("reputationChanges", reputationChanges);
 
         int stalkIndex = 0;
         for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {

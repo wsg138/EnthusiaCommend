@@ -5,8 +5,12 @@ import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.analytics.ReputationAnalyticsService;
+import org.enthusia.rep.analytics.ReputationChangeAction;
+import org.enthusia.rep.analytics.ReputationChangeSource;
 import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 
@@ -32,6 +36,7 @@ public final class RepService {
     private final CommendPlugin plugin;
     private final Runnable dirtyMarker;
     private final Consumer<UUID> scoreChangeListener;
+    private final ReputationAnalyticsService analyticsService;
 
     private RepConfig repConfig;
 
@@ -48,12 +53,14 @@ public final class RepService {
             RepConfig repConfig,
             PluginDataSnapshot dataSnapshot,
             Runnable dirtyMarker,
-            Consumer<UUID> scoreChangeListener
+            Consumer<UUID> scoreChangeListener,
+            ReputationAnalyticsService analyticsService
     ) {
         this.plugin = plugin;
         this.repConfig = repConfig;
         this.dirtyMarker = dirtyMarker;
         this.scoreChangeListener = scoreChangeListener;
+        this.analyticsService = analyticsService;
         loadSnapshot(dataSnapshot);
     }
 
@@ -89,15 +96,25 @@ public final class RepService {
         commendations.sort(Comparator.comparingLong(Commendation::getCreatedAt));
 
         List<RemovedRep> removed = removedEntries.stream().map(RemovedRep::copy).toList();
-        return new PluginDataSnapshot(scores, commendations, removed, base.stalkEntries());
+        return new PluginDataSnapshot(scores, commendations, removed, base.stalkEntries(), base.reputationChanges());
     }
 
     public int getScore(UUID playerId) {
         return scoreByPlayer.getOrDefault(playerId, 0);
     }
 
+    public Map<UUID, Integer> getScoresSnapshot() {
+        return Map.copyOf(scoreByPlayer);
+    }
+
     public void setScore(UUID playerId, int score) {
         applyScore(playerId, score, true);
+    }
+
+    public void setScoreByStaff(UUID playerId, int score, CommandSender actor) {
+        int oldScore = getScore(playerId);
+        applyScore(playerId, score, true);
+        recordStaffChange(playerId, actor, score - oldScore, ReputationChangeAction.SET, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin set", oldScore, score);
     }
 
     public void adjustScore(UUID playerId, int delta) {
@@ -105,6 +122,16 @@ public final class RepService {
             return;
         }
         applyScore(playerId, getScore(playerId) + delta, true);
+    }
+
+    public void adjustScoreByStaff(UUID playerId, int delta, CommandSender actor) {
+        if (delta == 0) {
+            return;
+        }
+        int oldScore = getScore(playerId);
+        int newScore = oldScore + delta;
+        applyScore(playerId, newScore, true);
+        recordStaffChange(playerId, actor, delta, ReputationChangeAction.ADJUST, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin adjustment", oldScore, newScore);
     }
 
     private void applyScore(UUID playerId, int newScore, boolean emitEvent) {
@@ -164,7 +191,10 @@ public final class RepService {
 
             Commendation created = new Commendation(giverId, targetId, positive, category, reasonText, now, now, ipHash);
             cacheCommendation(created, true);
-            applyScore(targetId, getScore(targetId) + (positive ? 1 : -1), true);
+            int oldScore = getScore(targetId);
+            int delta = positive ? 1 : -1;
+            applyScore(targetId, oldScore + delta, true);
+            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.ADD, category, reasonText, oldScore, oldScore + delta);
             logAltRecord(ipHash, giverId, targetId, positive, now);
             removalCooldowns.remove(key(giverId, targetId));
             dirtyMarker.run();
@@ -183,13 +213,15 @@ public final class RepService {
         if (existing.isPositive() != positive) {
             delta = positive ? 2 : -2;
         }
+        int oldScore = getScore(targetId);
         existing.setPositive(positive);
         existing.setCategory(category);
         existing.setReasonText(reasonText);
         existing.setLastEditedAt(now);
         existing.setIpHash(ipHash);
         if (delta != 0) {
-            applyScore(targetId, getScore(targetId) + delta, true);
+            applyScore(targetId, oldScore + delta, true);
+            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE, category, reasonText, oldScore, oldScore + delta);
         }
         logAltRecord(ipHash, giverId, targetId, positive, now);
         removalCooldowns.remove(key(giverId, targetId));
@@ -233,7 +265,9 @@ public final class RepService {
             }
         }
 
-        applyScore(targetId, getScore(targetId) + (existing.isPositive() ? -1 : 1), true);
+        int oldScore = getScore(targetId);
+        int delta = existing.isPositive() ? -1 : 1;
+        applyScore(targetId, oldScore + delta, true);
         if (applyCooldown) {
             removalCooldowns.put(key(giverId, targetId), System.currentTimeMillis());
         } else {
@@ -245,6 +279,10 @@ public final class RepService {
             removedRep = new RemovedRep(nextRemovalId(), cloneCommendation(existing), System.currentTimeMillis(), removerId);
             removedEntries.add(removedRep);
         }
+
+        ReputationChangeSource source = logRemoval ? ReputationChangeSource.STAFF_GUI : ReputationChangeSource.PLAYER_ACTION;
+        UUID actorId = logRemoval ? removerId : giverId;
+        recordChange(targetId, actorId, delta, ReputationChangeAction.REMOVE, source, existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
 
         dirtyMarker.run();
         return removedRep;
@@ -276,6 +314,13 @@ public final class RepService {
         for (Commendation commendation : current) {
             removeCommendationLogged(null, commendation.getGiver(), targetId, false);
         }
+    }
+
+    public void resetAllByStaff(UUID targetId, CommandSender actor) {
+        int oldScore = getScore(targetId);
+        resetAll(targetId);
+        int newScore = getScore(targetId);
+        recordStaffChange(targetId, actor, newScore - oldScore, ReputationChangeAction.RESET, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin reset", oldScore, newScore);
     }
 
     public String hashIp(String ipAddress) {
@@ -322,6 +367,10 @@ public final class RepService {
     }
 
     public boolean restoreRemoved(String id) {
+        return restoreRemoved(id, null);
+    }
+
+    public boolean restoreRemoved(String id, CommandSender actor) {
         if (id == null || id.isBlank()) {
             return false;
         }
@@ -339,11 +388,41 @@ public final class RepService {
         }
 
         cacheCommendation(cloneCommendation(commendation), true);
-        applyScore(commendation.getTarget(), getScore(commendation.getTarget()) + (commendation.isPositive() ? 1 : -1), true);
+        int oldScore = getScore(commendation.getTarget());
+        int delta = commendation.isPositive() ? 1 : -1;
+        applyScore(commendation.getTarget(), oldScore + delta, true);
         removalCooldowns.remove(key(commendation.getGiver(), commendation.getTarget()));
         removedEntries.remove(removed);
+        if (actor != null) {
+            recordStaffChange(commendation.getTarget(), actor, delta, ReputationChangeAction.RESTORE, ReputationChangeSource.STAFF_COMMAND, commendation.getCategory(), commendation.getReasonText(), oldScore, oldScore + delta);
+        } else {
+            recordChange(commendation.getTarget(), commendation.getGiver(), delta, ReputationChangeAction.RESTORE, ReputationChangeSource.SYSTEM, commendation.getCategory(), commendation.getReasonText(), oldScore, oldScore + delta);
+        }
         dirtyMarker.run();
         return true;
+    }
+
+    private void recordPlayerChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action, RepCategory category, String reason, int oldScore, int newScore) {
+        if (analyticsService != null) {
+            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
+        }
+    }
+
+    private void recordStaffChange(UUID targetId, CommandSender actor, int delta, ReputationChangeAction action, ReputationChangeSource source, RepCategory category, String reason, int oldScore, int newScore) {
+        if (analyticsService != null) {
+            analyticsService.recordStaffChange(targetId, actor, delta, action, source, category, reason, oldScore, newScore);
+        }
+    }
+
+    private void recordChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action, ReputationChangeSource source, RepCategory category, String reason, int oldScore, int newScore) {
+        if (analyticsService == null) {
+            return;
+        }
+        if (source == ReputationChangeSource.PLAYER_ACTION) {
+            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
+            return;
+        }
+        analyticsService.recordChange(targetId, actorId, null, delta, action, source, category, reason, oldScore, newScore);
     }
 
     private void cacheCommendation(Commendation commendation, boolean replaceExisting) {

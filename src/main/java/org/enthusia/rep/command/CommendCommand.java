@@ -283,7 +283,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.RED + "Score must be a whole number.");
                 return;
             }
-            repService.setScore(target.getUniqueId(), value);
+            repService.setScoreByStaff(target.getUniqueId(), value, sender);
             sender.sendMessage(ChatColor.GOLD + "Set rep of " + ChatColor.YELLOW + safeName(target)
                     + ChatColor.GOLD + " to " + plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId())));
             return;
@@ -295,7 +295,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.RED + "Delta must be a whole number.");
                 return;
             }
-            repService.adjustScore(target.getUniqueId(), value);
+            repService.adjustScoreByStaff(target.getUniqueId(), value, sender);
             sender.sendMessage(ChatColor.GOLD + "Adjusted rep of " + ChatColor.YELLOW + safeName(target)
                     + ChatColor.GOLD + " to " + plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId())));
             return;
@@ -312,7 +312,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         }
         if (sub.equals("reset") && args.length >= 3) {
             OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
-            repService.resetAll(target.getUniqueId());
+            repService.resetAllByStaff(target.getUniqueId(), sender);
             sender.sendMessage(plugin.getMessages().get("admin.reset", Map.of("target", safeName(target))));
             return;
         }
@@ -362,7 +362,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if ((sub.equals("restore") || sub.equals("undo")) && args.length >= 3) {
-            sender.sendMessage(repService.restoreRemoved(args[2])
+            sender.sendMessage(repService.restoreRemoved(args[2], sender)
                     ? ChatColor.GREEN + "Restored rep entry " + args[2] + "."
                     : ChatColor.RED + "Could not restore entry.");
             return;
