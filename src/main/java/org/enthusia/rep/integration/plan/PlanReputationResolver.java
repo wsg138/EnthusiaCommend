@@ -276,7 +276,7 @@ public final class PlanReputationResolver implements Resolver {
                         renderTable('recentChanges', [
                             {key: 'time', label: 'Time'},
                             {key: 'target', label: 'Target'},
-                            {key: 'actor', label: 'Actor/source'},
+                            {key: 'actor', label: 'Given by/source'},
                             {key: 'amount', label: 'Change'},
                             {key: 'reason', label: 'Reason'},
                             {key: 'oldTotal', label: 'Old'},
@@ -300,7 +300,7 @@ public final class PlanReputationResolver implements Resolver {
                         renderTable('staffActions', [
                             {key: 'time', label: 'Time'},
                             {key: 'target', label: 'Target'},
-                            {key: 'actor', label: 'Staff/source'},
+                            {key: 'actor', label: 'Changed by/source'},
                             {key: 'amount', label: 'Change'},
                             {key: 'reason', label: 'Reason'},
                             {key: 'action', label: 'Action'}

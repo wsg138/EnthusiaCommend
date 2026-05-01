@@ -12,11 +12,12 @@ import com.djrapitops.plan.extension.icon.Icon;
 import com.djrapitops.plan.extension.table.Table;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
-import org.enthusia.rep.analytics.ReputationChangeRecord;
+import org.enthusia.rep.rep.Commendation;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.UUID;
 
 @PluginInfo(
@@ -36,7 +37,7 @@ public final class PlanReputationDataExtension implements DataExtension {
 
     @Override
     public CallEvents[] callExtensionMethodsOn() {
-        return new CallEvents[]{CallEvents.PLAYER_JOIN, CallEvents.PLAYER_LEAVE, CallEvents.SERVER_PERIODICAL};
+        return new CallEvents[]{CallEvents.PLAYER_JOIN, CallEvents.PLAYER_LEAVE, CallEvents.SERVER_EXTENSION_REGISTER, CallEvents.SERVER_PERIODICAL};
     }
 
     @NumberProvider(
@@ -134,16 +135,19 @@ public final class PlanReputationDataExtension implements DataExtension {
     public Table recentPlayerHistory(UUID playerId) {
         Table.Factory table = Table.builder()
                 .columnOne("Time", new Icon(Family.SOLID, "clock", Color.GREY))
-                .columnTwo("Actor", new Icon(Family.SOLID, "user", Color.LIGHT_BLUE))
+                .columnTwo("Given by", new Icon(Family.SOLID, "user", Color.LIGHT_BLUE))
                 .columnThree("Change", new Icon(Family.SOLID, "plus-minus", Color.AMBER))
                 .columnFour("Reason", new Icon(Family.SOLID, "message", Color.GREY));
 
-        for (ReputationChangeRecord change : plugin.getAnalyticsService().playerHistory(playerId, 10)) {
+        for (Commendation commendation : plugin.getRepService().getCommendationsAbout(playerId).stream()
+                .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
+                .limit(10)
+                .toList()) {
             table.addRow(
-                    dateFormatter.format(Instant.ofEpochMilli(change.timestamp())),
-                    plugin.getAnalyticsService().actorName(change),
-                    signed(change.amount()) + " (" + change.oldTotal() + " -> " + change.newTotal() + ")",
-                    change.reason()
+                    dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
+                    plugin.getAnalyticsService().nameOf(commendation.getGiver()),
+                    commendation.isPositive() ? "+1" : "-1",
+                    commendation.getReasonText()
             );
         }
         return table.build();
@@ -155,23 +159,20 @@ public final class PlanReputationDataExtension implements DataExtension {
         Table.Factory table = Table.builder()
                 .columnOne("Time", new Icon(Family.SOLID, "clock", Color.GREY))
                 .columnTwo("Target", new Icon(Family.SOLID, "user", Color.LIGHT_BLUE))
-                .columnThree("Actor", new Icon(Family.SOLID, "user-pen", Color.LIGHT_BLUE))
+                .columnThree("Given by", new Icon(Family.SOLID, "user-pen", Color.LIGHT_BLUE))
                 .columnFour("Change", new Icon(Family.SOLID, "plus-minus", Color.AMBER))
                 .columnFive("Reason", new Icon(Family.SOLID, "message", Color.GREY));
 
-        for (ReputationChangeRecord change : plugin.getAnalyticsService().recentChanges(10)) {
+        for (Commendation commendation : plugin.getRepService().recentCommendations(10)) {
             table.addRow(
-                    dateFormatter.format(Instant.ofEpochMilli(change.timestamp())),
-                    plugin.getAnalyticsService().nameOf(change.targetId()),
-                    plugin.getAnalyticsService().actorName(change),
-                    signed(change.amount()) + " (" + change.oldTotal() + " -> " + change.newTotal() + ")",
-                    change.reason()
+                    dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
+                    plugin.getAnalyticsService().nameOf(commendation.getTarget()),
+                    plugin.getAnalyticsService().nameOf(commendation.getGiver()),
+                    commendation.isPositive() ? "+1" : "-1",
+                    commendation.getReasonText()
             );
         }
         return table.build();
     }
 
-    private String signed(int amount) {
-        return amount > 0 ? "+" + amount : String.valueOf(amount);
-    }
 }

@@ -156,6 +156,17 @@ public final class RepService {
         return commendations == null ? List.of() : List.copyOf(commendations);
     }
 
+    public List<Commendation> recentCommendations(int limit) {
+        List<Commendation> commendations = new ArrayList<>();
+        for (List<Commendation> entries : commendationsByTarget.values()) {
+            commendations.addAll(entries);
+        }
+        return commendations.stream()
+                .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
         Comparator<Map.Entry<UUID, Integer>> comparator = Map.Entry.comparingByValue();
         if (!lowest) {
