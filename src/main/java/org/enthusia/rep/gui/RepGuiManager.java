@@ -8,8 +8,10 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -250,7 +252,11 @@ public final class RepGuiManager implements Listener {
         Inventory topInventory = event.getView().getTopInventory();
         if (topInventory == null || topInventory.getHolder() == null) {
             if (isActiveAnvilSession(player, event.getView())) {
-                event.setCancelled(true);
+                denyInventoryClick(event);
+                if (!isGuiButtonClick(event.getClick())) {
+                    Bukkit.getScheduler().runTask(plugin, player::updateInventory);
+                    return;
+                }
                 handleAnvilResultClick(player, event);
             }
             return;
@@ -258,13 +264,22 @@ public final class RepGuiManager implements Listener {
         InventoryHolder holder = topInventory.getHolder();
         if (!(holder instanceof HolderMarker)) {
             if (isActiveAnvilSession(player, event.getView())) {
-                event.setCancelled(true);
+                denyInventoryClick(event);
+                if (!isGuiButtonClick(event.getClick())) {
+                    Bukkit.getScheduler().runTask(plugin, player::updateInventory);
+                    return;
+                }
                 handleAnvilResultClick(player, event);
             }
             return;
         }
 
-        event.setCancelled(true);
+        denyInventoryClick(event);
+
+        if (!isGuiButtonClick(event.getClick())) {
+            Bukkit.getScheduler().runTask(plugin, player::updateInventory);
+            return;
+        }
 
         if (holder instanceof ProfileHolder profile) {
             handleProfileClick(player, profile, event);
@@ -291,6 +306,15 @@ public final class RepGuiManager implements Listener {
                 || (event.getWhoClicked() instanceof Player player && isActiveAnvilSession(player, event.getView()))) {
             event.setCancelled(true);
         }
+    }
+
+    private void denyInventoryClick(InventoryClickEvent event) {
+        event.setCancelled(true);
+        event.setResult(Event.Result.DENY);
+    }
+
+    private boolean isGuiButtonClick(ClickType clickType) {
+        return clickType == ClickType.LEFT || clickType == ClickType.RIGHT;
     }
 
     @EventHandler
