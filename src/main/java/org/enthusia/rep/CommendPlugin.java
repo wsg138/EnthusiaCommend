@@ -207,9 +207,16 @@ public final class CommendPlugin extends JavaPlugin {
     }
 
     private void registerPlaceholderExpansion() {
-        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new RepPlaceholderExpansion(this).register();
+        if (!Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            getLogger().info("PlaceholderAPI is not enabled; skipping EnthusiaCommend placeholder registration.");
+            return;
         }
+        RepPlaceholderExpansion expansion = new RepPlaceholderExpansion(this);
+        if (!expansion.register()) {
+            getLogger().warning("Failed to register EnthusiaCommend PlaceholderAPI expansion.");
+            return;
+        }
+        getLogger().info("Registered EnthusiaCommend PlaceholderAPI expansion (%enthusiarep_*%).");
     }
 
     private void setupEconomy() {
