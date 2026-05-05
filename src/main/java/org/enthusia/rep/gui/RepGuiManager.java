@@ -6,6 +6,7 @@ import net.md_5.bungee.api.chat.HoverEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -66,6 +67,7 @@ public final class RepGuiManager implements Listener {
     private final RepService repService;
     private final RepEffectManager effectManager;
     private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private final NamespacedKey anvilGuiItemKey;
 
     private final Map<UUID, PendingTextInput> pendingChatInputs = new HashMap<>();
     private final Map<UUID, Integer> pendingChatTimeoutTasks = new HashMap<>();
@@ -79,6 +81,7 @@ public final class RepGuiManager implements Listener {
         this.plugin = plugin;
         this.repService = repService;
         this.effectManager = effectManager;
+        this.anvilGuiItemKey = new NamespacedKey(plugin, "rep-anvil-gui-item");
     }
 
     public void shutdown() {
@@ -253,6 +256,7 @@ public final class RepGuiManager implements Listener {
         if (topInventory == null || topInventory.getHolder() == null) {
             if (isActiveAnvilSession(player, event.getView())) {
                 denyInventoryClick(event);
+                scheduleAnvilCleanup(player);
                 if (!isGuiButtonClick(event.getClick())) {
                     Bukkit.getScheduler().runTask(plugin, player::updateInventory);
                     return;
@@ -265,6 +269,7 @@ public final class RepGuiManager implements Listener {
         if (!(holder instanceof HolderMarker)) {
             if (isActiveAnvilSession(player, event.getView())) {
                 denyInventoryClick(event);
+                scheduleAnvilCleanup(player);
                 if (!isGuiButtonClick(event.getClick())) {
                     Bukkit.getScheduler().runTask(plugin, player::updateInventory);
                     return;
@@ -305,6 +310,9 @@ public final class RepGuiManager implements Listener {
         if (event.getView().getTopInventory().getHolder() instanceof HolderMarker
                 || (event.getWhoClicked() instanceof Player player && isActiveAnvilSession(player, event.getView()))) {
             event.setCancelled(true);
+            if (event.getWhoClicked() instanceof Player player) {
+                scheduleAnvilCleanup(player);
+            }
         }
     }
 
@@ -334,7 +342,7 @@ public final class RepGuiManager implements Listener {
             event.setResult(null);
             return;
         }
-        event.setResult(simpleButton(materialFor(session.category().isPositive()), ChatColor.YELLOW + normalized, List.of(ChatColor.GRAY + "Click to continue")));
+        event.setResult(anvilGuiItem(materialFor(session.category().isPositive()), ChatColor.YELLOW + normalized, List.of(ChatColor.GRAY + "Click to continue")));
     }
 
     @EventHandler
@@ -345,10 +353,12 @@ public final class RepGuiManager implements Listener {
         if (pendingAnvils.containsKey(player.getUniqueId()) && event.getInventory().getType() == org.bukkit.event.inventory.InventoryType.ANVIL) {
             UUID playerId = player.getUniqueId();
             if (transitioningAnvil.remove(playerId)) {
+                purgeAnvilGuiItems(player);
                 return;
             }
             pendingAnvils.remove(playerId);
             liveAnvilText.remove(playerId);
+            Bukkit.getScheduler().runTask(plugin, () -> purgeAnvilGuiItems(player));
         }
     }
 
@@ -408,6 +418,7 @@ public final class RepGuiManager implements Listener {
     public void onDrop(PlayerDropItemEvent event) {
         if (pendingAnvils.containsKey(event.getPlayer().getUniqueId())) {
             event.setCancelled(true);
+            scheduleAnvilCleanup(event.getPlayer());
         }
     }
 
@@ -415,6 +426,7 @@ public final class RepGuiManager implements Listener {
     public void onSwap(PlayerSwapHandItemsEvent event) {
         if (pendingAnvils.containsKey(event.getPlayer().getUniqueId())) {
             event.setCancelled(true);
+            scheduleAnvilCleanup(event.getPlayer());
         }
     }
 
@@ -422,6 +434,7 @@ public final class RepGuiManager implements Listener {
     public void onHeldSlotChange(PlayerItemHeldEvent event) {
         if (pendingAnvils.containsKey(event.getPlayer().getUniqueId())) {
             event.setCancelled(true);
+            scheduleAnvilCleanup(event.getPlayer());
         }
     }
 
@@ -625,6 +638,7 @@ public final class RepGuiManager implements Listener {
         pendingAnvils.remove(player.getUniqueId());
         liveAnvilText.remove(player.getUniqueId());
         player.closeInventory();
+        Bukkit.getScheduler().runTask(plugin, () -> purgeAnvilGuiItems(player));
         Bukkit.getScheduler().runTask(plugin,
                 () -> openConfirmReason(player, anvil.targetId(), anvil.category(), anvil.returnPage(), text));
     }
@@ -688,7 +702,7 @@ public final class RepGuiManager implements Listener {
             resetAnvilView(anvilView);
         }
         Inventory inventory = view.getTopInventory();
-        inventory.setItem(0, simpleButton(materialFor(category.isPositive()), ChatColor.WHITE + "Type here", List.of()));
+        inventory.setItem(0, anvilGuiItem(materialFor(category.isPositive()), ChatColor.WHITE + "Type here", List.of()));
         if (inventory instanceof AnvilInventory anvilInventory) {
             resetAnvilCosts(anvilInventory);
         }
@@ -973,6 +987,58 @@ public final class RepGuiManager implements Listener {
             item.setItemMeta(meta);
         }
         return item;
+    }
+
+    private ItemStack anvilGuiItem(Material material, String displayName, List<String> lore) {
+        ItemStack item = simpleButton(material, displayName, lore);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.getPersistentDataContainer().set(anvilGuiItemKey, PersistentDataType.BYTE, (byte) 1);
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private boolean isAnvilGuiItem(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) {
+            return false;
+        }
+        ItemMeta meta = item.getItemMeta();
+        return meta != null && meta.getPersistentDataContainer().has(anvilGuiItemKey, PersistentDataType.BYTE);
+    }
+
+    private void scheduleAnvilCleanup(Player player) {
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            purgeAnvilGuiItems(player);
+            restoreAnvilInput(player);
+            player.updateInventory();
+        });
+    }
+
+    private void restoreAnvilInput(Player player) {
+        AnvilSession session = pendingAnvils.get(player.getUniqueId());
+        if (session == null || !isActiveAnvilSession(player, player.getOpenInventory())) {
+            return;
+        }
+        Inventory inventory = player.getOpenInventory().getTopInventory();
+        if (!isAnvilGuiItem(inventory.getItem(0))) {
+            inventory.setItem(0, anvilGuiItem(materialFor(session.category().isPositive()), ChatColor.WHITE + "Type here", List.of()));
+        }
+        if (inventory instanceof AnvilInventory anvilInventory) {
+            resetAnvilCosts(anvilInventory);
+        }
+    }
+
+    private void purgeAnvilGuiItems(Player player) {
+        if (isAnvilGuiItem(player.getItemOnCursor())) {
+            player.setItemOnCursor(null);
+        }
+        Inventory inventory = player.getInventory();
+        for (int i = 0; i < inventory.getSize(); i++) {
+            if (isAnvilGuiItem(inventory.getItem(i))) {
+                inventory.clear(i);
+            }
+        }
     }
 
     private List<String> buildGiveLore(Commendation existing, boolean positiveButton, long cooldownMillis) {
