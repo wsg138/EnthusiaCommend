@@ -17,12 +17,12 @@ Code:
 package org.enthusia.rep.gui;
 
 import org.bukkit.Material;
+import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.enthusia.rep.CommendPlugin;
-import org.enthusia.rep.skin.SkinCache;
 
 import java.util.UUID;
 
@@ -35,13 +35,13 @@ public final class HeadUtil {
     }
 
     public static ItemStack createPlayerHead(CommendPlugin plugin, UUID uuid, String displayName) {
-        SkinCache cache = plugin.getSkinCache();
-        ItemStack head = (cache != null)
-                ? cache.createHead(uuid, displayName)
-                : new ItemStack(Material.PLAYER_HEAD);
-
+        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         SkullMeta meta = (SkullMeta) head.getItemMeta();
         if (meta != null) {
+            meta.setOwningPlayer(Bukkit.getOfflinePlayer(uuid));
+            if (displayName != null) {
+                meta.setDisplayName(displayName);
+            }
             NamespacedKey key = new NamespacedKey(plugin, "owner-uuid");
             meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, uuid.toString());
             head.setItemMeta(meta);
@@ -78,51 +78,15 @@ ItemStack item = removerId != null
 ItemStack item = HeadUtil.createPlayerHead(plugin, c.getTarget(), ChatColor.YELLOW + repService.nameOf(c.getTarget()));
 
 
-Supporting skin cache
----------------------
-File:
-src/main/java/org/enthusia/rep/skin/SkinCache.java
-
-Purpose:
-Caches player heads with baked skins so offline players still render correctly.
-
-Relevant code:
-
-public void cacheFromOnline(Player player) {
-    ItemStack head = new ItemStack(Material.PLAYER_HEAD);
-    SkullMeta meta = (SkullMeta) head.getItemMeta();
-    meta.setOwningPlayer(player);
-    head.setItemMeta(meta);
-
-    cache.put(player.getUniqueId(), head);
-}
-
-public ItemStack createHead(UUID uuid, String displayName) {
-    ItemStack head = cache.get(uuid);
-
-    if (head != null && head.getType() == Material.PLAYER_HEAD) {
-        head = head.clone(); // don't mutate cached
-    } else {
-        head = new ItemStack(Material.PLAYER_HEAD);
-        SkullMeta meta = (SkullMeta) head.getItemMeta();
-        OfflinePlayer offline = Bukkit.getOfflinePlayer(uuid);
-        meta.setOwningPlayer(offline);
-        head.setItemMeta(meta);
-    }
-
-    if (displayName != null) {
-        SkullMeta meta = (SkullMeta) head.getItemMeta();
-        meta.setDisplayName(displayName);
-        head.setItemMeta(meta);
-    }
-
-    return head;
-}
+Skin handling
+-------------
+The public plugin source does not include a separate skin cache package. HeadUtil
+uses Bukkit's OfflinePlayer-backed SkullMeta owner support directly, which keeps
+the repo buildable without relying on ignored local sources.
 
 
 Summary
 -------
 If you want to reuse this in another plugin, the main code to copy is:
 1. HeadUtil.createPlayerHead(...)
-2. SkinCache.createHead(...) if you also want offline-player skins to render well
-3. The PersistentDataContainer "owner-uuid" write if you need to track ownership
+2. The PersistentDataContainer "owner-uuid" write if you need to track ownership

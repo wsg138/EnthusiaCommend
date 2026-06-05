@@ -22,8 +22,6 @@ import org.enthusia.rep.placeholder.RepPlaceholderExpansion;
 import org.enthusia.rep.playtime.PlaytimeService;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
-import org.enthusia.rep.skin.SkinCache;
-import org.enthusia.rep.skin.SkinListener;
 import org.enthusia.rep.stalk.StalkManager;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 import org.enthusia.rep.storage.PluginDataStore;
@@ -48,7 +46,6 @@ public final class CommendPlugin extends JavaPlugin {
     private TeleportIntegration teleportIntegration;
     private WarzoneDuelsHook warzoneDuelsHook;
     private PlanIntegrationBootstrap planIntegration;
-    private SkinCache skinCache;
     private Economy economy;
     private PluginDataStore dataStore;
     private BukkitTask autoSaveTask;
@@ -99,10 +96,6 @@ public final class CommendPlugin extends JavaPlugin {
         return warzoneDuelsHook;
     }
 
-    public SkinCache getSkinCache() {
-        return skinCache;
-    }
-
     public Economy getEconomy() {
         return economy;
     }
@@ -128,11 +121,8 @@ public final class CommendPlugin extends JavaPlugin {
         this.warzoneDuelsHook.refresh();
         this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService, warzoneDuelsHook);
         this.teleportIntegration = new TeleportIntegration(this, repService);
-        this.skinCache = new SkinCache(this);
-        this.skinCache.load();
         this.repGuiManager = new RepGuiManager(this, repService, effectManager);
 
-        getServer().getPluginManager().registerEvents(new SkinListener(skinCache), this);
         getServer().getPluginManager().registerEvents(stalkManager, this);
         getServer().getPluginManager().registerEvents(repGuiManager, this);
         effectManager.register(getServer().getPluginManager());
@@ -169,9 +159,6 @@ public final class CommendPlugin extends JavaPlugin {
             planIntegration.shutdown();
         }
         flushDataSync();
-        if (skinCache != null) {
-            skinCache.save();
-        }
     }
 
     public void reloadPluginConfig() {
