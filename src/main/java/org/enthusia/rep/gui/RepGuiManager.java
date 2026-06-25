@@ -40,9 +40,9 @@ import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.rep.Commendation;
 import org.enthusia.rep.rep.RepCategory;
 import org.enthusia.rep.rep.RepService;
+import org.enthusia.rep.util.RepDateFormats;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public final class RepGuiManager implements Listener {
@@ -66,15 +67,15 @@ public final class RepGuiManager implements Listener {
     private final CommendPlugin plugin;
     private final RepService repService;
     private final RepEffectManager effectManager;
-    private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private final DateTimeFormatter dateFormatter = RepDateFormats.dateTimeMinute();
     private final NamespacedKey anvilGuiItemKey;
 
-    private final Map<UUID, PendingTextInput> pendingChatInputs = new HashMap<>();
-    private final Map<UUID, Integer> pendingChatTimeoutTasks = new HashMap<>();
-    private final Map<UUID, AnvilSession> pendingAnvils = new HashMap<>();
-    private final Map<UUID, DraftReason> pendingDrafts = new HashMap<>();
-    private final Map<UUID, ProfileContext> returnFromBook = new HashMap<>();
-    private final Map<UUID, String> liveAnvilText = new HashMap<>();
+    private final Map<UUID, PendingTextInput> pendingChatInputs = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> pendingChatTimeoutTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, AnvilSession> pendingAnvils = new ConcurrentHashMap<>();
+    private final Map<UUID, DraftReason> pendingDrafts = new ConcurrentHashMap<>();
+    private final Map<UUID, ProfileContext> returnFromBook = new ConcurrentHashMap<>();
+    private final Map<UUID, String> liveAnvilText = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> transitioningAnvil = new java.util.HashSet<>();
 
     public RepGuiManager(CommendPlugin plugin, RepService repService, RepEffectManager effectManager) {

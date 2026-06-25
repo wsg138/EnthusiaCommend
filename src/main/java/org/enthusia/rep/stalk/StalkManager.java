@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class StalkManager implements Listener {
 
@@ -27,8 +28,8 @@ public final class StalkManager implements Listener {
 
     private RepConfig config;
 
-    private final Map<UUID, Map<UUID, Long>> subscriptionsByTarget = new HashMap<>();
-    private final Map<UUID, RegionManager.ZoneType> lastKnownZones = new HashMap<>();
+    private final Map<UUID, Map<UUID, Long>> subscriptionsByTarget = new ConcurrentHashMap<>();
+    private final Map<UUID, RegionManager.ZoneType> lastKnownZones = new ConcurrentHashMap<>();
 
     public StalkManager(RegionManager regionManager, RepService repService, RepConfig config, Runnable dirtyMarker) {
         this.regionManager = regionManager;
@@ -45,7 +46,7 @@ public final class StalkManager implements Listener {
                 continue;
             }
             subscriptionsByTarget
-                    .computeIfAbsent(entry.targetId(), ignored -> new HashMap<>())
+                    .computeIfAbsent(entry.targetId(), ignored -> new ConcurrentHashMap<>())
                     .put(entry.stalkerId(), entry.expiresAt());
         }
     }
@@ -69,7 +70,7 @@ public final class StalkManager implements Listener {
 
     public void addSubscription(UUID stalkerId, UUID targetId, long durationMillis) {
         long expiresAt = System.currentTimeMillis() + durationMillis;
-        subscriptionsByTarget.computeIfAbsent(targetId, ignored -> new HashMap<>()).put(stalkerId, expiresAt);
+        subscriptionsByTarget.computeIfAbsent(targetId, ignored -> new ConcurrentHashMap<>()).put(stalkerId, expiresAt);
         dirtyMarker.run();
     }
 

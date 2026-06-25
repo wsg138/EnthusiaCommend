@@ -13,9 +13,9 @@ import com.djrapitops.plan.extension.table.Table;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
 import org.enthusia.rep.rep.Commendation;
+import org.enthusia.rep.util.RepDateFormats;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.UUID;
@@ -29,7 +29,7 @@ import java.util.UUID;
 public final class PlanReputationDataExtension implements DataExtension {
 
     private final CommendPlugin plugin;
-    private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private final DateTimeFormatter dateFormatter = RepDateFormats.dateTimeMinute();
 
     public PlanReputationDataExtension(CommendPlugin plugin) {
         this.plugin = plugin;

@@ -13,9 +13,9 @@ import org.enthusia.rep.rep.Commendation;
 import org.enthusia.rep.rep.RepCategory;
 import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.stalk.StalkSubscription;
+import org.enthusia.rep.util.RepDateFormats;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -30,7 +30,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
 
     private final CommendPlugin plugin;
     private final RepService repService;
-    private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private final DateTimeFormatter dateFormatter = RepDateFormats.dateTimeMinute();
 
     public CommendCommand(CommendPlugin plugin, RepService repService) {
         this.plugin = plugin;

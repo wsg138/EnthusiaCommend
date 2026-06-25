@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public final class RepService {
@@ -40,11 +41,11 @@ public final class RepService {
 
     private RepConfig repConfig;
 
-    private final Map<UUID, Integer> scoreByPlayer = new HashMap<>();
-    private final Map<UUID, List<Commendation>> commendationsByTarget = new HashMap<>();
-    private final Map<UUID, Map<UUID, Commendation>> commendationsByGiver = new HashMap<>();
-    private final Map<String, Long> removalCooldowns = new HashMap<>();
-    private final Map<String, List<AltRepRecord>> altRecordsByHash = new HashMap<>();
+    private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
+    private final Map<UUID, List<Commendation>> commendationsByTarget = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<UUID, Commendation>> commendationsByGiver = new ConcurrentHashMap<>();
+    private final Map<String, Long> removalCooldowns = new ConcurrentHashMap<>();
+    private final Map<String, List<AltRepRecord>> altRecordsByHash = new ConcurrentHashMap<>();
     private final List<SuspiciousRepCase> suspiciousCases = new ArrayList<>();
     private final List<RemovedRep> removedEntries = new ArrayList<>();
 
@@ -365,7 +366,7 @@ public final class RepService {
     public boolean resolveCase(UUID targetId, String ipHash) {
         boolean changed = false;
         for (SuspiciousRepCase entry : suspiciousCases) {
-            if (entry.targetId.equals(targetId) && entry.ipHash.equalsIgnoreCase(ipHash) && !entry.resolved) {
+            if (entry.targetId.equals(targetId) && entry.sourceIpHash.equalsIgnoreCase(ipHash) && !entry.resolved) {
                 entry.resolved = true;
                 changed = true;
             }
@@ -386,14 +387,14 @@ public final class RepService {
             return false;
         }
         RemovedRep removed = removedEntries.stream()
-                .filter(entry -> id.equalsIgnoreCase(entry.id))
+                .filter(entry -> id.equalsIgnoreCase(entry.removalId))
                 .findFirst()
                 .orElse(null);
         if (removed == null) {
             return false;
         }
 
-        Commendation commendation = removed.commendation;
+        Commendation commendation = removed.removedCommendation;
         if (getCommendation(commendation.getGiver(), commendation.getTarget()) != null) {
             return false;
         }
@@ -438,7 +439,7 @@ public final class RepService {
 
     private void cacheCommendation(Commendation commendation, boolean replaceExisting) {
         commendationsByTarget.computeIfAbsent(commendation.getTarget(), ignored -> new ArrayList<>());
-        commendationsByGiver.computeIfAbsent(commendation.getGiver(), ignored -> new HashMap<>());
+        commendationsByGiver.computeIfAbsent(commendation.getGiver(), ignored -> new ConcurrentHashMap<>());
 
         if (replaceExisting) {
             Commendation previous = commendationsByGiver.get(commendation.getGiver()).get(commendation.getTarget());
@@ -478,7 +479,7 @@ public final class RepService {
 
         if (givers.size() >= 2) {
             boolean duplicate = suspiciousCases.stream()
-                    .anyMatch(entry -> entry.targetId.equals(targetId) && entry.ipHash.equalsIgnoreCase(ipHash) && !entry.resolved);
+                    .anyMatch(entry -> entry.targetId.equals(targetId) && entry.sourceIpHash.equalsIgnoreCase(ipHash) && !entry.resolved);
             if (!duplicate) {
                 SuspiciousRepCase created = new SuspiciousRepCase(targetId, ipHash, new ArrayList<>(givers), timestamp, false);
                 suspiciousCases.add(created);
@@ -489,7 +490,7 @@ public final class RepService {
 
     private void notifyStaff(SuspiciousRepCase caseData) {
         String targetArg = resolveTargetArgument(caseData.targetId);
-        String inspectCommand = "/rep admin inspect " + targetArg + " " + caseData.ipHash;
+        String inspectCommand = "/rep admin inspect " + targetArg + " " + caseData.sourceIpHash;
 
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (!player.hasPermission("enthusiacommend.rep.alert")) {
@@ -497,7 +498,7 @@ public final class RepService {
             }
             ComponentBuilder builder = new ComponentBuilder("ALT REP ALERT: IP group ")
                     .color(net.md_5.bungee.api.ChatColor.RED)
-                    .append(caseData.ipHash)
+                    .append(caseData.sourceIpHash)
                     .color(net.md_5.bungee.api.ChatColor.YELLOW)
                     .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, inspectCommand))
                     .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
@@ -557,14 +558,14 @@ public final class RepService {
 
     public static final class SuspiciousRepCase {
         private final UUID targetId;
-        private final String ipHash;
+        private final String sourceIpHash;
         private final List<UUID> giverIds;
         private final long createdAt;
         private boolean resolved;
 
         public SuspiciousRepCase(UUID targetId, String ipHash, List<UUID> giverIds, long createdAt, boolean resolved) {
             this.targetId = targetId;
-            this.ipHash = ipHash;
+            this.sourceIpHash = ipHash;
             this.giverIds = List.copyOf(giverIds);
             this.createdAt = createdAt;
             this.resolved = resolved;
@@ -575,7 +576,7 @@ public final class RepService {
         }
 
         public String ipHash() {
-            return ipHash;
+            return sourceIpHash;
         }
 
         public List<UUID> givers() {
@@ -606,40 +607,40 @@ public final class RepService {
     }
 
     public static final class RemovedRep {
-        private final String id;
-        private final Commendation commendation;
-        private final long removedAt;
-        private final UUID removedBy;
+        private final String removalId;
+        private final Commendation removedCommendation;
+        private final long removedAtMillis;
+        private final UUID removerId;
 
         public RemovedRep(String id, Commendation commendation, long removedAt, UUID removedBy) {
-            this.id = id;
-            this.commendation = commendation;
-            this.removedAt = removedAt;
-            this.removedBy = removedBy;
+            this.removalId = id;
+            this.removedCommendation = commendation;
+            this.removedAtMillis = removedAt;
+            this.removerId = removedBy;
         }
 
         public String id() {
-            return id;
+            return removalId;
         }
 
         public Commendation commendation() {
-            return commendation;
+            return removedCommendation;
         }
 
         public long removedAt() {
-            return removedAt;
+            return removedAtMillis;
         }
 
         public UUID removedBy() {
-            return removedBy;
+            return removerId;
         }
 
         public Map<String, Object> serialize() {
-            Map<String, Object> map = new LinkedHashMap<>(commendation.serialize());
-            map.put("id", id);
-            map.put("removedAt", removedAt);
-            if (removedBy != null) {
-                map.put("removedBy", removedBy.toString());
+            Map<String, Object> map = new LinkedHashMap<>(removedCommendation.serialize());
+            map.put("id", removalId);
+            map.put("removedAt", removedAtMillis);
+            if (removerId != null) {
+                map.put("removedBy", removerId.toString());
             }
             return map;
         }
@@ -670,16 +671,16 @@ public final class RepService {
         }
 
         public RemovedRep copy() {
-            return new RemovedRep(id, new Commendation(
-                    commendation.getGiver(),
-                    commendation.getTarget(),
-                    commendation.isPositive(),
-                    commendation.getCategory(),
-                    commendation.getReasonText(),
-                    commendation.getCreatedAt(),
-                    commendation.getLastEditedAt(),
-                    commendation.getIpHash()
-            ), removedAt, removedBy);
+            return new RemovedRep(removalId, new Commendation(
+                    removedCommendation.getGiver(),
+                    removedCommendation.getTarget(),
+                    removedCommendation.isPositive(),
+                    removedCommendation.getCategory(),
+                    removedCommendation.getReasonText(),
+                    removedCommendation.getCreatedAt(),
+                    removedCommendation.getLastEditedAt(),
+                    removedCommendation.getIpHash()
+            ), removedAtMillis, removerId);
         }
     }
 }

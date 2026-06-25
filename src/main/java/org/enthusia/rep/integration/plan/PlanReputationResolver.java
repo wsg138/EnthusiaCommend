@@ -9,9 +9,9 @@ import com.djrapitops.plan.delivery.web.resource.WebResource;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
 import org.enthusia.rep.analytics.ReputationChangeRecord;
+import org.enthusia.rep.util.RepDateFormats;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,7 +28,7 @@ public final class PlanReputationResolver implements Resolver {
 
     private final CommendPlugin plugin;
     private final ResourceService resourceService;
-    private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private final DateTimeFormatter dateFormatter = RepDateFormats.dateTimeMinute();
 
     public PlanReputationResolver(CommendPlugin plugin, ResourceService resourceService) {
         this.plugin = plugin;

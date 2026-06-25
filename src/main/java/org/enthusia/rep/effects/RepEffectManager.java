@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RepEffectManager implements Listener {
 
@@ -52,12 +53,12 @@ public final class RepEffectManager implements Listener {
 
     private RepConfig config;
 
-    private final Map<UUID, RepAppliedEffects> currentEffects = new HashMap<>();
-    private final Map<UUID, Integer> appliedMovementPercents = new HashMap<>();
-    private final Map<UUID, GlowState> glowStates = new HashMap<>();
-    private final Map<UUID, Long> lastPearlMessageAt = new HashMap<>();
-    private final Map<UUID, Long> lastWindMessageAt = new HashMap<>();
-    private final Map<UUID, Long> lastRocketUseAt = new HashMap<>();
+    private final Map<UUID, RepAppliedEffects> currentEffects = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> appliedMovementPercents = new ConcurrentHashMap<>();
+    private final Map<UUID, GlowState> glowStates = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastPearlMessageAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastWindMessageAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastRocketUseAt = new ConcurrentHashMap<>();
 
     public RepEffectManager(
             CommendPlugin plugin,
