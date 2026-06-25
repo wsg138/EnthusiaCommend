@@ -13,6 +13,15 @@ import java.lang.reflect.Method;
 import java.util.UUID;
 
 public final class TeleportIntegration implements Listener {
+    private static final int STRONG_POSITIVE_WARMUP_SCORE = 15;
+    private static final int POSITIVE_WARMUP_SCORE = 5;
+    private static final int SEVERE_NEGATIVE_WARMUP_SCORE = -25;
+    private static final int STRONG_NEGATIVE_WARMUP_SCORE = -15;
+    private static final int NEGATIVE_WARMUP_SCORE = -10;
+    private static final int BEST_COOLDOWN_SCORE = 20;
+    private static final int STRONG_COOLDOWN_SCORE = 15;
+    private static final int MEDIUM_COOLDOWN_SCORE = 10;
+    private static final int POSITIVE_COOLDOWN_SCORE = 5;
 
     private final CommendPlugin plugin;
     private final RepService repService;
@@ -143,19 +152,19 @@ public final class TeleportIntegration implements Listener {
     }
 
     private double computeWarmupModifier(int score) {
-        if (score >= 15) return 0.5D;
-        if (score >= 5) return 0.8D;
-        if (score <= -25) return 2.0D;
-        if (score <= -15) return 1.6D;
-        if (score <= -10) return 1.4D;
+        if (score >= STRONG_POSITIVE_WARMUP_SCORE) return 0.5D;
+        if (score >= POSITIVE_WARMUP_SCORE) return 0.8D;
+        if (score <= SEVERE_NEGATIVE_WARMUP_SCORE) return 2.0D;
+        if (score <= STRONG_NEGATIVE_WARMUP_SCORE) return 1.6D;
+        if (score <= NEGATIVE_WARMUP_SCORE) return 1.4D;
         return 1.0D;
     }
 
     private double computeCooldownModifier(int score) {
-        if (score >= 20) return 0.5D;
-        if (score >= 15) return 40.0D / 60.0D;
-        if (score >= 10) return 45.0D / 60.0D;
-        if (score >= 5) return 50.0D / 60.0D;
+        if (score >= BEST_COOLDOWN_SCORE) return 0.5D;
+        if (score >= STRONG_COOLDOWN_SCORE) return 40.0D / 60.0D;
+        if (score >= MEDIUM_COOLDOWN_SCORE) return 45.0D / 60.0D;
+        if (score >= POSITIVE_COOLDOWN_SCORE) return 50.0D / 60.0D;
         return 1.0D;
     }
 }
