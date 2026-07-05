@@ -1142,34 +1142,34 @@ public final class RepGuiManager implements Listener {
     private void resetAnvilCosts(AnvilInventory inventory) {
         try {
             inventory.setRepairCost(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
         try {
             inventory.setRepairCostAmount(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
         try {
             inventory.setMaximumRepairCost(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
     }
 
     private void resetAnvilView(AnvilView anvilView) {
         try {
             anvilView.setRepairCost(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
         try {
             anvilView.setRepairItemCountCost(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
         try {
             anvilView.setMaximumRepairCost(0);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
         try {
             anvilView.bypassEnchantmentLevelRestriction(true);
-        } catch (Throwable ignored) {
+        } catch (RuntimeException ignored) {
         }
     }
 
