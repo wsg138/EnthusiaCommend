@@ -47,6 +47,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -63,6 +64,13 @@ public final class RepGuiManager implements Listener {
             28, 29, 30, 31, 32, 33, 34,
             37, 38, 39, 40, 41, 42, 43
     );
+    private static final String CATEGORY_LABEL = "Category: ";
+    private static final int PREVIOUS_PAGE_SLOT = 45;
+    private static final int NEXT_PAGE_SLOT = 53;
+    private static final int POSITIVE_REP_SLOT = 48;
+    private static final int EFFECTS_OR_REMOVE_SLOT = 49;
+    private static final int NEGATIVE_REP_SLOT = 50;
+    private static final Map<RepCategory, String> CATEGORY_DISPLAY_NAMES = categoryDisplayNames();
 
     private final CommendPlugin plugin;
     private final RepService repService;
@@ -162,29 +170,29 @@ public final class RepGuiManager implements Listener {
         }
 
         if (resolvedPage > 0) {
-            inventory.setItem(45, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
+            inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
         }
         if (resolvedPage < maxPage) {
-            inventory.setItem(53, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
+            inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
         }
 
         if (viewer.getUniqueId().equals(targetId)) {
             RepAppliedEffects effects = effectManager.getCurrentEffects(targetId);
-            inventory.setItem(49, simpleButton(Material.BOOK, ChatColor.AQUA + "Your Rep Effects", buildCurrentEffectsLore(effects)));
-            inventory.setItem(48, simpleButton(Material.BARRIER, ChatColor.GRAY + "You cannot rep yourself", List.of()));
-            inventory.setItem(50, simpleButton(Material.BARRIER, ChatColor.GRAY + "You cannot rep yourself", List.of()));
+            inventory.setItem(EFFECTS_OR_REMOVE_SLOT, simpleButton(Material.BOOK, ChatColor.AQUA + "Your Rep Effects", buildCurrentEffectsLore(effects)));
+            inventory.setItem(POSITIVE_REP_SLOT, simpleButton(Material.BARRIER, ChatColor.GRAY + "You cannot rep yourself", List.of()));
+            inventory.setItem(NEGATIVE_REP_SLOT, simpleButton(Material.BARRIER, ChatColor.GRAY + "You cannot rep yourself", List.of()));
         } else {
             Commendation existing = repService.getCommendation(viewer.getUniqueId(), targetId);
             long remaining = cooldownRemaining(viewer.getUniqueId(), targetId, existing);
             if (remaining > 0L) {
-                inventory.setItem(48, simpleButton(Material.BARRIER, ChatColor.RED + "On cooldown", buildGiveLore(existing, true, remaining)));
-                inventory.setItem(50, simpleButton(Material.BARRIER, ChatColor.RED + "On cooldown", buildGiveLore(existing, false, remaining)));
+                inventory.setItem(POSITIVE_REP_SLOT, simpleButton(Material.BARRIER, ChatColor.RED + "On cooldown", buildGiveLore(existing, true, remaining)));
+                inventory.setItem(NEGATIVE_REP_SLOT, simpleButton(Material.BARRIER, ChatColor.RED + "On cooldown", buildGiveLore(existing, false, remaining)));
             } else {
-                inventory.setItem(48, simpleButton(Material.LIME_WOOL, ChatColor.GREEN + "Leave Positive", buildGiveLore(existing, true, 0L)));
-                inventory.setItem(50, simpleButton(Material.RED_WOOL, ChatColor.RED + "Leave Negative", buildGiveLore(existing, false, 0L)));
+                inventory.setItem(POSITIVE_REP_SLOT, simpleButton(Material.LIME_WOOL, ChatColor.GREEN + "Leave Positive", buildGiveLore(existing, true, 0L)));
+                inventory.setItem(NEGATIVE_REP_SLOT, simpleButton(Material.RED_WOOL, ChatColor.RED + "Leave Negative", buildGiveLore(existing, false, 0L)));
             }
             if (existing != null) {
-                inventory.setItem(49, simpleButton(Material.PAPER, ChatColor.YELLOW + "Remove my rep",
+                inventory.setItem(EFFECTS_OR_REMOVE_SLOT, simpleButton(Material.PAPER, ChatColor.YELLOW + "Remove my rep",
                         List.of(ChatColor.GRAY + "Click to remove your commendation", ChatColor.GRAY + "(applies cooldown)")));
             }
         }
@@ -255,28 +263,12 @@ public final class RepGuiManager implements Listener {
         }
         Inventory topInventory = event.getView().getTopInventory();
         if (topInventory == null || topInventory.getHolder() == null) {
-            if (isActiveAnvilSession(player, event.getView())) {
-                denyInventoryClick(event);
-                scheduleAnvilCleanup(player);
-                if (!isGuiButtonClick(event.getClick())) {
-                    Bukkit.getScheduler().runTask(plugin, player::updateInventory);
-                    return;
-                }
-                handleAnvilResultClick(player, event);
-            }
+            handleAnvilClickIfNeeded(player, event);
             return;
         }
         InventoryHolder holder = topInventory.getHolder();
         if (!(holder instanceof HolderMarker)) {
-            if (isActiveAnvilSession(player, event.getView())) {
-                denyInventoryClick(event);
-                scheduleAnvilCleanup(player);
-                if (!isGuiButtonClick(event.getClick())) {
-                    Bukkit.getScheduler().runTask(plugin, player::updateInventory);
-                    return;
-                }
-                handleAnvilResultClick(player, event);
-            }
+            handleAnvilClickIfNeeded(player, event);
             return;
         }
 
@@ -304,6 +296,19 @@ public final class RepGuiManager implements Listener {
         } else if (holder instanceof ConfirmRestoreHolder restore) {
             handleRestoreClick(player, restore, event.getRawSlot());
         }
+    }
+
+    private void handleAnvilClickIfNeeded(Player player, InventoryClickEvent event) {
+        if (!isActiveAnvilSession(player, event.getView())) {
+            return;
+        }
+        denyInventoryClick(event);
+        scheduleAnvilCleanup(player);
+        if (!isGuiButtonClick(event.getClick())) {
+            Bukkit.getScheduler().runTask(plugin, player::updateInventory);
+            return;
+        }
+        handleAnvilResultClick(player, event);
     }
 
     @EventHandler
@@ -458,26 +463,20 @@ public final class RepGuiManager implements Listener {
 
     private void handleProfileClick(Player player, ProfileHolder profile, InventoryClickEvent event) {
         int slot = event.getRawSlot();
-        if (slot == 45) {
+        if (slot == PREVIOUS_PAGE_SLOT) {
             openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page() - 1);
             return;
         }
-        if (slot == 53) {
+        if (slot == NEXT_PAGE_SLOT) {
             openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page() + 1);
             return;
         }
-        if ((slot == 48 || slot == 50) && !player.getUniqueId().equals(profile.targetId())) {
-            if (!canStartRep(player, profile.targetId())) {
-                return;
-            }
-            openReasonMenu(player, profile.targetId(), slot == 48, profile.page());
+        if (isRepButton(slot) && !player.getUniqueId().equals(profile.targetId())) {
+            handleProfileRepButton(player, profile, slot);
             return;
         }
-        if (slot == 49 && !player.getUniqueId().equals(profile.targetId())) {
-            Commendation existing = repService.getCommendation(player.getUniqueId(), profile.targetId());
-            if (existing != null) {
-                openRemovalConfirm(player, existing, profile.page(), true, false);
-            }
+        if (slot == EFFECTS_OR_REMOVE_SLOT && !player.getUniqueId().equals(profile.targetId())) {
+            handleOwnRepRemovalButton(player, profile);
             return;
         }
 
@@ -500,6 +499,24 @@ public final class RepGuiManager implements Listener {
         }
         returnFromBook.put(player.getUniqueId(), new ProfileContext(profile.targetId(), profile.page()));
         openReviewBook(player, selected);
+    }
+
+    private boolean isRepButton(int slot) {
+        return slot == POSITIVE_REP_SLOT || slot == NEGATIVE_REP_SLOT;
+    }
+
+    private void handleProfileRepButton(Player player, ProfileHolder profile, int slot) {
+        if (!canStartRep(player, profile.targetId())) {
+            return;
+        }
+        openReasonMenu(player, profile.targetId(), slot == POSITIVE_REP_SLOT, profile.page());
+    }
+
+    private void handleOwnRepRemovalButton(Player player, ProfileHolder profile) {
+        Commendation existing = repService.getCommendation(player.getUniqueId(), profile.targetId());
+        if (existing != null) {
+            openRemovalConfirm(player, existing, profile.page(), true, false);
+        }
     }
 
     private void handleReasonClick(Player player, ReasonHolder reason, int slot) {
@@ -776,7 +793,7 @@ public final class RepGuiManager implements Listener {
         inventory.setItem(13, simpleButton(Material.PAPER, ChatColor.YELLOW + "Rep from " + repService.nameOf(commendation.getGiver()),
                 List.of(
                         ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
-                        ChatColor.GRAY + "Category: " + ChatColor.WHITE + displayName(commendation.getCategory()),
+                        ChatColor.GRAY + CATEGORY_LABEL + ChatColor.WHITE + displayName(commendation.getCategory()),
                         ChatColor.GRAY + "Value: " + (commendation.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1")
                 )));
         inventory.setItem(15, simpleButton(Material.RED_CONCRETE, ChatColor.RED + "Cancel", List.of()));
@@ -1048,7 +1065,7 @@ public final class RepGuiManager implements Listener {
             lore.add(ChatColor.GRAY + "Leave a " + (positiveButton ? "positive" : "negative") + " commendation.");
         } else {
             lore.add(ChatColor.GRAY + "You already left " + (existing.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1") + ChatColor.GRAY + ".");
-            lore.add(ChatColor.GRAY + "Category: " + ChatColor.YELLOW + displayName(existing.getCategory()));
+            lore.add(ChatColor.GRAY + CATEGORY_LABEL + ChatColor.YELLOW + displayName(existing.getCategory()));
         }
         if (cooldownMillis > 0L) {
             long hours = (long) Math.ceil(cooldownMillis / 1000.0D / 3600.0D);
@@ -1062,16 +1079,41 @@ public final class RepGuiManager implements Listener {
     private List<String> buildCurrentEffectsLore(RepAppliedEffects effects) {
         List<String> lore = new ArrayList<>();
         lore.add(ChatColor.GRAY + "Active effects:");
-        if (effects.movementSpeedPercent() != 0) lore.add(ChatColor.WHITE + "Movement speed: " + ChatColor.YELLOW + percent(effects.movementSpeedPercent()));
-        if (effects.potionDurationPercent() != 0) lore.add(ChatColor.WHITE + "Potion duration: " + ChatColor.YELLOW + percent(effects.potionDurationPercent()));
-        if (effects.fireworkDurationPercent() != 0) lore.add(ChatColor.WHITE + "Rocket flight duration: " + ChatColor.YELLOW + percent(effects.fireworkDurationPercent()));
-        if (effects.pearlCooldownSeconds() > 0) lore.add(ChatColor.WHITE + "Ender pearl cooldown: " + ChatColor.YELLOW + effects.pearlCooldownSeconds() + "s");
-        if (effects.windCooldownSeconds() > 0) lore.add(ChatColor.WHITE + "Wind charge cooldown: " + ChatColor.YELLOW + effects.windCooldownSeconds() + "s");
-        if (effects.glow()) lore.add(ChatColor.WHITE + "Glow: " + ChatColor.YELLOW + (effects.glowColor() != null ? effects.glowColor().name() : "WHITE"));
-        if (effects.stalkable()) lore.add(ChatColor.WHITE + "Stalkable in warzone");
-        if (effects.cashbackPercent() > 0) lore.add(ChatColor.WHITE + "Cashback: " + ChatColor.YELLOW + effects.cashbackPercent() + "%");
-        if (lore.size() == 1) lore.add(ChatColor.GRAY + "You currently have no rep-based buffs or penalties.");
+        addPercentEffect(lore, "Movement speed", effects.movementSpeedPercent());
+        addPercentEffect(lore, "Potion duration", effects.potionDurationPercent());
+        addPercentEffect(lore, "Rocket flight duration", effects.fireworkDurationPercent());
+        addCooldownEffect(lore, "Ender pearl cooldown", effects.pearlCooldownSeconds());
+        addCooldownEffect(lore, "Wind charge cooldown", effects.windCooldownSeconds());
+        addBooleanEffects(lore, effects);
+        if (lore.size() == 1) {
+            lore.add(ChatColor.GRAY + "You currently have no rep-based buffs or penalties.");
+        }
         return lore;
+    }
+
+    private void addPercentEffect(List<String> lore, String label, int percentValue) {
+        if (percentValue != 0) {
+            lore.add(ChatColor.WHITE + label + ": " + ChatColor.YELLOW + percent(percentValue));
+        }
+    }
+
+    private void addCooldownEffect(List<String> lore, String label, int seconds) {
+        if (seconds > 0) {
+            lore.add(ChatColor.WHITE + label + ": " + ChatColor.YELLOW + seconds + "s");
+        }
+    }
+
+    private void addBooleanEffects(List<String> lore, RepAppliedEffects effects) {
+        if (effects.glow()) {
+            lore.add(ChatColor.WHITE + "Glow: " + ChatColor.YELLOW
+                    + (effects.glowColor() != null ? effects.glowColor().name() : "WHITE"));
+        }
+        if (effects.stalkable()) {
+            lore.add(ChatColor.WHITE + "Stalkable in warzone");
+        }
+        if (effects.cashbackPercent() > 0) {
+            lore.add(ChatColor.WHITE + "Cashback: " + ChatColor.YELLOW + effects.cashbackPercent() + "%");
+        }
     }
 
     private List<RepCategory> positiveCategories() {
@@ -1083,20 +1125,24 @@ public final class RepGuiManager implements Listener {
     }
 
     private String displayName(RepCategory category) {
-        return switch (category) {
-            case WAS_KIND -> "Was Kind";
-            case HELPED_ME -> "Helped Me";
-            case GAVE_ITEMS -> "Gave Items/Money";
-            case TRUSTWORTHY -> "Trustworthy";
-            case GOOD_STALL -> "Good Stall";
-            case OTHER_POSITIVE -> "Other";
-            case SCAMMED -> "Scammed";
-            case SPAWN_KILLED -> "Spawn Killed";
-            case GRIEFED -> "Griefed";
-            case TRAPPED -> "Trapped";
-            case SCAM_STALL -> "Scam Stall";
-            case OTHER_NEGATIVE -> "Other";
-        };
+        return CATEGORY_DISPLAY_NAMES.get(category);
+    }
+
+    private static Map<RepCategory, String> categoryDisplayNames() {
+        Map<RepCategory, String> names = new EnumMap<>(RepCategory.class);
+        names.put(RepCategory.WAS_KIND, "Was Kind");
+        names.put(RepCategory.HELPED_ME, "Helped Me");
+        names.put(RepCategory.GAVE_ITEMS, "Gave Items/Money");
+        names.put(RepCategory.TRUSTWORTHY, "Trustworthy");
+        names.put(RepCategory.GOOD_STALL, "Good Stall");
+        names.put(RepCategory.OTHER_POSITIVE, "Other");
+        names.put(RepCategory.SCAMMED, "Scammed");
+        names.put(RepCategory.SPAWN_KILLED, "Spawn Killed");
+        names.put(RepCategory.GRIEFED, "Griefed");
+        names.put(RepCategory.TRAPPED, "Trapped");
+        names.put(RepCategory.SCAM_STALL, "Scam Stall");
+        names.put(RepCategory.OTHER_NEGATIVE, "Other");
+        return names;
     }
 
     private List<String> wrapLore(String text, int width, ChatColor color) {
