@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.pull_request.head.ref == 'feature/rep-system-v2-mainline'
+    if: github.event.pull_request.head.ref == 'feature/rep-system-v2-mainline' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
