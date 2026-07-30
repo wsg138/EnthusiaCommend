@@ -25,14 +25,23 @@ jobs:
           cache: maven
 
       - name: Apply final release fixes
-        run: python3 .final-review/apply_release_fixes.py
+        run: |
+          if [ -f .final-review/apply_release_fixes.py ]; then
+            python3 .final-review/apply_release_fixes.py
+            python3 .final-review/fix_potion_test.py
+          else
+            echo "Release fixes are already published."
+          fi
 
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
 
       - name: Publish verified fixes
         run: |
+          rm -f .final-review/apply_release_fixes.py .final-review/fix_potion_test.py
           if git diff --quiet -- \
+            .final-review/apply_release_fixes.py \
+            .final-review/fix_potion_test.py \
             src/main/java/org/enthusia/rep/CommendPlugin.java \
             src/main/java/org/enthusia/rep/storage/PluginDataStore.java \
             src/main/java/org/enthusia/rep/storage/PluginDataSnapshot.java \
@@ -49,7 +58,8 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
+          git add -A \
+            .final-review \
             src/main/java/org/enthusia/rep/CommendPlugin.java \
             src/main/java/org/enthusia/rep/storage/PluginDataStore.java \
             src/main/java/org/enthusia/rep/storage/PluginDataSnapshot.java \
