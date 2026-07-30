@@ -1,0 +1,65 @@
+name: Apply final release review fixes
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'feature/rep-system-v2-mainline'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rep-system-v2-mainline
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Apply final release fixes
+        run: python3 .final-review/apply_release_fixes.py
+
+      - name: Verify
+        run: mvn --batch-mode --no-transfer-progress clean verify
+
+      - name: Publish verified fixes
+        run: |
+          if git diff --quiet -- \
+            src/main/java/org/enthusia/rep/CommendPlugin.java \
+            src/main/java/org/enthusia/rep/storage/PluginDataStore.java \
+            src/main/java/org/enthusia/rep/storage/PluginDataSnapshot.java \
+            src/main/java/org/enthusia/rep/storage/OrderedSnapshotWriter.java \
+            src/main/java/org/enthusia/rep/storage/YamlPluginDataStore.java \
+            src/main/java/org/enthusia/rep/rep/RepRules.java \
+            src/main/java/org/enthusia/rep/rep/RepService.java \
+            src/main/java/org/enthusia/rep/effects/RepEffectManager.java \
+            src/test/java/org/enthusia/rep/storage/OrderedSnapshotWriterTest.java \
+            src/test/java/org/enthusia/rep/effects/RepEffectManagerTest.java \
+            src/test/java/org/enthusia/rep/rep/RepRulesTest.java; then
+            echo "No source changes to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/main/java/org/enthusia/rep/CommendPlugin.java \
+            src/main/java/org/enthusia/rep/storage/PluginDataStore.java \
+            src/main/java/org/enthusia/rep/storage/PluginDataSnapshot.java \
+            src/main/java/org/enthusia/rep/storage/OrderedSnapshotWriter.java \
+            src/main/java/org/enthusia/rep/storage/YamlPluginDataStore.java \
+            src/main/java/org/enthusia/rep/rep/RepRules.java \
+            src/main/java/org/enthusia/rep/rep/RepService.java \
+            src/main/java/org/enthusia/rep/effects/RepEffectManager.java \
+            src/test/java/org/enthusia/rep/storage/OrderedSnapshotWriterTest.java \
+            src/test/java/org/enthusia/rep/effects/RepEffectManagerTest.java \
+            src/test/java/org/enthusia/rep/rep/RepRulesTest.java
+          git commit -m "fix: close final persistence and potion exploits"
+          git push origin HEAD:feature/rep-system-v2-mainline
