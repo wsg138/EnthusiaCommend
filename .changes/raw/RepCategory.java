@@ -49,7 +49,7 @@ public enum RepCategory {
 
     public static RepCategory fromStored(String raw, boolean positive) {
         if (raw == null || raw.isBlank()) {
-            return positive ? WAS_KIND : SCAMMD;
+            return positive ? WAS_KIND : SCAMMED;
         }
         try {
             return RepCategory.valueOf(raw).migratedCategory();
