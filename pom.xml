@@ -1,93 +1,51 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.enthusia</groupId>
     <artifactId>enthusia-commend</artifactId>
-    <version>2.11.1</version>
+    <version>2.12.0</version>
     <name>EnthusiaCommend</name>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <junit.version>5.11.4</junit.version>
     </properties>
 
-    <!-- Repositories Paper/Vault/PlaceholderAPI live on -->
     <repositories>
-        <!-- PaperMC (paper-api and its transitive deps like brigadier, bungeecord-chat) -->
-        <repository>
-            <id>papermc-repo</id>
-            <url>https://repo.papermc.io/repository/maven-public/</url>
-        </repository>
-
-        <!-- JitPack for VaultAPI -->
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-
-        <!-- PlaceholderAPI repo -->
-        <repository>
-            <id>placeholderapi-repo</id>
-            <url>https://repo.extendedclip.com/content/repositories/placeholderapi/</url>
-        </repository>
-
-        <!-- Plan API -->
-        <repository>
-            <id>jitpack</id>
-            <url>https://jitpack.io</url>
-        </repository>
+        <repository><id>papermc-repo</id><url>https://repo.papermc.io/repository/maven-public/</url></repository>
+        <repository><id>jitpack.io</id><url>https://jitpack.io</url></repository>
+        <repository><id>placeholderapi-repo</id><url>https://repo.extendedclip.com/content/repositories/placeholderapi/</url></repository>
     </repositories>
 
     <dependencies>
-        <!-- Paper / Spigot API -->
         <dependency>
-            <groupId>io.papermc.paper</groupId>
-            <artifactId>paper-api</artifactId>
-            <version>1.21.11-R0.1-SNAPSHOT</version>
-            <scope>provided</scope>
+            <groupId>io.papermc.paper</groupId><artifactId>paper-api</artifactId>
+            <version>1.21.11-R0.1-SNAPSHOT</version><scope>provided</scope>
         </dependency>
-
-        <!-- Vault API (from GitHub via JitPack) -->
         <dependency>
-            <groupId>com.github.MilkBowl</groupId>
-            <artifactId>VaultAPI</artifactId>
-            <version>1.7.1</version>
-            <scope>provided</scope>
+            <groupId>com.github.MilkBowl</groupId><artifactId>VaultAPI</artifactId>
+            <version>1.7.1</version><scope>provided</scope>
         </dependency>
-
-        <!-- PlaceholderAPI -->
         <dependency>
-            <groupId>me.clip</groupId>
-            <artifactId>placeholderapi</artifactId>
-            <version>2.11.6</version>
-            <scope>provided</scope>
+            <groupId>me.clip</groupId><artifactId>placeholderapi</artifactId>
+            <version>2.11.6</version><scope>provided</scope>
         </dependency>
-
-        <!-- GlowingEntities for scoreboard-safe glowing (shaded) -->
         <dependency>
-            <groupId>fr.skytasul</groupId>
-            <artifactId>glowingentities</artifactId>
-            <version>1.4.9</version>
+            <groupId>fr.skytasul</groupId><artifactId>glowingentities</artifactId><version>1.4.9</version>
         </dependency>
-
-        <!-- ProtocolLib for packet-based glow (provided at runtime) -->
         <dependency>
-            <groupId>net.dmulloy2</groupId>
-            <artifactId>ProtocolLib</artifactId>
-            <version>5.4.0</version>
-            <scope>provided</scope>
+            <groupId>net.dmulloy2</groupId><artifactId>ProtocolLib</artifactId><version>5.4.0</version><scope>provided</scope>
         </dependency>
-
-        <!-- Plan Player Analytics API (optional at runtime) -->
         <dependency>
-            <groupId>com.github.plan-player-analytics</groupId>
-            <artifactId>Plan</artifactId>
-            <version>5.5.2172</version>
-            <scope>provided</scope>
+            <groupId>com.github.plan-player-analytics</groupId><artifactId>Plan</artifactId>
+            <version>5.5.2172</version><scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version><scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -95,32 +53,23 @@
         <finalName>EnthusiaCommend-${project.version}</finalName>
         <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
                 <configuration>
-                    <excludes>
-                        <exclude>org/enthusia/rep/skin/**</exclude>
-                    </excludes>
+                    <excludes><exclude>org/enthusia/rep/skin/**</exclude></excludes>
                 </configuration>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version>
+                <configuration><useModulePath>false</useModulePath></configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.0</version>
                 <executions>
                     <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
+                        <phase>package</phase><goals><goal>shade</goal></goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <artifactSet>
-                                <excludes>
-                                    <exclude>net.dmulloy2:ProtocolLib</exclude>
-                                </excludes>
-                            </artifactSet>
+                            <artifactSet><excludes><exclude>net.dmulloy2:ProtocolLib</exclude></excludes></artifactSet>
                             <relocations>
                                 <relocation>
                                     <pattern>fr.skytasul.glowingentities</pattern>
@@ -128,12 +77,7 @@
                                 </relocation>
                             </relocations>
                             <filters>
-                                <filter>
-                                    <artifact>com.github.plan-player-analytics:Plan</artifact>
-                                    <excludes>
-                                        <exclude>**</exclude>
-                                    </excludes>
-                                </filter>
+                                <filter><artifact>com.github.plan-player-analytics:Plan</artifact><excludes><exclude>**</exclude></excludes></filter>
                             </filters>
                         </configuration>
                     </execution>

@@ -7,7 +7,6 @@ import org.enthusia.rep.effects.RepAppliedEffects;
 import java.util.Locale;
 
 public final class RepConfig {
-
     private final int minActivePlaytimeHours;
     private final long editCooldownMillis;
     private final InputMode defaultInputMode;
@@ -22,6 +21,7 @@ public final class RepConfig {
     private final boolean planPageEnabled;
     private final int analyticsRetentionDays;
     private final int analyticsMaxRecords;
+    private final String discordWebhookUrl;
     private final EffectThresholds effectThresholds;
 
     public RepConfig(FileConfiguration config) {
@@ -39,80 +39,31 @@ public final class RepConfig {
         this.planPageEnabled = config.getBoolean("integrations.plan.page.enabled", true);
         this.analyticsRetentionDays = Math.max(1, config.getInt("analytics.retentionDays", 90));
         this.analyticsMaxRecords = Math.max(100, config.getInt("analytics.maxRecords", 5000));
+        this.discordWebhookUrl = config.getString("discord.webhookUrl", "").trim();
         this.effectThresholds = new EffectThresholds(config);
     }
 
-    public int getMinActivePlaytimeHours() {
-        return minActivePlaytimeHours;
-    }
-
-    public long getEditCooldownMillis() {
-        return editCooldownMillis;
-    }
-
-    public InputMode getDefaultInputMode() {
-        return defaultInputMode;
-    }
-
-    public int getMaxReasonLength() {
-        return maxReasonLength;
-    }
-
-    public long getInputTimeoutMillis() {
-        return inputTimeoutMillis;
-    }
-
-    public long getAutoSaveIntervalTicks() {
-        return autoSaveIntervalTicks;
-    }
-
-    public double getStalkCostPerDay() {
-        return stalkCostPerDay;
-    }
-
-    public int getStalkMaxDays() {
-        return stalkMaxDays;
-    }
-
-    public String getPlaytimePrimaryPlaceholder() {
-        return playtimePrimaryPlaceholder;
-    }
-
-    public String getPlaytimeFallbackPlaceholder() {
-        return playtimeFallbackPlaceholder;
-    }
-
-    public boolean isPlanIntegrationEnabled() {
-        return planIntegrationEnabled;
-    }
-
-    public boolean isPlanPageEnabled() {
-        return planPageEnabled;
-    }
-
-    public int getAnalyticsRetentionDays() {
-        return analyticsRetentionDays;
-    }
-
-    public long getAnalyticsRetentionMillis() {
-        return analyticsRetentionDays * 24L * 60L * 60L * 1000L;
-    }
-
-    public int getAnalyticsMaxRecords() {
-        return analyticsMaxRecords;
-    }
-
-    public EffectThresholds getEffectThresholds() {
-        return effectThresholds;
-    }
+    public int getMinActivePlaytimeHours() { return minActivePlaytimeHours; }
+    public long getEditCooldownMillis() { return editCooldownMillis; }
+    public InputMode getDefaultInputMode() { return defaultInputMode; }
+    public int getMaxReasonLength() { return maxReasonLength; }
+    public long getInputTimeoutMillis() { return inputTimeoutMillis; }
+    public long getAutoSaveIntervalTicks() { return autoSaveIntervalTicks; }
+    public double getStalkCostPerDay() { return stalkCostPerDay; }
+    public int getStalkMaxDays() { return stalkMaxDays; }
+    public String getPlaytimePrimaryPlaceholder() { return playtimePrimaryPlaceholder; }
+    public String getPlaytimeFallbackPlaceholder() { return playtimeFallbackPlaceholder; }
+    public boolean isPlanIntegrationEnabled() { return planIntegrationEnabled; }
+    public boolean isPlanPageEnabled() { return planPageEnabled; }
+    public int getAnalyticsRetentionDays() { return analyticsRetentionDays; }
+    public long getAnalyticsRetentionMillis() { return analyticsRetentionDays * 24L * 60L * 60L * 1000L; }
+    public int getAnalyticsMaxRecords() { return analyticsMaxRecords; }
+    public String getDiscordWebhookUrl() { return discordWebhookUrl; }
+    public EffectThresholds getEffectThresholds() { return effectThresholds; }
 
     public ChatColor colorForScore(int score) {
-        if (score > 0) {
-            return ChatColor.GREEN;
-        }
-        if (score < 0) {
-            return ChatColor.RED;
-        }
+        if (score > 0) return ChatColor.GREEN;
+        if (score < 0) return ChatColor.RED;
         return ChatColor.YELLOW;
     }
 
@@ -120,8 +71,8 @@ public final class RepConfig {
         return colorForScore(score) + String.valueOf(score);
     }
 
+    /** Movement-speed reputation modifiers are intentionally disabled. */
     public RepAppliedEffects resolveEffects(int score) {
-        int movementSpeedPercent = 0;
         int potionDurationPercent = 0;
         int fireworkDurationPercent = 0;
         int pearlCooldownSeconds = 0;
@@ -131,13 +82,10 @@ public final class RepConfig {
         boolean stalkable = false;
         int cashbackPercent = 0;
 
-        if (score <= effectThresholds.moveSpeedMinusOneAt) movementSpeedPercent = -1;
         if (score <= effectThresholds.pearlCooldownThreeSecondsAt) pearlCooldownSeconds = 3;
         if (score <= effectThresholds.fireworkDurationMinusFiveAt) fireworkDurationPercent = -5;
-        if (score <= effectThresholds.moveSpeedMinusThreeAt) movementSpeedPercent = -3;
         if (score <= effectThresholds.windChargeCooldownTwoSecondsAt) windCooldownSeconds = 2;
         if (score <= effectThresholds.fireworkDurationMinusTenAt) fireworkDurationPercent = -10;
-        if (score <= effectThresholds.moveSpeedMinusFiveAt) movementSpeedPercent = -5;
         if (score <= effectThresholds.glowAt) glow = true;
         if (score <= effectThresholds.stalkableAt) stalkable = true;
         if (score <= effectThresholds.potionDurationMinusTenAt) potionDurationPercent = -10;
@@ -146,7 +94,6 @@ public final class RepConfig {
         if (score <= effectThresholds.fireworkDurationMinusFifteenAt) fireworkDurationPercent = -15;
         if (score <= effectThresholds.pearlCooldownTenSecondsAt) pearlCooldownSeconds = 10;
         if (score <= effectThresholds.windChargeCooldownTenSecondsAt) windCooldownSeconds = 10;
-        if (score <= effectThresholds.moveSpeedMinusTenAt) movementSpeedPercent = -10;
         if (score <= effectThresholds.potionDurationMinusFifteenAt) potionDurationPercent = -15;
         if (score <= effectThresholds.fireworkDurationMinusTwentyFiveAt) fireworkDurationPercent = -25;
         if (score <= effectThresholds.redGlowAt) {
@@ -154,16 +101,13 @@ public final class RepConfig {
             glowColor = ChatColor.RED;
         }
 
-        if (score >= effectThresholds.moveSpeedPlusOneAt) movementSpeedPercent = 1;
-        if (score >= effectThresholds.moveSpeedPlusThreeAt) movementSpeedPercent = 3;
         if (score >= effectThresholds.potionDurationPlusFiveAt) potionDurationPercent = 5;
         if (score >= effectThresholds.cashbackThreePercentAt) cashbackPercent = 3;
-        if (score >= effectThresholds.moveSpeedPlusFiveAt) movementSpeedPercent = 5;
         if (score >= effectThresholds.potionDurationPlusTenAt) potionDurationPercent = 10;
         if (score >= effectThresholds.cashbackFivePercentAt) cashbackPercent = 5;
 
         return new RepAppliedEffects(
-                movementSpeedPercent,
+                0,
                 potionDurationPercent,
                 fireworkDurationPercent,
                 pearlCooldownSeconds,
@@ -175,14 +119,23 @@ public final class RepConfig {
         );
     }
 
+    public boolean crossedEffectThreshold(int oldScore, int newScore) {
+        if (oldScore == newScore) return false;
+        for (int threshold : effectThresholds.activeMilestones()) {
+            if ((oldScore < threshold && newScore >= threshold)
+                    || (oldScore > threshold && newScore <= threshold)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public enum InputMode {
         ANVIL,
         CHAT;
 
         public static InputMode from(String raw) {
-            if (raw == null) {
-                return ANVIL;
-            }
+            if (raw == null) return ANVIL;
             try {
                 return InputMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException ignored) {
@@ -192,6 +145,7 @@ public final class RepConfig {
     }
 
     public static final class EffectThresholds {
+        // Retained so existing config keys remain loadable, although movement speed is inert.
         public final int moveSpeedMinusOneAt;
         public final int pearlCooldownThreeSecondsAt;
         public final int fireworkDurationMinusFiveAt;
@@ -216,7 +170,7 @@ public final class RepConfig {
         public final int potionDurationPlusFiveAt;
         public final int cashbackThreePercentAt;
         public final int moveSpeedPlusFiveAt;
-        public final int potionDurationPlusTenAt;
+      public final int potionDurationPlusTenAt;
         public final int cashbackFivePercentAt;
 
         private EffectThresholds(FileConfiguration config) {
@@ -246,6 +200,30 @@ public final class RepConfig {
             this.moveSpeedPlusFiveAt = config.getInt("rep.effects.benefits.moveSpeedPlus5PercentAt", 15);
             this.potionDurationPlusTenAt = config.getInt("rep.effects.benefits.potionDurationPlus10PercentAt", 15);
             this.cashbackFivePercentAt = config.getInt("rep.effects.benefits.cashback5PercentAt", 15);
+        }
+
+        private int[] activeMilestones() {
+            return new int[] {
+                    pearlCooldownThreeSecondsAt,
+                    fireworkDurationMinusFiveAt,
+                    windChargeCooldownTwoSecondsAt,
+                    fireworkDurationMinusTenAt,
+                    glowAt,
+                    stalkableAt,
+                    potionDurationMinusTenAt,
+                    pearlCooldownSevenSecondsAt,
+                    windChargeCooldownFiveSecondsAt,
+                    fireworkDurationMinusFifteenAt,
+                    pearlCooldownTenSecondsAt,
+                    windChargeCooldownTenSecondsAt,
+                    potionDurationMinusFifteenAt,
+                    fireworkDurationMinusTwentyFiveAt,
+                    redGlowAt,
+                    potionDurationPlusFiveAt,
+                    cashbackThreePercentAt,
+                    potionDurationPlusTenAt,
+                    cashbackFivePercentAt
+            };
         }
     }
 }

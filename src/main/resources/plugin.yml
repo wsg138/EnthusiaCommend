@@ -1,6 +1,6 @@
 name: EnthusiaCommend
 main: org.enthusia.rep.CommendPlugin
-version: 2.11.1
+version: 2.12.0
 api-version: '1.21'
 author: Enthusia
 depend: [Vault]
@@ -19,7 +19,6 @@ permissions:
     default: false
     children:
       enthusiacommend.rep.*: true
-
   enthusiacommend.rep.*:
     description: All rep-related permissions.
     default: false
@@ -29,25 +28,20 @@ permissions:
       enthusiacommend.rep.stalk: true
       enthusiacommend.rep.alert: true
       enthusiacommend.rep.testpay: true
-
   enthusiacommend.rep.view:
     description: Use /rep to view reputation.
     default: true
-
   enthusiacommend.rep.admin:
     description: Admin functions for rep (/rep admin ...).
     default: op
     children:
       enthusiacommend.rep.alert: true
-
   enthusiacommend.rep.stalk:
     description: Use /rep stalk.
     default: true
-
   enthusiacommend.rep.alert:
     description: Receive alerts for suspicious rep activity.
     default: op
-
   enthusiacommend.rep.testpay:
     description: Reserved for economy test hooks.
     default: op

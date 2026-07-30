@@ -1,24 +1,12 @@
 rep:
-  # Minimum active playtime hours required before a player can leave rep.
   minActivePlaytimeHours: 12
-
-  # Cooldown between editing or re-submitting rep for the same target.
   editCooldownHours: 24
-
   input:
-    # Default GUI text-entry mode after a category is chosen.
-    # Valid values: ANVIL or CHAT
     default: ANVIL
-
-    # Maximum number of characters stored for the reason text.
     maxReasonLength: 256
-
-    # How long a player can sit in chat-entry mode before it auto-cancels.
     timeoutSeconds: 60
-
   effects:
-    # Effect values are fixed in code for consistency.
-    # You edit only the rep score at which each effect turns on.
+    # Movement-speed keys remain for config compatibility but are intentionally inert.
     penalties:
       moveSpeedMinus1PercentAt: -5
       pearlCooldown3SecondsAt: -6
@@ -39,7 +27,6 @@ rep:
       potionDurationMinus15PercentAt: -20
       fireworkDurationMinus25PercentAt: -20
       redGlowAt: -20
-
     benefits:
       moveSpeedPlus1PercentAt: 5
       moveSpeedPlus3PercentAt: 10
@@ -48,49 +35,30 @@ rep:
       moveSpeedPlus5PercentAt: 15
       potionDurationPlus10PercentAt: 15
       cashback5PercentAt: 15
-
 stalk:
-  # Cost per purchased day of stalking.
   costPerDay: 100.0
-
-  # Maximum duration a player can buy in one command.
   maxDays: 7
-
 storage:
-  # Autosave interval for in-memory data.
   autoSaveSeconds: 60
-
 analytics:
-  # How long reputation change history is retained for Plan/reporting views.
   retentionDays: 90
-
-  # Safety cap for retained reputation change records when using YAML storage.
   maxRecords: 5000
-
 integrations:
   plan:
-    # Optional Plan Player Analytics integration.
     enabled: true
-
     page:
-      # Adds a dedicated reputation dashboard page through Plan's PageExtension API.
       enabled: true
-
+discord:
+  # HTTPS Discord webhook URL. Leave blank to disable commendation logging.
+  webhookUrl: ""
 playtime:
-  # Primary PlaceholderAPI placeholder expected to return active seconds.
   primaryPlaceholder: "%playtime_active%"
-
-  # Fallback PlaceholderAPI placeholder expected to return formatted text like "12h 30m".
   fallbackFormattedPlaceholder: "%playtime_active_formatted%"
-
 regions:
-  # Players inside spawn or warzone receive rep-based effects.
   spawn:
     - world: world
       min: -50, 0, -50
       max: 50, 256, 50
-
-  # Stalk notifications fire when players enter or leave warzone.
   warzone:
     - world: world
       min: -500, 0, -500
