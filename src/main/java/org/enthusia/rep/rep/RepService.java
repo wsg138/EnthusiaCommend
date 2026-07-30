@@ -390,18 +390,8 @@ public final class RepService {
             return CommendationResult.cooldown(repConfig.getEditCooldownMillis() - sinceLastEdit);
         }
 
-        int oldValue = existing.getScoreValue();
-        boolean polarityChanged = existing.isPositive() != positive;
-        int newValue = polarityChanged ? normalizedCategory.defaultScoreValue() : oldValue;
-        int delta = newValue - oldValue;
+        int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash);
         int oldScore = getScore(targetId);
-
-        existing.setPositive(positive);
-        existing.setCategory(normalizedCategory);
-        existing.setReasonText(reasonText);
-        existing.setLastEditedAt(now);
-        existing.setIpHash(ipHash);
-        existing.setScoreValue(newValue);
 
         if (delta != 0) {
             applyScore(targetId, oldScore + delta, true);
@@ -780,17 +770,7 @@ public final class RepService {
     }
 
     private Commendation cloneCommendation(Commendation commendation) {
-        return new Commendation(
-                commendation.getGiver(),
-                commendation.getTarget(),
-                commendation.isPositive(),
-                commendation.getCategory(),
-                commendation.getReasonText(),
-                commendation.getCreatedAt(),
-                commendation.getLastEditedAt(),
-                commendation.getIpHash(),
-                commendation.getScoreValue()
-        );
+        return commendation.snapshot();
     }
 
     private String nextRemovalId() {

@@ -51,4 +51,21 @@ class CommendationMigrationTest {
         assertEquals(-3, totals.get(RepCategory.SCAMMED));
         assertEquals(1, totals.get(RepCategory.HELPED_ME));
     }
+
+    @Test
+    void atomicUpdatePreservesWeightUntilPolarityChangesAndSnapshotIsDetached() {
+        Commendation commendation = new Commendation(
+                UUID.randomUUID(), UUID.randomUUID(), false, RepCategory.SCAMMED,
+                "legacy", 1L, 1L, null, -1);
+
+        assertEquals(0, commendation.applyUpdate(false, RepCategory.GRIEFED, "edited", 2L, "hash"));
+        assertEquals(-1, commendation.getScoreValue());
+        Commendation snapshot = commendation.snapshot();
+
+        assertEquals(2, commendation.applyUpdate(true, RepCategory.WAS_KIND, "positive", 3L, null));
+        assertEquals(1, commendation.getScoreValue());
+        assertFalse(snapshot.isPositive());
+        assertEquals(-1, snapshot.getScoreValue());
+        assertEquals("edited", snapshot.getReasonText());
+    }
 }

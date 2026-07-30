@@ -63,16 +63,35 @@ public class Commendation {
     public String getIpHash() { return ipHash; }
     public int getScoreValue() { return scoreValue; }
 
-    public void setPositive(boolean positive) { this.positive = positive; }
-    public void setCategory(RepCategory category) {
+    public synchronized void setPositive(boolean positive) { this.positive = positive; }
+    public synchronized void setCategory(RepCategory category) {
         this.category = category == null ? (positive ? RepCategory.WAS_KIND : RepCategory.SCAMMED) : category.migratedCategory();
     }
-    public void setReasonText(String reasonText) { this.reasonText = reasonText == null ? "" : reasonText; }
-    public void setLastEditedAt(long lastEditedAt) { this.lastEditedAt = lastEditedAt; }
-    public void setIpHash(String ipHash) { this.ipHash = ipHash; }
-    public void setScoreValue(int scoreValue) { this.scoreValue = normalizeScoreValue(positive, scoreValue); }
+    public synchronized void setReasonText(String reasonText) { this.reasonText = reasonText == null ? "" : reasonText; }
+    public synchronized void setLastEditedAt(long lastEditedAt) { this.lastEditedAt = lastEditedAt; }
+    public synchronized void setIpHash(String ipHash) { this.ipHash = ipHash; }
+    public synchronized void setScoreValue(int scoreValue) { this.scoreValue = normalizeScoreValue(positive, scoreValue); }
 
-    public Map<String, Object> serialize() {
+    public synchronized int applyUpdate(boolean newPositive, RepCategory newCategory, String newReasonText,
+                                        long newLastEditedAt, String newIpHash) {
+        int oldValue = scoreValue;
+        boolean polarityChanged = positive != newPositive;
+        int newValue = polarityChanged ? newCategory.defaultScoreValue() : oldValue;
+        positive = newPositive;
+        category = newCategory;
+        reasonText = newReasonText == null ? "" : newReasonText;
+        lastEditedAt = newLastEditedAt;
+        ipHash = newIpHash;
+        scoreValue = normalizeScoreValue(newPositive, newValue);
+        return scoreValue - oldValue;
+    }
+
+    public synchronized Commendation snapshot() {
+        return new Commendation(giver, target, positive, category, reasonText,
+                createdAt, lastEditedAt, ipHash, scoreValue);
+    }
+
+    public synchronized Map<String, Object> serialize() {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("giver", giver.toString());
         map.put("target", target.toString());
