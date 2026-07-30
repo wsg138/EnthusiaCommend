@@ -52,4 +52,3 @@ for source_name, destination_name in GZIP_B64_FILES.items():
     write_file(source, ROOT / destination_name, decoded)
 
 shutil.rmtree(ROOT / ".changes")
-(ROOT / ".github/workflows/apply-payload.yml").unlink(missing_ok=True)
