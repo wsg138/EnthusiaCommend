@@ -9,6 +9,9 @@ import org.enthusia.rep.rep.RepService;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,8 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class YamlPluginDataStore implements PluginDataStore {
-
-    private static final int DATA_VERSION = 3;
+    private static final int DATA_VERSION = 5;
 
     private final CommendPlugin plugin;
     private final File file;
@@ -39,6 +41,8 @@ public final class YamlPluginDataStore implements PluginDataStore {
         List<RepService.RemovedRep> removedEntries = new ArrayList<>();
         List<PluginDataSnapshot.StalkEntry> stalkEntries = new ArrayList<>();
         List<ReputationChangeRecord> reputationChanges = new ArrayList<>();
+        List<RepService.SuspiciousRepCase> suspiciousCases = new ArrayList<>();
+        List<PluginDataSnapshot.RemovalCooldownEntry> removalCooldowns = new ArrayList<>();
 
         ConfigurationSection players = config.getConfigurationSection("players");
         if (players != null) {
@@ -75,6 +79,24 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
+        for (Map<?, ?> rawCase : config.getMapList("suspiciousCases")) {
+            RepService.SuspiciousRepCase caseData = RepService.SuspiciousRepCase.fromMap(rawCase);
+            if (caseData != null) {
+                suspiciousCases.add(caseData);
+            }
+        }
+
+        for (Map<?, ?> rawCooldown : config.getMapList("removalCooldowns")) {
+            try {
+                UUID giverId = UUID.fromString(String.valueOf(rawCooldown.get("giver")));
+                UUID targetId = UUID.fromString(String.valueOf(rawCooldown.get("target")));
+                long removedAt = rawCooldown.get("removedAt") instanceof Number value
+                        ? value.longValue() : Long.parseLong(String.valueOf(rawCooldown.get("removedAt")));
+                removalCooldowns.add(new PluginDataSnapshot.RemovalCooldownEntry(giverId, targetId, removedAt));
+            } catch (Exception ignored) {
+            }
+        }
+
         ConfigurationSection stalkSection = config.getConfigurationSection("stalks");
         if (stalkSection != null) {
             for (String key : stalkSection.getKeys(false)) {
@@ -88,11 +110,11 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
-        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges);
+        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges, suspiciousCases, removalCooldowns);
     }
 
     @Override
-    public void save(PluginDataSnapshot snapshot) {
+    public boolean save(PluginDataSnapshot snapshot) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", DATA_VERSION);
 
@@ -117,6 +139,22 @@ public final class YamlPluginDataStore implements PluginDataStore {
         }
         config.set("reputationChanges", reputationChanges);
 
+        List<Map<String, Object>> suspiciousCases = new ArrayList<>();
+        for (RepService.SuspiciousRepCase entry : snapshot.suspiciousCases()) {
+            suspiciousCases.add(entry.serialize());
+        }
+        config.set("suspiciousCases", suspiciousCases);
+
+        List<Map<String, Object>> removalCooldowns = new ArrayList<>();
+        for (PluginDataSnapshot.RemovalCooldownEntry entry : snapshot.removalCooldowns()) {
+            Map<String, Object> serialized = new LinkedHashMap<>();
+            serialized.put("giver", entry.giverId().toString());
+            serialized.put("target", entry.targetId().toString());
+            serialized.put("removedAt", entry.removedAt());
+            removalCooldowns.add(serialized);
+        }
+        config.set("removalCooldowns", removalCooldowns);
+
         int stalkIndex = 0;
         for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {
             String path = "stalks." + stalkIndex++;
@@ -125,10 +163,26 @@ public final class YamlPluginDataStore implements PluginDataStore {
             config.set(path + ".expiresAt", entry.expiresAt());
         }
 
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            plugin.getLogger().warning("Could not create plugin data directory.");
+            return false;
+        }
+        File temporary = new File(file.getParentFile(), file.getName() + ".tmp");
         try {
-            config.save(file);
-        } catch (IOException e) {
-            plugin.getLogger().warning("Failed to save data.yml: " + e.getMessage());
+            config.save(temporary);
+            try {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (IOException exception) {
+            plugin.getLogger().warning("Failed to save data.yml: " + exception.getMessage());
+            if (temporary.exists() && !temporary.delete()) {
+                temporary.deleteOnExit();
+            }
+            return false;
         }
     }
 }

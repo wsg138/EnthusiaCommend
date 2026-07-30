@@ -1,8 +1,9 @@
 package org.enthusia.rep.rep;
 
-import net.md_5.bungee.api.chat.ClickEvent;
-import net.md_5.bungee.api.chat.ComponentBuilder;
-import net.md_5.bungee.api.chat.HoverEvent;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
@@ -11,7 +12,8 @@ import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
 import org.enthusia.rep.analytics.ReputationChangeAction;
 import org.enthusia.rep.analytics.ReputationChangeSource;
-import org.enthusia.rep.config.RepConfig;
+import org.enthusia.rep.events.RepMilestoneReachedEvent;
+import org.enthusia.rep.events.RepScoreChangedEvent;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 
 import java.security.MessageDigest;
@@ -19,11 +21,9 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,39 +33,55 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public final class RepService {
+    private static final long ALT_WINDOW_MILLIS = 48L * 60L * 60L * 1000L;
 
     private final CommendPlugin plugin;
     private final Runnable dirtyMarker;
     private final Consumer<UUID> scoreChangeListener;
     private final ReputationAnalyticsService analyticsService;
+    private final Consumer<AuditRecord> auditConsumer;
 
-    private RepConfig repConfig;
+    private volatile org.enthusia.rep.config.RepConfig repConfig;
 
     private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
+    private final Map<UUID, String> knownNames = new ConcurrentHashMap<>();
     private final Map<UUID, List<Commendation>> commendationsByTarget = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, Commendation>> commendationsByGiver = new ConcurrentHashMap<>();
-    private final Map<String, Long> removalCooldowns = new ConcurrentHashMap<>();
+    private final Map<RepPair, Long> removalCooldowns = new ConcurrentHashMap<>();
     private final Map<String, List<AltRepRecord>> altRecordsByHash = new ConcurrentHashMap<>();
     private final List<SuspiciousRepCase> suspiciousCases = new ArrayList<>();
     private final List<RemovedRep> removedEntries = new ArrayList<>();
 
     public RepService(
             CommendPlugin plugin,
-            RepConfig repConfig,
+            org.enthusia.rep.config.RepConfig repConfig,
             PluginDataSnapshot dataSnapshot,
             Runnable dirtyMarker,
             Consumer<UUID> scoreChangeListener,
             ReputationAnalyticsService analyticsService
+    ) {
+        this(plugin, repConfig, dataSnapshot, dirtyMarker, scoreChangeListener, analyticsService, ignored -> { });
+    }
+
+    public RepService(
+            CommendPlugin plugin,
+            org.enthusia.rep.config.RepConfig repConfig,
+            PluginDataSnapshot dataSnapshot,
+            Runnable dirtyMarker,
+            Consumer<UUID> scoreChangeListener,
+            ReputationAnalyticsService analyticsService,
+            Consumer<AuditRecord> auditConsumer
     ) {
         this.plugin = plugin;
         this.repConfig = repConfig;
         this.dirtyMarker = dirtyMarker;
         this.scoreChangeListener = scoreChangeListener;
         this.analyticsService = analyticsService;
-        loadSnapshot(dataSnapshot);
+        this.auditConsumer = auditConsumer == null ? ignored -> { } : auditConsumer;
+        loadSnapshot(dataSnapshot == null ? PluginDataSnapshot.EMPTY : dataSnapshot);
     }
 
-    public void reload(RepConfig repConfig) {
+    public void reload(org.enthusia.rep.config.RepConfig repConfig) {
         this.repConfig = repConfig;
     }
 
@@ -79,25 +95,81 @@ public final class RepService {
             cacheCommendation(cloneCommendation(commendation), false);
         }
 
-        removedEntries.clear();
-        removedEntries.addAll(snapshot.removedEntries().stream().map(RemovedRep::copy).toList());
+        synchronized (removedEntries) {
+            removedEntries.clear();
+            removedEntries.addAll(snapshot.removedEntries().stream().map(RemovedRep::copy).toList());
+        }
+        synchronized (suspiciousCases) {
+            suspiciousCases.clear();
+            suspiciousCases.addAll(snapshot.suspiciousCases().stream().map(SuspiciousRepCase::copy).toList());
+        }
         removalCooldowns.clear();
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        for (PluginDataSnapshot.RemovalCooldownEntry entry : snapshot.removalCooldowns()) {
+            if (RepRules.isCooldownActive(entry.removedAt(), now, cooldownMillis)) {
+                removalCooldowns.put(new RepPair(entry.giverId(), entry.targetId()), entry.removedAt());
+            }
+        }
+        rebuildAntiAbuseIndex();
+    }
+
+    private void rebuildAntiAbuseIndex() {
         altRecordsByHash.clear();
-        suspiciousCases.clear();
+        for (List<Commendation> entries : commendationsByTarget.values()) {
+            synchronized (entries) {
+                for (Commendation commendation : entries) {
+                    if (commendation.getIpHash() == null || commendation.getIpHash().isBlank()) {
+                        continue;
+                    }
+                    altRecordsByHash.computeIfAbsent(commendation.getIpHash(), ignored -> new ArrayList<>())
+                            .add(new AltRepRecord(
+                                    commendation.getGiver(),
+                                    commendation.getTarget(),
+                                    commendation.isPositive(),
+                                    commendation.getLastEditedAt(),
+                                    commendation.getIpHash()));
+                }
+            }
+        }
     }
 
     public PluginDataSnapshot snapshot(PluginDataSnapshot base) {
         Map<UUID, Integer> scores = new LinkedHashMap<>(scoreByPlayer);
         List<Commendation> commendations = new ArrayList<>();
         for (List<Commendation> entries : commendationsByTarget.values()) {
-            for (Commendation commendation : entries) {
-                commendations.add(cloneCommendation(commendation));
+            synchronized (entries) {
+                for (Commendation commendation : entries) {
+                    commendations.add(cloneCommendation(commendation));
+                }
             }
         }
         commendations.sort(Comparator.comparingLong(Commendation::getCreatedAt));
 
-        List<RemovedRep> removed = removedEntries.stream().map(RemovedRep::copy).toList();
-        return new PluginDataSnapshot(scores, commendations, removed, base.stalkEntries(), base.reputationChanges());
+        List<RemovedRep> removed;
+        synchronized (removedEntries) {
+            removed = removedEntries.stream().map(RemovedRep::copy).toList();
+        }
+        List<SuspiciousRepCase> cases;
+        synchronized (suspiciousCases) {
+            cases = suspiciousCases.stream().map(SuspiciousRepCase::copy).toList();
+        }
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        List<PluginDataSnapshot.RemovalCooldownEntry> cooldowns = removalCooldowns.entrySet().stream()
+                .filter(entry -> RepRules.isCooldownActive(entry.getValue(), now, cooldownMillis))
+                .map(entry -> new PluginDataSnapshot.RemovalCooldownEntry(
+                        entry.getKey().giverId(), entry.getKey().targetId(), entry.getValue()))
+                .toList();
+        return new PluginDataSnapshot(
+                scores,
+                commendations,
+                removed,
+                base.stalkEntries(),
+                base.reputationChanges(),
+                cases,
+                cooldowns
+        );
     }
 
     public int getScore(UUID playerId) {
@@ -108,6 +180,29 @@ public final class RepService {
         return Map.copyOf(scoreByPlayer);
     }
 
+    public Map<RepCategory, Integer> getCategoryScores(UUID playerId) {
+        return Map.copyOf(RepRules.categoryScores(getCommendationsAbout(playerId)));
+    }
+
+    public Map<RepCategory, Integer> getAllCategoryScores(UUID playerId) {
+        return getCategoryScores(playerId);
+    }
+
+    public int getCategoryScore(UUID playerId, RepCategory category) {
+        if (category == null) {
+            return 0;
+        }
+        return getCategoryScores(playerId).getOrDefault(category.migratedCategory(), 0);
+    }
+
+    public int getWorstNegativeCategoryScore(UUID playerId) {
+        return getCategoryScores(playerId).entrySet().stream()
+                .filter(entry -> !entry.getKey().isPositive())
+                .mapToInt(Map.Entry::getValue)
+                .min()
+                .orElse(0);
+    }
+
     public void setScore(UUID playerId, int score) {
         applyScore(playerId, score, true);
     }
@@ -115,14 +210,14 @@ public final class RepService {
     public void setScoreByStaff(UUID playerId, int score, CommandSender actor) {
         int oldScore = getScore(playerId);
         applyScore(playerId, score, true);
-        recordStaffChange(playerId, actor, score - oldScore, ReputationChangeAction.SET, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin set", oldScore, score);
+        recordStaffChange(playerId, actor, score - oldScore, ReputationChangeAction.SET,
+                ReputationChangeSource.ADMIN_CORRECTION, null, "Admin set", oldScore, score);
     }
 
     public void adjustScore(UUID playerId, int delta) {
-        if (delta == 0) {
-            return;
+        if (delta != 0) {
+            applyScore(playerId, getScore(playerId) + delta, true);
         }
-        applyScore(playerId, getScore(playerId) + delta, true);
     }
 
     public void adjustScoreByStaff(UUID playerId, int delta, CommandSender actor) {
@@ -132,19 +227,24 @@ public final class RepService {
         int oldScore = getScore(playerId);
         int newScore = oldScore + delta;
         applyScore(playerId, newScore, true);
-        recordStaffChange(playerId, actor, delta, ReputationChangeAction.ADJUST, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin adjustment", oldScore, newScore);
+        recordStaffChange(playerId, actor, delta, ReputationChangeAction.ADJUST,
+                ReputationChangeSource.ADMIN_CORRECTION, null, "Admin adjustment", oldScore, newScore);
     }
 
     private void applyScore(UUID playerId, int newScore, boolean emitEvent) {
         int oldScore = getScore(playerId);
         scoreByPlayer.put(playerId, newScore);
-        if (oldScore != newScore) {
-            dirtyMarker.run();
-            if (emitEvent) {
-                Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.RepMilestoneReachedEvent(playerId, oldScore, newScore));
-            }
-            scoreChangeListener.accept(playerId);
+        if (oldScore == newScore) {
+            return;
         }
+        dirtyMarker.run();
+        if (emitEvent) {
+            Bukkit.getPluginManager().callEvent(new RepScoreChangedEvent(playerId, oldScore, newScore));
+            if (repConfig.crossedEffectThreshold(oldScore, newScore)) {
+                Bukkit.getPluginManager().callEvent(new RepMilestoneReachedEvent(playerId, oldScore, newScore));
+            }
+        }
+        scoreChangeListener.accept(playerId);
     }
 
     public Commendation getCommendation(UUID giverId, UUID targetId) {
@@ -154,15 +254,61 @@ public final class RepService {
 
     public List<Commendation> getCommendationsAbout(UUID targetId) {
         List<Commendation> commendations = commendationsByTarget.get(targetId);
-        return commendations == null ? List.of() : List.copyOf(commendations);
+        if (commendations == null) {
+            return List.of();
+        }
+        synchronized (commendations) {
+            return List.copyOf(commendations);
+        }
+    }
+
+    public List<Commendation> getReceivedCommendations(UUID targetId) {
+        return getCommendationsAbout(targetId).stream()
+                .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
+                .toList();
+    }
+
+    public Commendation findCommendation(UUID giverId, UUID targetId, RepCategory category) {
+        Commendation commendation = getCommendation(giverId, targetId);
+        if (commendation == null || category == null) {
+            return null;
+        }
+        return commendation.getCategory() == category.migratedCategory() ? commendation : null;
     }
 
     public List<Commendation> recentCommendations(int limit) {
         List<Commendation> commendations = new ArrayList<>();
         for (List<Commendation> entries : commendationsByTarget.values()) {
-            commendations.addAll(entries);
+            synchronized (entries) {
+                commendations.addAll(entries);
+            }
         }
         return commendations.stream()
+                .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    /** Immutable copies safe for asynchronous integrations such as Plan. */
+    public List<Commendation> getCommendationSnapshotsAbout(UUID targetId) {
+        List<Commendation> entries = commendationsByTarget.get(targetId);
+        if (entries == null) {
+            return List.of();
+        }
+        synchronized (entries) {
+            return entries.stream().map(this::cloneCommendation).toList();
+        }
+    }
+
+    /** Immutable copies safe for asynchronous integrations such as Plan. */
+    public List<Commendation> recentCommendationSnapshots(int limit) {
+        List<Commendation> snapshots = new ArrayList<>();
+        for (List<Commendation> entries : commendationsByTarget.values()) {
+            synchronized (entries) {
+                entries.stream().map(this::cloneCommendation).forEach(snapshots::add);
+            }
+        }
+        return snapshots.stream()
                 .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
                 .limit(Math.max(1, limit))
                 .toList();
@@ -181,7 +327,22 @@ public final class RepService {
 
     public String nameOf(UUID playerId) {
         OfflinePlayer player = Bukkit.getOfflinePlayer(playerId);
-        return player.getName() != null ? player.getName() : playerId.toString().substring(0, 8);
+        rememberName(playerId, player.getName());
+        return cachedNameOf(playerId);
+    }
+
+    public void rememberName(UUID playerId, String playerName) {
+        if (playerId != null && playerName != null && !playerName.isBlank()) {
+            knownNames.put(playerId, playerName);
+        }
+    }
+
+    /** Does not access Bukkit and is safe for asynchronous integrations. */
+    public String cachedNameOf(UUID playerId) {
+        if (playerId == null) {
+            return "unknown";
+        }
+        return knownNames.getOrDefault(playerId, playerId.toString().substring(0, 8));
     }
 
     public CommendationResult addOrUpdateCommendation(
@@ -192,27 +353,35 @@ public final class RepService {
             String reasonText,
             String ipHash
     ) {
+        RepCategory normalizedCategory = RepRules.acceptedCategory(category, positive);
+        if (normalizedCategory == null) {
+            return CommendationResult.invalid();
+        }
+
         long now = System.currentTimeMillis();
         Commendation existing = getCommendation(giverId, targetId);
-
         if (existing == null) {
             long remainingCooldown = getRemovalCooldownMillis(giverId, targetId);
             if (remainingCooldown > 0) {
                 return CommendationResult.cooldown(remainingCooldown);
             }
 
-            Commendation created = new Commendation(giverId, targetId, positive, category, reasonText, now, now, ipHash);
+            int value = normalizedCategory.defaultScoreValue();
+            Commendation created = new Commendation(
+                    giverId, targetId, positive, normalizedCategory, reasonText,
+                    now, now, ipHash, value);
             cacheCommendation(created, true);
             int oldScore = getScore(targetId);
-            int delta = positive ? 1 : -1;
-            applyScore(targetId, oldScore + delta, true);
-            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.ADD, category, reasonText, oldScore, oldScore + delta);
-            logAltRecord(ipHash, giverId, targetId, positive, now);
+            applyScore(targetId, oldScore + value, true);
+            recordPlayerChange(targetId, giverId, value, ReputationChangeAction.ADD,
+                    normalizedCategory, reasonText, oldScore, oldScore + value);
             removalCooldowns.remove(key(giverId, targetId));
+            runAntiAbuseChecks(created, now);
             dirtyMarker.run();
 
             Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationGivenEvent(giverId, targetId, positive));
             Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationReceivedEvent(targetId, giverId, positive, getScore(targetId)));
+            auditConsumer.accept(new AuditRecord(AuditAction.CREATED, cloneCommendation(created), value, getScore(targetId), now));
             return CommendationResult.created(created);
         }
 
@@ -221,25 +390,21 @@ public final class RepService {
             return CommendationResult.cooldown(repConfig.getEditCooldownMillis() - sinceLastEdit);
         }
 
-        int delta = 0;
-        if (existing.isPositive() != positive) {
-            delta = positive ? 2 : -2;
-        }
+        int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash);
         int oldScore = getScore(targetId);
-        existing.setPositive(positive);
-        existing.setCategory(category);
-        existing.setReasonText(reasonText);
-        existing.setLastEditedAt(now);
-        existing.setIpHash(ipHash);
+
         if (delta != 0) {
             applyScore(targetId, oldScore + delta, true);
-            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE, category, reasonText, oldScore, oldScore + delta);
         }
-        logAltRecord(ipHash, giverId, targetId, positive, now);
+        recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
+                normalizedCategory, reasonText, oldScore, oldScore + delta);
         removalCooldowns.remove(key(giverId, targetId));
+        rebuildAntiAbuseIndex();
+        runAntiAbuseChecks(existing, now);
         dirtyMarker.run();
 
         Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationEditedEvent(giverId, targetId, positive));
+        auditConsumer.accept(new AuditRecord(AuditAction.UPDATED, cloneCommendation(existing), delta, getScore(targetId), now));
         return CommendationResult.updated(existing, delta);
     }
 
@@ -255,7 +420,8 @@ public final class RepService {
         return removeCommendationInternal(giverId, targetId, applyCooldown, true, removerId);
     }
 
-    private RemovedRep removeCommendationInternal(UUID giverId, UUID targetId, boolean applyCooldown, boolean logRemoval, UUID removerId) {
+    private RemovedRep removeCommendationInternal(UUID giverId, UUID targetId, boolean applyCooldown,
+                                                   boolean logRemoval, UUID removerId) {
         Commendation existing = getCommendation(giverId, targetId);
         if (existing == null) {
             return null;
@@ -271,14 +437,16 @@ public final class RepService {
 
         List<Commendation> byTarget = commendationsByTarget.get(targetId);
         if (byTarget != null) {
-            byTarget.removeIf(commendation -> commendation.getGiver().equals(giverId));
-            if (byTarget.isEmpty()) {
-                commendationsByTarget.remove(targetId);
+            synchronized (byTarget) {
+                byTarget.removeIf(commendation -> commendation.getGiver().equals(giverId));
+                if (byTarget.isEmpty()) {
+                    commendationsByTarget.remove(targetId);
+                }
             }
         }
 
         int oldScore = getScore(targetId);
-        int delta = existing.isPositive() ? -1 : 1;
+        int delta = -existing.getScoreValue();
         applyScore(targetId, oldScore + delta, true);
         if (applyCooldown) {
             removalCooldowns.put(key(giverId, targetId), System.currentTimeMillis());
@@ -289,14 +457,18 @@ public final class RepService {
         RemovedRep removedRep = null;
         if (logRemoval) {
             removedRep = new RemovedRep(nextRemovalId(), cloneCommendation(existing), System.currentTimeMillis(), removerId);
-            removedEntries.add(removedRep);
+            synchronized (removedEntries) {
+                removedEntries.add(removedRep);
+            }
         }
 
         ReputationChangeSource source = logRemoval ? ReputationChangeSource.STAFF_GUI : ReputationChangeSource.PLAYER_ACTION;
         UUID actorId = logRemoval ? removerId : giverId;
-        recordChange(targetId, actorId, delta, ReputationChangeAction.REMOVE, source, existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
-
+        recordChange(targetId, actorId, delta, ReputationChangeAction.REMOVE, source,
+                existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
+        rebuildAntiAbuseIndex();
         dirtyMarker.run();
+        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta, getScore(targetId), System.currentTimeMillis()));
         return removedRep;
     }
 
@@ -313,26 +485,34 @@ public final class RepService {
         if (removedAt == null) {
             return 0L;
         }
-        long remaining = repConfig.getEditCooldownMillis() - (System.currentTimeMillis() - removedAt);
-        if (remaining <= 0L) {
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        if (!RepRules.isCooldownActive(removedAt, now, cooldownMillis)) {
             removalCooldowns.remove(key(giverId, targetId));
             return 0L;
         }
-        return remaining;
+        return cooldownMillis - (now - removedAt);
     }
 
     public void resetAll(UUID targetId) {
-        List<Commendation> current = new ArrayList<>(commendationsByTarget.getOrDefault(targetId, List.of()));
+        List<Commendation> current = new ArrayList<>(getCommendationsAbout(targetId));
         for (Commendation commendation : current) {
             removeCommendationLogged(null, commendation.getGiver(), targetId, false);
         }
     }
 
     public void resetAllByStaff(UUID targetId, CommandSender actor) {
-        int oldScore = getScore(targetId);
-        resetAll(targetId);
-        int newScore = getScore(targetId);
-        recordStaffChange(targetId, actor, newScore - oldScore, ReputationChangeAction.RESET, ReputationChangeSource.ADMIN_CORRECTION, null, "Admin reset", oldScore, newScore);
+        UUID removerId = actor instanceof Player player ? player.getUniqueId() : null;
+        List<Commendation> current = new ArrayList<>(getCommendationsAbout(targetId));
+        for (Commendation commendation : current) {
+            removeCommendationLogged(removerId, commendation.getGiver(), targetId, false);
+        }
+        int residualScore = getScore(targetId);
+        if (residualScore != 0) {
+            applyScore(targetId, 0, true);
+            recordStaffChange(targetId, actor, -residualScore, ReputationChangeAction.RESET,
+                    ReputationChangeSource.ADMIN_CORRECTION, null, "Admin reset residual", residualScore, 0);
+        }
     }
 
     public String hashIp(String ipAddress) {
@@ -341,7 +521,7 @@ public final class RepService {
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(ipAddress.getBytes());
+            byte[] bytes = digest.digest(ipAddress.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder builder = new StringBuilder();
             for (int i = 0; i < 8 && i < bytes.length; i++) {
                 builder.append(String.format("%02x", bytes[i]));
@@ -353,29 +533,41 @@ public final class RepService {
     }
 
     public List<SuspiciousRepCase> getSuspiciousCases() {
-        return List.copyOf(suspiciousCases);
+        synchronized (suspiciousCases) {
+            return suspiciousCases.stream().map(SuspiciousRepCase::copy).toList();
+        }
     }
 
     public List<SuspiciousRepCase> getCasesForTarget(UUID targetId, boolean includeResolved) {
-        return suspiciousCases.stream()
-                .filter(entry -> entry.targetId.equals(targetId))
-                .filter(entry -> includeResolved || !entry.resolved)
-                .toList();
+        synchronized (suspiciousCases) {
+            return suspiciousCases.stream()
+                    .filter(entry -> entry.targetId.equals(targetId))
+                    .filter(entry -> includeResolved || !entry.resolved)
+                    .map(SuspiciousRepCase::copy)
+                    .toList();
+        }
     }
 
-    public boolean resolveCase(UUID targetId, String ipHash) {
+    public boolean resolveCase(UUID targetId, String key) {
         boolean changed = false;
-        for (SuspiciousRepCase entry : suspiciousCases) {
-            if (entry.targetId.equals(targetId) && entry.sourceIpHash.equalsIgnoreCase(ipHash) && !entry.resolved) {
-                entry.resolved = true;
-                changed = true;
+        synchronized (suspiciousCases) {
+            for (SuspiciousRepCase entry : suspiciousCases) {
+                if (entry.targetId.equals(targetId) && entry.caseKey.equalsIgnoreCase(key) && !entry.resolved) {
+                    entry.resolved = true;
+                    changed = true;
+                }
             }
+        }
+        if (changed) {
+            dirtyMarker.run();
         }
         return changed;
     }
 
     public List<RemovedRep> getRemovedLog() {
-        return removedEntries.stream().map(RemovedRep::copy).toList();
+        synchronized (removedEntries) {
+            return removedEntries.stream().map(RemovedRep::copy).toList();
+        }
     }
 
     public boolean restoreRemoved(String id) {
@@ -386,10 +578,13 @@ public final class RepService {
         if (id == null || id.isBlank()) {
             return false;
         }
-        RemovedRep removed = removedEntries.stream()
-                .filter(entry -> id.equalsIgnoreCase(entry.removalId))
-                .findFirst()
-                .orElse(null);
+        RemovedRep removed;
+        synchronized (removedEntries) {
+            removed = removedEntries.stream()
+                    .filter(entry -> id.equalsIgnoreCase(entry.removalId))
+                    .findFirst()
+                    .orElse(null);
+        }
         if (removed == null) {
             return false;
         }
@@ -399,132 +594,170 @@ public final class RepService {
             return false;
         }
 
-        cacheCommendation(cloneCommendation(commendation), true);
-        int oldScore = getScore(commendation.getTarget());
-        int delta = commendation.isPositive() ? 1 : -1;
-        applyScore(commendation.getTarget(), oldScore + delta, true);
-        removalCooldowns.remove(key(commendation.getGiver(), commendation.getTarget()));
-        removedEntries.remove(removed);
-        if (actor != null) {
-            recordStaffChange(commendation.getTarget(), actor, delta, ReputationChangeAction.RESTORE, ReputationChangeSource.STAFF_COMMAND, commendation.getCategory(), commendation.getReasonText(), oldScore, oldScore + delta);
-        } else {
-            recordChange(commendation.getTarget(), commendation.getGiver(), delta, ReputationChangeAction.RESTORE, ReputationChangeSource.SYSTEM, commendation.getCategory(), commendation.getReasonText(), oldScore, oldScore + delta);
+        Commendation restored = cloneCommendation(commendation);
+        cacheCommendation(restored, true);
+        int oldScore = getScore(restored.getTarget());
+        int delta = restored.getScoreValue();
+        applyScore(restored.getTarget(), oldScore + delta, true);
+        removalCooldowns.remove(key(restored.getGiver(), restored.getTarget()));
+        synchronized (removedEntries) {
+            removedEntries.remove(removed);
         }
+        if (actor != null) {
+            recordStaffChange(restored.getTarget(), actor, delta, ReputationChangeAction.RESTORE,
+                    ReputationChangeSource.STAFF_COMMAND, restored.getCategory(), restored.getReasonText(), oldScore, oldScore + delta);
+        } else {
+            recordChange(restored.getTarget(), restored.getGiver(), delta, ReputationChangeAction.RESTORE,
+                    ReputationChangeSource.SYSTEM, restored.getCategory(), restored.getReasonText(), oldScore, oldScore + delta);
+        }
+        rebuildAntiAbuseIndex();
         dirtyMarker.run();
+        auditConsumer.accept(new AuditRecord(AuditAction.RESTORED, cloneCommendation(restored), delta, getScore(restored.getTarget()), System.currentTimeMillis()));
         return true;
     }
 
-    private void recordPlayerChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action, RepCategory category, String reason, int oldScore, int newScore) {
-        if (analyticsService != null) {
-            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
+    private void runAntiAbuseChecks(Commendation changed, long now) {
+        logAltRecord(changed.getIpHash(), changed.getGiver(), changed.getTarget(), changed.isPositive(), now);
+        checkReciprocity(changed, now);
+        if (!changed.isPositive()) {
+            checkNegativeCluster(changed.getTarget(), now);
         }
-    }
-
-    private void recordStaffChange(UUID targetId, CommandSender actor, int delta, ReputationChangeAction action, ReputationChangeSource source, RepCategory category, String reason, int oldScore, int newScore) {
-        if (analyticsService != null) {
-            analyticsService.recordStaffChange(targetId, actor, delta, action, source, category, reason, oldScore, newScore);
-        }
-    }
-
-    private void recordChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action, ReputationChangeSource source, RepCategory category, String reason, int oldScore, int newScore) {
-        if (analyticsService == null) {
-            return;
-        }
-        if (source == ReputationChangeSource.PLAYER_ACTION) {
-            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
-            return;
-        }
-        analyticsService.recordChange(targetId, actorId, null, delta, action, source, category, reason, oldScore, newScore);
-    }
-
-    private void cacheCommendation(Commendation commendation, boolean replaceExisting) {
-        commendationsByTarget.computeIfAbsent(commendation.getTarget(), ignored -> new ArrayList<>());
-        commendationsByGiver.computeIfAbsent(commendation.getGiver(), ignored -> new ConcurrentHashMap<>());
-
-        if (replaceExisting) {
-            Commendation previous = commendationsByGiver.get(commendation.getGiver()).get(commendation.getTarget());
-            if (previous != null) {
-                List<Commendation> existing = commendationsByTarget.get(commendation.getTarget());
-                existing.removeIf(entry -> entry.getGiver().equals(commendation.getGiver()));
-            }
-        }
-
-        commendationsByTarget.get(commendation.getTarget()).add(commendation);
-        commendationsByGiver.get(commendation.getGiver()).put(commendation.getTarget(), commendation);
     }
 
     private void logAltRecord(String ipHash, UUID giverId, UUID targetId, boolean positive, long timestamp) {
         if (ipHash == null || ipHash.isBlank()) {
             return;
         }
-
-        altRecordsByHash.computeIfAbsent(ipHash, ignored -> new ArrayList<>())
-                .add(new AltRepRecord(giverId, targetId, positive, timestamp, ipHash));
-
+        List<AltRepRecord> records = altRecordsByHash.computeIfAbsent(ipHash, ignored -> new ArrayList<>());
+        synchronized (records) {
+            records.removeIf(record -> record.giverId.equals(giverId) && record.targetId.equals(targetId));
+            records.add(new AltRepRecord(giverId, targetId, positive, timestamp, ipHash));
+        }
         if (positive) {
             return;
         }
 
-        List<AltRepRecord> records = altRecordsByHash.getOrDefault(ipHash, List.of());
-        long windowMillis = 48L * 60L * 60L * 1000L;
-        Set<UUID> givers = new HashSet<>();
-        for (AltRepRecord record : records) {
-            if (!record.targetId.equals(targetId)) {
-                continue;
-            }
-            if (!record.positive && timestamp - record.timestamp <= windowMillis) {
-                givers.add(record.giverId);
+        Set<UUID> givers = new LinkedHashSet<>();
+        synchronized (records) {
+            for (AltRepRecord record : records) {
+                if (record.targetId.equals(targetId)
+                        && !record.positive
+                        && timestamp >= record.timestamp
+                        && timestamp - record.timestamp <= ALT_WINDOW_MILLIS) {
+                    givers.add(record.giverId);
+                }
             }
         }
-
         if (givers.size() >= 2) {
-            boolean duplicate = suspiciousCases.stream()
-                    .anyMatch(entry -> entry.targetId.equals(targetId) && entry.sourceIpHash.equalsIgnoreCase(ipHash) && !entry.resolved);
+            createCaseIfAbsent(targetId, "ALT_IP", ipHash, new ArrayList<>(givers), timestamp,
+                    "Multiple accounts on the same IP hash down-repped this player within 48 hours.");
+        }
+    }
+
+    private void checkReciprocity(Commendation changed, long now) {
+        Commendation reverse = getCommendation(changed.getTarget(), changed.getGiver());
+        if (!RepRules.isRecentReciprocal(reverse, now)) {
+            return;
+        }
+        List<UUID> participants = List.of(changed.getGiver(), changed.getTarget());
+        String first = changed.getGiver().compareTo(changed.getTarget()) <= 0
+                ? changed.getGiver().toString() : changed.getTarget().toString();
+        String second = changed.getGiver().compareTo(changed.getTarget()) <= 0
+                ? changed.getTarget().toString() : changed.getGiver().toString();
+        createCaseIfAbsent(changed.getTarget(), "RECIPROCITY", first + "-" + second,
+                participants, now, "The two players exchanged reputation within 24 hours.");
+    }
+
+    private void checkNegativeCluster(UUID targetId, long now) {
+        Set<UUID> givers = RepRules.recentNegativeGivers(getCommendationsAbout(targetId), now);
+        if (givers.size() >= RepRules.CLUSTER_MIN_GIVERS) {
+            createCaseIfAbsent(targetId, "CLUSTER_DOWNREP", targetId.toString(), new ArrayList<>(givers), now,
+                    givers.size() + " distinct players down-repped this target within 6 hours.");
+        }
+    }
+
+    private void createCaseIfAbsent(UUID targetId, String type, String caseKey, List<UUID> givers,
+                                    long timestamp, String detail) {
+        SuspiciousRepCase created = null;
+        synchronized (suspiciousCases) {
+            boolean duplicate = suspiciousCases.stream().anyMatch(entry ->
+                    !entry.resolved
+                            && entry.targetId.equals(targetId)
+                            && entry.type.equals(type)
+                            && entry.caseKey.equalsIgnoreCase(caseKey));
             if (!duplicate) {
-                SuspiciousRepCase created = new SuspiciousRepCase(targetId, ipHash, new ArrayList<>(givers), timestamp, false);
+                created = new SuspiciousRepCase(targetId, type, caseKey, givers, timestamp, false, detail);
                 suspiciousCases.add(created);
-                notifyStaff(created);
             }
+        }
+        if (created != null) {
+            dirtyMarker.run();
+            notifyStaff(created);
         }
     }
 
     private void notifyStaff(SuspiciousRepCase caseData) {
-        String targetArg = resolveTargetArgument(caseData.targetId);
-        String inspectCommand = "/rep admin inspect " + targetArg + " " + caseData.sourceIpHash;
-
+        String targetArgument = resolveTargetArgument(caseData.targetId);
+        String inspectCommand = "/rep admin inspect " + targetArgument + " " + caseData.caseKey;
+        Component message = Component.text("REP ALERT: ", NamedTextColor.RED)
+                .append(Component.text(caseData.type, NamedTextColor.YELLOW))
+                .append(Component.text(" involving ", NamedTextColor.RED))
+                .append(Component.text(nameOf(caseData.targetId), NamedTextColor.YELLOW))
+                .append(Component.text(" [inspect]", NamedTextColor.AQUA)
+                        .clickEvent(ClickEvent.runCommand(inspectCommand))
+                        .hoverEvent(HoverEvent.showText(Component.text(caseData.detail, NamedTextColor.GRAY))));
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (!player.hasPermission("enthusiacommend.rep.alert")) {
-                continue;
+            if (player.hasPermission("enthusiacommend.rep.alert")) {
+                player.sendMessage(message);
             }
-            ComponentBuilder builder = new ComponentBuilder("ALT REP ALERT: IP group ")
-                    .color(net.md_5.bungee.api.ChatColor.RED)
-                    .append(caseData.sourceIpHash)
-                    .color(net.md_5.bungee.api.ChatColor.YELLOW)
-                    .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, inspectCommand))
-                    .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                            new ComponentBuilder("Click to inspect report").color(net.md_5.bungee.api.ChatColor.GRAY).create()))
-                    .append(" accounts ")
-                    .color(net.md_5.bungee.api.ChatColor.RED)
-                    .event((ClickEvent) null)
-                    .event((HoverEvent) null)
-                    .append(formatNames(caseData.giverIds))
-                    .color(net.md_5.bungee.api.ChatColor.WHITE)
-                    .append(" down-repped ")
-                    .color(net.md_5.bungee.api.ChatColor.RED)
-                    .append(nameOf(caseData.targetId))
-                    .color(net.md_5.bungee.api.ChatColor.YELLOW)
-                    .append(".")
-                    .color(net.md_5.bungee.api.ChatColor.RED);
-            player.spigot().sendMessage(builder.create());
         }
     }
 
-    private String formatNames(Collection<UUID> playerIds) {
-        List<String> names = new ArrayList<>();
-        for (UUID playerId : playerIds) {
-            names.add(nameOf(playerId));
+    private void recordPlayerChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action,
+                                    RepCategory category, String reason, int oldScore, int newScore) {
+        if (analyticsService != null) {
+            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
         }
-        return String.join(", ", names);
+    }
+
+    private void recordStaffChange(UUID targetId, CommandSender actor, int delta, ReputationChangeAction action,
+                                   ReputationChangeSource source, RepCategory category, String reason,
+                                   int oldScore, int newScore) {
+        if (analyticsService != null) {
+            analyticsService.recordStaffChange(targetId, actor, delta, action, source, category, reason, oldScore, newScore);
+        }
+    }
+
+    private void recordChange(UUID targetId, UUID actorId, int delta, ReputationChangeAction action,
+                              ReputationChangeSource source, RepCategory category, String reason,
+                              int oldScore, int newScore) {
+        if (analyticsService == null) {
+            return;
+        }
+        if (source == ReputationChangeSource.PLAYER_ACTION) {
+            analyticsService.recordPlayerChange(targetId, actorId, delta, action, category, reason, oldScore, newScore);
+        } else {
+            analyticsService.recordChange(targetId, actorId, null, delta, action, source, category, reason, oldScore, newScore);
+        }
+    }
+
+    private void cacheCommendation(Commendation commendation, boolean replaceExisting) {
+        List<Commendation> targetEntries = commendationsByTarget.computeIfAbsent(
+                commendation.getTarget(), ignored -> java.util.Collections.synchronizedList(new ArrayList<>()));
+        Map<UUID, Commendation> giverEntries = commendationsByGiver.computeIfAbsent(
+                commendation.getGiver(), ignored -> new ConcurrentHashMap<>());
+        if (replaceExisting) {
+            Commendation previous = giverEntries.get(commendation.getTarget());
+            if (previous != null) {
+                synchronized (targetEntries) {
+                    targetEntries.removeIf(entry -> entry.getGiver().equals(commendation.getGiver()));
+                }
+            }
+        }
+        synchronized (targetEntries) {
+            targetEntries.add(commendation);
+        }
+        giverEntries.put(commendation.getTarget(), commendation);
     }
 
     private String resolveTargetArgument(UUID targetId) {
@@ -532,77 +765,133 @@ public final class RepService {
         return player.getName() != null ? player.getName() : targetId.toString();
     }
 
-    private String key(UUID giverId, UUID targetId) {
-        return giverId + "->" + targetId;
+    private RepPair key(UUID giverId, UUID targetId) {
+        return new RepPair(giverId, targetId);
     }
 
     private Commendation cloneCommendation(Commendation commendation) {
-        return new Commendation(
-                commendation.getGiver(),
-                commendation.getTarget(),
-                commendation.isPositive(),
-                commendation.getCategory(),
-                commendation.getReasonText(),
-                commendation.getCreatedAt(),
-                commendation.getLastEditedAt(),
-                commendation.getIpHash()
-        );
+        return commendation.snapshot();
     }
 
     private String nextRemovalId() {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 
+    private record RepPair(UUID giverId, UUID targetId) {
+    }
+
     private record AltRepRecord(UUID giverId, UUID targetId, boolean positive, long timestamp, String ipHash) {
+    }
+
+    public record AuditRecord(AuditAction action, Commendation commendation, int scoreDelta, int newTotal, long timestamp) {
+    }
+
+    public enum AuditAction {
+        CREATED,
+        UPDATED,
+        REMOVED,
+        RESTORED
     }
 
     public static final class SuspiciousRepCase {
         private final UUID targetId;
-        private final String sourceIpHash;
+        private final String type;
+        private final String caseKey;
         private final List<UUID> giverIds;
         private final long createdAt;
         private boolean resolved;
+        private final String detail;
 
-        public SuspiciousRepCase(UUID targetId, String ipHash, List<UUID> giverIds, long createdAt, boolean resolved) {
+        public SuspiciousRepCase(UUID targetId, String type, String caseKey, List<UUID> giverIds,
+                                 long createdAt, boolean resolved, String detail) {
             this.targetId = targetId;
-            this.sourceIpHash = ipHash;
-            this.giverIds = List.copyOf(giverIds);
+            this.type = type == null ? "UNKNOWN" : type;
+            this.caseKey = caseKey == null ? this.type : caseKey;
+            this.giverIds = List.copyOf(giverIds == null ? List.of() : giverIds);
             this.createdAt = createdAt;
             this.resolved = resolved;
+            this.detail = detail == null ? "" : detail;
         }
 
-        public UUID getTarget() {
-            return targetId;
+        /** Compatibility constructor for older in-memory callers. */
+        public SuspiciousRepCase(UUID targetId, String key, List<UUID> giverIds, long createdAt, boolean resolved) {
+            this(targetId, "ALT_IP", key, giverIds, createdAt, resolved, "");
         }
 
-        public String ipHash() {
-            return sourceIpHash;
+        public UUID getTarget() { return targetId; }
+        public String ipHash() { return caseKey; }
+        public String type() { return type; }
+        public String key() { return caseKey; }
+        public List<UUID> givers() { return giverIds; }
+        public long getCreatedAt() { return createdAt; }
+        public boolean isResolved() { return resolved; }
+        public String detail() { return detail; }
+
+        public Map<String, Object> serialize() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("target", targetId.toString());
+            map.put("type", type);
+            map.put("key", caseKey);
+            map.put("givers", giverIds.stream().map(UUID::toString).toList());
+            map.put("createdAt", createdAt);
+            map.put("resolved", resolved);
+            map.put("detail", detail);
+            return map;
         }
 
-        public List<UUID> givers() {
-            return giverIds;
+        public static SuspiciousRepCase fromMap(Map<?, ?> raw) {
+            try {
+                UUID target = UUID.fromString(String.valueOf(raw.get("target")));
+                String type = Objects.toString(raw.get("type"), "ALT_IP");
+                String key = Objects.toString(raw.get("key"), Objects.toString(raw.get("ipHash"), type));
+                List<UUID> givers = new ArrayList<>();
+                Object rawGivers = raw.get("givers");
+                if (rawGivers instanceof Collection<?> values) {
+                    for (Object value : values) {
+                        try {
+                            givers.add(UUID.fromString(String.valueOf(value)));
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
+                }
+                long createdAt = raw.get("createdAt") instanceof Number value ? value.longValue() : System.currentTimeMillis();
+                boolean resolved = raw.get("resolved") instanceof Boolean value
+                        ? value : Boolean.parseBoolean(String.valueOf(raw.get("resolved")));
+                String detail = Objects.toString(raw.get("detail"), "");
+                return new SuspiciousRepCase(target, type, key, givers, createdAt, resolved, detail);
+            } catch (Exception ignored) {
+                return null;
+            }
         }
 
-        public long getCreatedAt() {
-            return createdAt;
-        }
-
-        public boolean isResolved() {
-            return resolved;
+        public SuspiciousRepCase copy() {
+            return new SuspiciousRepCase(targetId, type, caseKey, giverIds, createdAt, resolved, detail);
         }
     }
 
-    public record CommendationResult(boolean success, boolean created, Commendation commendation, long cooldownRemainingMillis, int repDelta) {
+    public record CommendationResult(boolean success, boolean created, Commendation commendation,
+                                      long cooldownRemainingMillis, int repDelta, Failure failure) {
+        public enum Failure {
+            NONE,
+            COOLDOWN,
+            INVALID_CATEGORY
+        }
+
         public static CommendationResult created(Commendation commendation) {
-            return new CommendationResult(true, true, commendation, 0L, commendation.isPositive() ? 1 : -1);
+            return new CommendationResult(true, true, commendation, 0L,
+                    commendation.getScoreValue(), Failure.NONE);
         }
 
         public static CommendationResult updated(Commendation commendation, int delta) {
-            return new CommendationResult(true, false, commendation, 0L, delta);
+            return new CommendationResult(true, false, commendation, 0L, delta, Failure.NONE);
         }
 
         public static CommendationResult cooldown(long remainingMillis) {
-            return new CommendationResult(false, false, null, remainingMillis, 0);
+            return new CommendationResult(false, false, null, remainingMillis, 0, Failure.COOLDOWN);
+        }
+
+        public static CommendationResult invalid() {
+            return new CommendationResult(false, false, null, 0L, 0, Failure.INVALID_CATEGORY);
         }
     }
 
@@ -619,21 +908,10 @@ public final class RepService {
             this.removerId = removedBy;
         }
 
-        public String id() {
-            return removalId;
-        }
-
-        public Commendation commendation() {
-            return removedCommendation;
-        }
-
-        public long removedAt() {
-            return removedAtMillis;
-        }
-
-        public UUID removedBy() {
-            return removerId;
-        }
+        public String id() { return removalId; }
+        public Commendation commendation() { return removedCommendation; }
+        public long removedAt() { return removedAtMillis; }
+        public UUID removedBy() { return removerId; }
 
         public Map<String, Object> serialize() {
             Map<String, Object> map = new LinkedHashMap<>(removedCommendation.serialize());
@@ -651,19 +929,18 @@ public final class RepService {
                 UUID giver = UUID.fromString(String.valueOf(raw.get("giver")));
                 UUID target = UUID.fromString(String.valueOf(raw.get("target")));
                 boolean positive = raw.get("positive") instanceof Boolean flag
-                        ? flag
-                        : Boolean.parseBoolean(String.valueOf(raw.get("positive")));
-                RepCategory category = RepCategory.valueOf(String.valueOf(raw.get("category")));
+                        ? flag : Boolean.parseBoolean(String.valueOf(raw.get("positive")));
+                RepCategory category = RepCategory.fromStored(Objects.toString(raw.get("category"), null), positive);
                 String reason = Objects.toString(raw.get("reason"), "");
                 long createdAt = raw.get("createdAt") instanceof Number value ? value.longValue() : Instant.now().toEpochMilli();
                 long lastEditedAt = raw.get("lastEditedAt") instanceof Number value ? value.longValue() : createdAt;
                 String ipHash = raw.get("ipHash") != null ? raw.get("ipHash").toString() : null;
+                int scoreValue = raw.get("scoreValue") instanceof Number value
+                        ? value.intValue() : (positive ? 1 : -1);
                 long removedAt = raw.get("removedAt") instanceof Number value ? value.longValue() : Instant.now().toEpochMilli();
-                UUID removedBy = null;
-                if (raw.get("removedBy") != null) {
-                    removedBy = UUID.fromString(String.valueOf(raw.get("removedBy")));
-                }
-                Commendation commendation = new Commendation(giver, target, positive, category, reason, createdAt, lastEditedAt, ipHash);
+                UUID removedBy = raw.get("removedBy") == null ? null : UUID.fromString(String.valueOf(raw.get("removedBy")));
+                Commendation commendation = new Commendation(
+                        giver, target, positive, category, reason, createdAt, lastEditedAt, ipHash, scoreValue);
                 return new RemovedRep(id, commendation, removedAt, removedBy);
             } catch (Exception ignored) {
                 return null;
@@ -671,7 +948,7 @@ public final class RepService {
         }
 
         public RemovedRep copy() {
-            return new RemovedRep(removalId, new Commendation(
+            Commendation copied = new Commendation(
                     removedCommendation.getGiver(),
                     removedCommendation.getTarget(),
                     removedCommendation.isPositive(),
@@ -679,8 +956,9 @@ public final class RepService {
                     removedCommendation.getReasonText(),
                     removedCommendation.getCreatedAt(),
                     removedCommendation.getLastEditedAt(),
-                    removedCommendation.getIpHash()
-            ), removedAtMillis, removerId);
+                    removedCommendation.getIpHash(),
+                    removedCommendation.getScoreValue());
+            return new RemovedRep(removalId, copied, removedAtMillis, removerId);
         }
     }
 }

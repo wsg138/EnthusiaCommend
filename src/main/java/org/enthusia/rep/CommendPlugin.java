@@ -9,10 +9,11 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
+import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
+import org.enthusia.rep.discord.DiscordWebhookService;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.gui.RepGuiManager;
 import org.enthusia.rep.integration.TeleportIntegration;
@@ -25,15 +26,17 @@ import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.stalk.StalkManager;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 import org.enthusia.rep.storage.PluginDataStore;
+import org.enthusia.rep.storage.OrderedSnapshotWriter;
 import org.enthusia.rep.storage.YamlPluginDataStore;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class CommendPlugin extends JavaPlugin {
-
     private RepConfig repConfig;
     private Messages messages;
     private RegionManager regionManager;
@@ -46,59 +49,26 @@ public final class CommendPlugin extends JavaPlugin {
     private TeleportIntegration teleportIntegration;
     private WarzoneDuelsHook warzoneDuelsHook;
     private PlanIntegrationBootstrap planIntegration;
+    private DiscordWebhookService discordWebhookService;
     private Economy economy;
     private PluginDataStore dataStore;
     private BukkitTask autoSaveTask;
     private final AtomicBoolean dirty = new AtomicBoolean(false);
-    private final Object saveLock = new Object();
+    private final AtomicLong saveSequence = new AtomicLong();
+    private OrderedSnapshotWriter snapshotWriter;
 
-    public RepConfig getRepConfig() {
-        return repConfig;
-    }
-
-    public Messages getMessages() {
-        return messages;
-    }
-
-    public RegionManager getRegionManager() {
-        return regionManager;
-    }
-
-    public PlaytimeService getPlaytimeService() {
-        return playtimeService;
-    }
-
-    public RepService getRepService() {
-        return repService;
-    }
-
-    public ReputationAnalyticsService getAnalyticsService() {
-        return analyticsService;
-    }
-
-    public RepEffectManager getEffectManager() {
-        return effectManager;
-    }
-
-    public StalkManager getStalkManager() {
-        return stalkManager;
-    }
-
-    public RepGuiManager getRepGuiManager() {
-        return repGuiManager;
-    }
-
-    public TeleportIntegration getTeleportIntegration() {
-        return teleportIntegration;
-    }
-
-    public WarzoneDuelsHook getWarzoneDuelsHook() {
-        return warzoneDuelsHook;
-    }
-
-    public Economy getEconomy() {
-        return economy;
-    }
+    public RepConfig getRepConfig() { return repConfig; }
+    public Messages getMessages() { return messages; }
+    public RegionManager getRegionManager() { return regionManager; }
+    public PlaytimeService getPlaytimeService() { return playtimeService; }
+    public RepService getRepService() { return repService; }
+    public ReputationAnalyticsService getAnalyticsService() { return analyticsService; }
+    public RepEffectManager getEffectManager() { return effectManager; }
+    public StalkManager getStalkManager() { return stalkManager; }
+    public RepGuiManager getRepGuiManager() { return repGuiManager; }
+    public TeleportIntegration getTeleportIntegration() { return teleportIntegration; }
+    public WarzoneDuelsHook getWarzoneDuelsHook() { return warzoneDuelsHook; }
+    public Economy getEconomy() { return economy; }
 
     @Override
     public void onEnable() {
@@ -109,12 +79,25 @@ public final class CommendPlugin extends JavaPlugin {
         this.messages = new Messages(this);
         this.messages.reload();
         this.dataStore = new YamlPluginDataStore(this);
+        this.snapshotWriter = new OrderedSnapshotWriter(dataStore);
+        this.discordWebhookService = new DiscordWebhookService(repConfig.getDiscordWebhookUrl(), getLogger());
 
         PluginDataSnapshot snapshot = dataStore.load();
         this.regionManager = new RegionManager(this);
         this.playtimeService = new PlaytimeService(repConfig);
         this.analyticsService = new ReputationAnalyticsService(() -> this.repConfig, snapshot.reputationChanges(), this::markDirty);
-        this.repService = new RepService(this, repConfig, snapshot, this::markDirty, this::handleScoreChanged, analyticsService);
+        this.repService = new RepService(
+                this,
+                repConfig,
+                snapshot,
+                this::markDirty,
+                this::handleScoreChanged,
+                analyticsService,
+                this::handleAuditRecord
+        );
+        for (var player : Bukkit.getOnlinePlayers()) {
+            repService.rememberName(player.getUniqueId(), player.getName());
+        }
         this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
@@ -134,7 +117,7 @@ public final class CommendPlugin extends JavaPlugin {
 
         teleportIntegration.refresh();
         effectManager.refreshAll();
-        startAutoSaveTask();
+        restartAutoSaveTask();
         registerPlanIntegration();
 
         getLogger().info("EnthusiaCommend enabled.");
@@ -142,10 +125,7 @@ public final class CommendPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (autoSaveTask != null) {
-            autoSaveTask.cancel();
-            autoSaveTask = null;
-        }
+        cancelAutoSaveTask();
         if (repGuiManager != null) {
             repGuiManager.shutdown();
         }
@@ -159,11 +139,13 @@ public final class CommendPlugin extends JavaPlugin {
             planIntegration.shutdown();
         }
         flushDataSync();
+        closeDiscordWebhook();
     }
 
     public void reloadPluginConfig() {
         if (repGuiManager != null) {
-            repGuiManager.cancelOpenAnvilSessions(org.bukkit.ChatColor.YELLOW + "Rep anvil input was closed because the plugin reloaded.");
+            repGuiManager.cancelOpenAnvilSessions(org.bukkit.ChatColor.YELLOW
+                    + "Rep anvil input was closed because the plugin reloaded.");
         }
         reloadConfig();
         mergeMissingConfigDefaults();
@@ -172,13 +154,15 @@ public final class CommendPlugin extends JavaPlugin {
         this.regionManager.reload(getConfig(), this);
         this.playtimeService.reload(repConfig);
         this.repService.reload(repConfig);
-        if (this.analyticsService != null) {
-            this.analyticsService.pruneExpired(true);
+        if (analyticsService != null) {
+            analyticsService.pruneExpired(true);
         }
         this.stalkManager.reload(repConfig);
         this.effectManager.reload(repConfig);
         this.warzoneDuelsHook.refresh();
         this.teleportIntegration.refresh();
+        reloadDiscordWebhook();
+        restartAutoSaveTask();
         registerPlanIntegration();
     }
 
@@ -219,28 +203,42 @@ public final class CommendPlugin extends JavaPlugin {
         this.economy = provider.getProvider();
     }
 
-    private void startAutoSaveTask() {
-        autoSaveTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            if (!dirty.compareAndSet(true, false)) {
-                return;
-            }
-            PluginDataSnapshot snapshot = buildSnapshot();
-            Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-                synchronized (saveLock) {
-                    dataStore.save(snapshot);
-                }
-            });
-        }, repConfig.getAutoSaveIntervalTicks(), repConfig.getAutoSaveIntervalTicks());
+    private void restartAutoSaveTask() {
+        cancelAutoSaveTask();
+        long interval = repConfig.getAutoSaveIntervalTicks();
+        autoSaveTask = Bukkit.getScheduler().runTaskTimer(this, this::queueDirtySave, interval, interval);
+    }
+
+    private void cancelAutoSaveTask() {
+        if (autoSaveTask != null) {
+            autoSaveTask.cancel();
+            autoSaveTask = null;
+        }
+    }
+
+    private void queueDirtySave() {
+        if (!dirty.compareAndSet(true, false)) {
+            return;
+        }
+        PluginDataSnapshot snapshot = buildSnapshot();
+        long sequence = saveSequence.incrementAndGet();
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> saveSnapshot(snapshot, sequence));
     }
 
     private void flushDataSync() {
         if (dataStore == null || repService == null || stalkManager == null) {
             return;
         }
-        synchronized (saveLock) {
-            dataStore.save(buildSnapshot());
+        long sequence = saveSequence.incrementAndGet();
+        OrderedSnapshotWriter.SaveResult result = snapshotWriter.saveIfNewer(sequence, buildSnapshot());
+        dirty.set(result == OrderedSnapshotWriter.SaveResult.FAILED);
+    }
+
+    private void saveSnapshot(PluginDataSnapshot snapshot, long sequence) {
+        OrderedSnapshotWriter.SaveResult result = snapshotWriter.saveIfNewer(sequence, snapshot);
+        if (result == OrderedSnapshotWriter.SaveResult.FAILED) {
+            dirty.set(true);
         }
-        dirty.set(false);
     }
 
     private PluginDataSnapshot buildSnapshot() {
@@ -249,6 +247,7 @@ public final class CommendPlugin extends JavaPlugin {
                 java.util.List.of(),
                 java.util.List.of(),
                 stalkManager.snapshotEntries(),
+                java.util.List.of(),
                 java.util.List.of()
         );
         PluginDataSnapshot repSnapshot = repService.snapshot(stalkSnapshot);
@@ -257,7 +256,9 @@ public final class CommendPlugin extends JavaPlugin {
                 repSnapshot.commendations(),
                 repSnapshot.removedEntries(),
                 repSnapshot.stalkEntries(),
-                analyticsService != null ? analyticsService.snapshot() : java.util.List.of()
+                analyticsService != null ? analyticsService.snapshot() : java.util.List.of(),
+                repSnapshot.suspiciousCases(),
+                repSnapshot.removalCooldowns()
         );
     }
 
@@ -273,6 +274,49 @@ public final class CommendPlugin extends JavaPlugin {
             teleportIntegration.updatePlayer(playerId);
         }
         markDirty();
+    }
+
+    private void handleAuditRecord(RepService.AuditRecord record) {
+        if (record == null || discordWebhookService == null || !discordWebhookService.isEnabled()) {
+            return;
+        }
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(this, () -> handleAuditRecord(record));
+            return;
+        }
+        var commendation = record.commendation();
+        DiscordWebhookService.Action action = switch (record.action()) {
+            case CREATED -> DiscordWebhookService.Action.CREATED;
+            case UPDATED -> DiscordWebhookService.Action.UPDATED;
+            case REMOVED -> DiscordWebhookService.Action.REMOVED;
+            case RESTORED -> DiscordWebhookService.Action.RESTORED;
+        };
+        int displayedValue = switch (record.action()) {
+            case CREATED, UPDATED -> commendation.getScoreValue();
+            case REMOVED, RESTORED -> record.scoreDelta();
+        };
+        discordWebhookService.log(new DiscordWebhookService.LogEntry(
+                action,
+                repService.nameOf(commendation.getGiver()),
+                repService.nameOf(commendation.getTarget()),
+                commendation.getCategory(),
+                commendation.getReasonText(),
+                displayedValue,
+                record.newTotal(),
+                Instant.ofEpochMilli(record.timestamp())
+        ));
+    }
+
+    private void reloadDiscordWebhook() {
+        closeDiscordWebhook();
+        discordWebhookService = new DiscordWebhookService(repConfig.getDiscordWebhookUrl(), getLogger());
+    }
+
+    private void closeDiscordWebhook() {
+        if (discordWebhookService != null) {
+            discordWebhookService.close();
+            discordWebhookService = null;
+        }
     }
 
     private void registerPlanIntegration() {
@@ -294,12 +338,13 @@ public final class CommendPlugin extends JavaPlugin {
             if (inputStream == null) {
                 return;
             }
-            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
+                    new InputStreamReader(inputStream, StandardCharsets.UTF_8));
             if (mergeMissingSections(config, defaults)) {
                 saveConfig();
             }
-        } catch (Exception ex) {
-            getLogger().warning("Failed to merge config defaults: " + ex.getMessage());
+        } catch (Exception exception) {
+            getLogger().warning("Failed to merge config defaults: " + exception.getMessage());
         }
     }
 

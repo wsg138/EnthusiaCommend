@@ -151,11 +151,20 @@ public final class RepGuiManager implements Listener {
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId, scoreColor + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
-            headMeta.setLore(List.of(
-                    ChatColor.GRAY + "Total Rep: " + scoreColor + score,
-                    ChatColor.GRAY + "Positives: " + ChatColor.GREEN + "+" + positives,
-                    ChatColor.GRAY + "Negatives: " + ChatColor.RED + "-" + negatives
-            ));
+            List<String> profileLore = new ArrayList<>();
+            profileLore.add(ChatColor.GRAY + "Total Rep: " + scoreColor + score);
+            profileLore.add(ChatColor.GRAY + "Positive reviews: " + ChatColor.GREEN + positives);
+            profileLore.add(ChatColor.GRAY + "Negative reviews: " + ChatColor.RED + negatives);
+            Map<RepCategory, Integer> categoryScores = repService.getCategoryScores(targetId);
+            if (!categoryScores.isEmpty()) {
+                profileLore.add("");
+                profileLore.add(ChatColor.GOLD + "Category scores:");
+                categoryScores.entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .forEach(entry -> profileLore.add(ChatColor.GRAY + displayName(entry.getKey()) + ": "
+                                + coloredValue(entry.getValue())));
+            }
+            headMeta.setLore(profileLore);
             head.setItemMeta(headMeta);
         }
         inventory.setItem(4, head);
@@ -794,7 +803,7 @@ public final class RepGuiManager implements Listener {
                 List.of(
                         ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
                         ChatColor.GRAY + CATEGORY_LABEL + ChatColor.WHITE + displayName(commendation.getCategory()),
-                        ChatColor.GRAY + "Value: " + (commendation.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1")
+                        ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue()))
                 )));
         inventory.setItem(15, simpleButton(Material.RED_CONCRETE, ChatColor.RED + "Cancel", List.of()));
         admin.openInventory(inventory);
@@ -826,8 +835,15 @@ public final class RepGuiManager implements Listener {
         );
 
         if (!result.success()) {
-            long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
-            player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of("hours", String.valueOf(hoursLeft))));
+            if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
+                player.sendMessage(plugin.getMessages().get("rep.category-invalid", Map.of(
+                        "list", "Was Kind, Helped Me, Gave Items/Money, Trustworthy, Good Stall, "
+                                + "Scammed, Spawn Killed, Griefed, Trapped, Scam Stall")));
+            } else {
+                long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
+                player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(
+                        "hours", String.valueOf(Math.max(1L, hoursLeft)))));
+            }
             openProfile(player, Bukkit.getOfflinePlayer(targetId), returnPage);
             return;
         }
@@ -837,7 +853,7 @@ public final class RepGuiManager implements Listener {
         String formattedScore = plugin.getRepConfig().formatColoredScore(repService.getScore(targetId));
         OfflinePlayer target = Bukkit.getOfflinePlayer(targetId);
         player.sendMessage(plugin.getMessages().get("rep.give-success", Map.of(
-                "amount", commendation.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1",
+                "amount", coloredValue(commendation.getScoreValue()),
                 "target", safeName(target),
                 "category", displayName(commendation.getCategory()),
                 "rep", formattedScore
@@ -847,7 +863,7 @@ public final class RepGuiManager implements Listener {
         if (onlineTarget != null) {
             onlineTarget.sendMessage(plugin.getMessages().get("rep.receive", Map.of(
                     "giver", player.getName(),
-                    "amount", commendation.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1",
+                    "amount", coloredValue(commendation.getScoreValue()),
                     "category", displayName(commendation.getCategory()),
                     "rep", formattedScore
             )));
@@ -927,7 +943,7 @@ public final class RepGuiManager implements Listener {
             meta.setDisplayName(ChatColor.YELLOW + removed.id() + ChatColor.GRAY + " - " + repService.nameOf(commendation.getGiver()));
             meta.setLore(List.of(
                     ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
-                    ChatColor.GRAY + "Value: " + (commendation.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1"),
+                    ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue())),
                     ChatColor.GRAY + "Category: " + ChatColor.WHITE + displayName(commendation.getCategory()),
                     ChatColor.GRAY + "Removed: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(removed.removedAt())),
                     ChatColor.GRAY + "By: " + ChatColor.WHITE + (removed.removedBy() != null ? repService.nameOf(removed.removedBy()) : "unknown"),
@@ -944,12 +960,18 @@ public final class RepGuiManager implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(ChatColor.YELLOW + repService.nameOf(caseData.getTarget()));
-            meta.setLore(List.of(
-                    ChatColor.GRAY + "IP: " + ChatColor.WHITE + caseData.ipHash(),
-                    ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(caseData.givers()),
-                    ChatColor.GRAY + "Created: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(caseData.getCreatedAt())),
-                    ChatColor.YELLOW + "Click to post details in chat."
-            ));
+            List<String> lore = new ArrayList<>();
+            lore.add(ChatColor.GRAY + "Type: " + ChatColor.WHITE + caseData.type());
+            lore.add(ChatColor.GRAY + "Key: " + ChatColor.WHITE + caseData.key());
+            lore.add(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(caseData.givers()));
+            lore.add(ChatColor.GRAY + "Created: " + ChatColor.WHITE
+                    + dateFormatter.format(Instant.ofEpochMilli(caseData.getCreatedAt())));
+            if (!caseData.detail().isBlank()) {
+                lore.add(ChatColor.GRAY + "Details:");
+                lore.addAll(wrapLore(caseData.detail(), 34, ChatColor.WHITE));
+            }
+            lore.add(ChatColor.YELLOW + "Click to post details in chat.");
+            meta.setLore(lore);
             item.setItemMeta(meta);
         }
         return item;
@@ -957,10 +979,15 @@ public final class RepGuiManager implements Listener {
 
     private void sendReportDetails(Player admin, RepService.SuspiciousRepCase caseData) {
         String targetArg = resolveTargetArgument(caseData.getTarget());
-        admin.sendMessage(ChatColor.GOLD + "ALT REP REPORT: " + ChatColor.YELLOW + repService.nameOf(caseData.getTarget())
-                + ChatColor.GRAY + " (IP " + ChatColor.YELLOW + caseData.ipHash() + ChatColor.GRAY + ")");
+        admin.sendMessage(ChatColor.GOLD + "REP REPORT: " + ChatColor.YELLOW + repService.nameOf(caseData.getTarget()));
+        admin.sendMessage(ChatColor.GRAY + "Type: " + ChatColor.WHITE + caseData.type()
+                + ChatColor.GRAY + " | Key: " + ChatColor.WHITE + caseData.key());
         admin.sendMessage(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(caseData.givers()));
-        admin.sendMessage(ChatColor.GRAY + "Created: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(caseData.getCreatedAt())));
+        admin.sendMessage(ChatColor.GRAY + "Created: " + ChatColor.WHITE
+                + dateFormatter.format(Instant.ofEpochMilli(caseData.getCreatedAt())));
+        if (!caseData.detail().isBlank()) {
+            admin.sendMessage(ChatColor.GRAY + "Details: " + ChatColor.WHITE + caseData.detail());
+        }
         admin.spigot().sendMessage(new ComponentBuilder(ChatColor.YELLOW + "Inspect report")
                 .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/rep admin inspect " + targetArg + " " + caseData.ipHash()))
                 .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT, new ComponentBuilder(ChatColor.GRAY + "Click to inspect this report").create()))
@@ -1064,7 +1091,7 @@ public final class RepGuiManager implements Listener {
         if (existing == null) {
             lore.add(ChatColor.GRAY + "Leave a " + (positiveButton ? "positive" : "negative") + " commendation.");
         } else {
-            lore.add(ChatColor.GRAY + "You already left " + (existing.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-1") + ChatColor.GRAY + ".");
+            lore.add(ChatColor.GRAY + "You already left " + (coloredValue(existing.getScoreValue())) + ChatColor.GRAY + ".");
             lore.add(ChatColor.GRAY + CATEGORY_LABEL + ChatColor.YELLOW + displayName(existing.getCategory()));
         }
         if (cooldownMillis > 0L) {
@@ -1117,11 +1144,11 @@ public final class RepGuiManager implements Listener {
     }
 
     private List<RepCategory> positiveCategories() {
-        return List.of(RepCategory.WAS_KIND, RepCategory.HELPED_ME, RepCategory.GAVE_ITEMS, RepCategory.TRUSTWORTHY, RepCategory.GOOD_STALL, RepCategory.OTHER_POSITIVE);
+        return List.of(RepCategory.WAS_KIND, RepCategory.HELPED_ME, RepCategory.GAVE_ITEMS, RepCategory.TRUSTWORTHY, RepCategory.GOOD_STALL);
     }
 
     private List<RepCategory> negativeCategories() {
-        return List.of(RepCategory.SCAMMED, RepCategory.SPAWN_KILLED, RepCategory.GRIEFED, RepCategory.TRAPPED, RepCategory.SCAM_STALL, RepCategory.OTHER_NEGATIVE);
+        return List.of(RepCategory.SCAMMED, RepCategory.SPAWN_KILLED, RepCategory.GRIEFED, RepCategory.TRAPPED, RepCategory.SCAM_STALL);
     }
 
     private String displayName(RepCategory category) {
@@ -1165,6 +1192,11 @@ public final class RepGuiManager implements Listener {
             lines.add(color + current.toString());
         }
         return lines;
+    }
+
+    private String coloredValue(int value) {
+        return (value > 0 ? ChatColor.GREEN : value < 0 ? ChatColor.RED : ChatColor.YELLOW)
+                + (value > 0 ? "+" + value : String.valueOf(value));
     }
 
     private String percent(int value) {
