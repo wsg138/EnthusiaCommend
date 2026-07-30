@@ -114,9 +114,15 @@ def patch_history() -> None:
     service_path = Path("src/main/java/org/enthusia/rep/rep/RepService.java")
     service = service_path.read_text(encoding="utf-8")
     old_service = '''        if (delta != 0) {
-            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE, category, reasonText, oldScore, newScore);
+            applyScore(targetId, oldScore + delta, true);
+            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
+                    normalizedCategory, reasonText, oldScore, oldScore + delta);
         }'''
-    new_service = '''        recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE, category, reasonText, oldScore, newScore);'''
+    new_service = '''        if (delta != 0) {
+            applyScore(targetId, oldScore + delta, true);
+        }
+        recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
+                normalizedCategory, reasonText, oldScore, oldScore + delta);'''
     if old_service not in service:
         raise SystemExit("RepService metadata-update history block not found")
     service_path.write_text(service.replace(old_service, new_service), encoding="utf-8")
