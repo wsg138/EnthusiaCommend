@@ -4,5 +4,5 @@ public interface PluginDataStore {
 
     PluginDataSnapshot load();
 
-    void save(PluginDataSnapshot snapshot);
+    boolean save(PluginDataSnapshot snapshot);
 }

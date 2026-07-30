@@ -57,4 +57,13 @@ class RepRulesTest {
         assertNull(RepRules.acceptedCategory(RepCategory.OTHER_POSITIVE, true));
         assertNull(RepRules.acceptedCategory(RepCategory.WAS_KIND, false));
     }
+
+    @Test
+    void removalCooldownSurvivesUntilExactExpiry() {
+        long removedAt = 10_000L;
+        long duration = 5_000L;
+        assertTrue(RepRules.isCooldownActive(removedAt, 14_999L, duration));
+        assertFalse(RepRules.isCooldownActive(removedAt, 15_000L, duration));
+        assertFalse(RepRules.isCooldownActive(removedAt, 9_999L, duration));
+    }
 }

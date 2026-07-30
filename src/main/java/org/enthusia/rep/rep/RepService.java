@@ -46,7 +46,7 @@ public final class RepService {
     private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
     private final Map<UUID, List<Commendation>> commendationsByTarget = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, Commendation>> commendationsByGiver = new ConcurrentHashMap<>();
-    private final Map<String, Long> removalCooldowns = new ConcurrentHashMap<>();
+    private final Map<RepPair, Long> removalCooldowns = new ConcurrentHashMap<>();
     private final Map<String, List<AltRepRecord>> altRecordsByHash = new ConcurrentHashMap<>();
     private final List<SuspiciousRepCase> suspiciousCases = new ArrayList<>();
     private final List<RemovedRep> removedEntries = new ArrayList<>();
@@ -103,6 +103,13 @@ public final class RepService {
             suspiciousCases.addAll(snapshot.suspiciousCases().stream().map(SuspiciousRepCase::copy).toList());
         }
         removalCooldowns.clear();
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        for (PluginDataSnapshot.RemovalCooldownEntry entry : snapshot.removalCooldowns()) {
+            if (RepRules.isCooldownActive(entry.removedAt(), now, cooldownMillis)) {
+                removalCooldowns.put(new RepPair(entry.giverId(), entry.targetId()), entry.removedAt());
+            }
+        }
         rebuildAntiAbuseIndex();
     }
 
@@ -146,13 +153,21 @@ public final class RepService {
         synchronized (suspiciousCases) {
             cases = suspiciousCases.stream().map(SuspiciousRepCase::copy).toList();
         }
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        List<PluginDataSnapshot.RemovalCooldownEntry> cooldowns = removalCooldowns.entrySet().stream()
+                .filter(entry -> RepRules.isCooldownActive(entry.getValue(), now, cooldownMillis))
+                .map(entry -> new PluginDataSnapshot.RemovalCooldownEntry(
+                        entry.getKey().giverId(), entry.getKey().targetId(), entry.getValue()))
+                .toList();
         return new PluginDataSnapshot(
                 scores,
                 commendations,
                 removed,
                 base.stalkEntries(),
                 base.reputationChanges(),
-                cases
+                cases,
+                cooldowns
         );
     }
 
@@ -439,12 +454,13 @@ public final class RepService {
         if (removedAt == null) {
             return 0L;
         }
-        long remaining = repConfig.getEditCooldownMillis() - (System.currentTimeMillis() - removedAt);
-        if (remaining <= 0L) {
+        long now = System.currentTimeMillis();
+        long cooldownMillis = repConfig.getEditCooldownMillis();
+        if (!RepRules.isCooldownActive(removedAt, now, cooldownMillis)) {
             removalCooldowns.remove(key(giverId, targetId));
             return 0L;
         }
-        return remaining;
+        return cooldownMillis - (now - removedAt);
     }
 
     public void resetAll(UUID targetId) {
@@ -455,11 +471,17 @@ public final class RepService {
     }
 
     public void resetAllByStaff(UUID targetId, CommandSender actor) {
-        int oldScore = getScore(targetId);
-        resetAll(targetId);
-        int newScore = getScore(targetId);
-        recordStaffChange(targetId, actor, newScore - oldScore, ReputationChangeAction.RESET,
-                ReputationChangeSource.ADMIN_CORRECTION, null, "Admin reset", oldScore, newScore);
+        UUID removerId = actor instanceof Player player ? player.getUniqueId() : null;
+        List<Commendation> current = new ArrayList<>(getCommendationsAbout(targetId));
+        for (Commendation commendation : current) {
+            removeCommendationLogged(removerId, commendation.getGiver(), targetId, false);
+        }
+        int residualScore = getScore(targetId);
+        if (residualScore != 0) {
+            applyScore(targetId, 0, true);
+            recordStaffChange(targetId, actor, -residualScore, ReputationChangeAction.RESET,
+                    ReputationChangeSource.ADMIN_CORRECTION, null, "Admin reset residual", residualScore, 0);
+        }
     }
 
     public String hashIp(String ipAddress) {
@@ -712,8 +734,8 @@ public final class RepService {
         return player.getName() != null ? player.getName() : targetId.toString();
     }
 
-    private String key(UUID giverId, UUID targetId) {
-        return giverId + "->" + targetId;
+    private RepPair key(UUID giverId, UUID targetId) {
+        return new RepPair(giverId, targetId);
     }
 
     private Commendation cloneCommendation(Commendation commendation) {
@@ -732,6 +754,9 @@ public final class RepService {
 
     private String nextRemovalId() {
         return UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private record RepPair(UUID giverId, UUID targetId) {
     }
 
     private record AltRepRecord(UUID giverId, UUID targetId, boolean positive, long timestamp, String ipHash) {

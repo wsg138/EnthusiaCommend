@@ -23,6 +23,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.FireworkMeta;
+import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -33,8 +34,11 @@ import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -289,38 +293,89 @@ public final class RepEffectManager implements Listener {
     public void onPotionConsume(PlayerItemConsumeEvent event) {
         Player player = event.getPlayer();
         if (warzoneDuelsHook.isDuelExempt(player) || !regionManager.isInSpawnOrWarzone(player.getLocation())) return;
-        Material material = event.getItem().getType();
-        if (material != Material.POTION && material != Material.SPLASH_POTION && material != Material.LINGERING_POTION) return;
+        if (event.getItem().getType() != Material.POTION) return;
         RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
-        if (effects.potionDurationPercent() != 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> applyPotionDurationModifier(player, effects), 5L);
-        }
+        Set<PotionEffectType> affectedTypes = potionEffectTypes(event.getItem());
+        if (effects.potionDurationPercent() == 0 || affectedTypes.isEmpty()) return;
+        Map<PotionEffectType, PotionEffect> before = snapshotPotionEffects(player);
+        Bukkit.getScheduler().runTaskLater(plugin,
+                () -> applyPotionDurationModifier(player, effects, before, affectedTypes), 1L);
     }
 
     @EventHandler
     public void onPotionSplash(PotionSplashEvent event) {
+        Set<PotionEffectType> affectedTypes = new HashSet<>();
+        for (PotionEffect effect : event.getPotion().getEffects()) {
+            affectedTypes.add(effect.getType());
+        }
+        if (affectedTypes.isEmpty()) return;
         for (Entity entity : event.getAffectedEntities()) {
             if (entity instanceof Player player
                     && !warzoneDuelsHook.isDuelExempt(player)
                     && regionManager.isInSpawnOrWarzone(player.getLocation())) {
                 RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
                 if (effects.potionDurationPercent() != 0) {
-                    Bukkit.getScheduler().runTaskLater(plugin, () -> applyPotionDurationModifier(player, effects), 5L);
+                    Map<PotionEffectType, PotionEffect> before = snapshotPotionEffects(player);
+                    Bukkit.getScheduler().runTaskLater(plugin,
+                            () -> applyPotionDurationModifier(player, effects, before, affectedTypes), 1L);
                 }
             }
         }
     }
 
-    private void applyPotionDurationModifier(Player player, RepAppliedEffects effects) {
-        List<PotionEffect> activeEffects = new ArrayList<>(player.getActivePotionEffects());
-        for (PotionEffect effect : activeEffects) {
-            if (!isBeneficial(effect.getType())) continue;
+    private Set<PotionEffectType> potionEffectTypes(ItemStack item) {
+        if (!(item.getItemMeta() instanceof PotionMeta potionMeta)) {
+            return Set.of();
+        }
+        Set<PotionEffectType> types = new HashSet<>();
+        if (potionMeta.getBasePotionType() != null) {
+            for (PotionEffect effect : potionMeta.getBasePotionType().getPotionEffects()) {
+                types.add(effect.getType());
+            }
+        }
+        for (PotionEffect effect : potionMeta.getCustomEffects()) {
+            types.add(effect.getType());
+        }
+        return Set.copyOf(types);
+    }
+
+    private Map<PotionEffectType, PotionEffect> snapshotPotionEffects(Player player) {
+        Map<PotionEffectType, PotionEffect> snapshot = new HashMap<>();
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            snapshot.put(effect.getType(), effect);
+        }
+        return snapshot;
+    }
+
+    private void applyPotionDurationModifier(Player player, RepAppliedEffects effects,
+                                             Map<PotionEffectType, PotionEffect> before,
+                                             Set<PotionEffectType> affectedTypes) {
+        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+            if (!affectedTypes.contains(effect.getType()) || !isBeneficial(effect.getType())) continue;
+            if (!wasPotionEffectAppliedOrRefreshed(before.get(effect.getType()), effect)) continue;
             int adjustedDuration = (int) Math.max(1,
                     Math.round(effect.getDuration() * (1.0D + effects.potionDurationPercent() / 100.0D)));
             player.removePotionEffect(effect.getType());
             player.addPotionEffect(new PotionEffect(effect.getType(), adjustedDuration, effect.getAmplifier(),
                     effect.isAmbient(), effect.hasParticles(), effect.hasIcon()), true);
         }
+    }
+
+    private static boolean wasPotionEffectAppliedOrRefreshed(PotionEffect before, PotionEffect after) {
+        return after != null && wasPotionEffectAppliedOrRefreshed(
+                before != null,
+                before != null ? before.getDuration() : 0,
+                before != null ? before.getAmplifier() : 0,
+                after.getDuration(),
+                after.getAmplifier());
+    }
+
+    static boolean wasPotionEffectAppliedOrRefreshed(boolean hadBefore, int beforeDuration,
+                                                     int beforeAmplifier, int afterDuration,
+                                                     int afterAmplifier) {
+        return !hadBefore
+                || beforeAmplifier != afterAmplifier
+                || afterDuration > beforeDuration + 2;
     }
 
     private boolean isBeneficial(PotionEffectType type) {

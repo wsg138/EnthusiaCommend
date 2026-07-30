@@ -14,17 +14,26 @@ public record PluginDataSnapshot(
         List<RepService.RemovedRep> removedEntries,
         List<StalkEntry> stalkEntries,
         List<ReputationChangeRecord> reputationChanges,
-        List<RepService.SuspiciousRepCase> suspiciousCases
+        List<RepService.SuspiciousRepCase> suspiciousCases,
+        List<RemovalCooldownEntry> removalCooldowns
 ) {
+    public PluginDataSnapshot(
+            Map<UUID, Integer> scores,
+            List<Commendation> commendations,
+            List<RepService.RemovedRep> removedEntries,
+            List<StalkEntry> stalkEntries,
+            List<ReputationChangeRecord> reputationChanges,
+            List<RepService.SuspiciousRepCase> suspiciousCases
+    ) {
+        this(scores, commendations, removedEntries, stalkEntries, reputationChanges, suspiciousCases, List.of());
+    }
+
     public static final PluginDataSnapshot EMPTY = new PluginDataSnapshot(
-            Map.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of()
-    );
+            Map.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
     public record StalkEntry(UUID stalkerId, UUID targetId, long expiresAt) {
+    }
+
+    public record RemovalCooldownEntry(UUID giverId, UUID targetId, long removedAt) {
     }
 }

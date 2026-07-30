@@ -38,6 +38,12 @@ public final class RepRules {
         return candidate.isSelectable() && candidate.isPositive() == positive ? candidate : null;
     }
 
+    public static boolean isCooldownActive(long removedAt, long nowMillis, long cooldownMillis) {
+        return cooldownMillis > 0L
+                && nowMillis >= removedAt
+                && nowMillis - removedAt < cooldownMillis;
+    }
+
     public static boolean isRecentReciprocal(Commendation reverse, long nowMillis) {
         return reverse != null
                 && nowMillis >= reverse.getLastEditedAt()

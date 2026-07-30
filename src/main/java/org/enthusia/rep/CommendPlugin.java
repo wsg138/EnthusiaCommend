@@ -26,6 +26,7 @@ import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.stalk.StalkManager;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 import org.enthusia.rep.storage.PluginDataStore;
+import org.enthusia.rep.storage.OrderedSnapshotWriter;
 import org.enthusia.rep.storage.YamlPluginDataStore;
 
 import java.io.InputStream;
@@ -33,6 +34,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class CommendPlugin extends JavaPlugin {
     private RepConfig repConfig;
@@ -52,7 +54,8 @@ public final class CommendPlugin extends JavaPlugin {
     private PluginDataStore dataStore;
     private BukkitTask autoSaveTask;
     private final AtomicBoolean dirty = new AtomicBoolean(false);
-    private final Object saveLock = new Object();
+    private final AtomicLong saveSequence = new AtomicLong();
+    private OrderedSnapshotWriter snapshotWriter;
 
     public RepConfig getRepConfig() { return repConfig; }
     public Messages getMessages() { return messages; }
@@ -76,6 +79,7 @@ public final class CommendPlugin extends JavaPlugin {
         this.messages = new Messages(this);
         this.messages.reload();
         this.dataStore = new YamlPluginDataStore(this);
+        this.snapshotWriter = new OrderedSnapshotWriter(dataStore);
         this.discordWebhookService = new DiscordWebhookService(repConfig.getDiscordWebhookUrl(), getLogger());
 
         PluginDataSnapshot snapshot = dataStore.load();
@@ -214,21 +218,24 @@ public final class CommendPlugin extends JavaPlugin {
             return;
         }
         PluginDataSnapshot snapshot = buildSnapshot();
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            synchronized (saveLock) {
-                dataStore.save(snapshot);
-            }
-        });
+        long sequence = saveSequence.incrementAndGet();
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> saveSnapshot(snapshot, sequence));
     }
 
     private void flushDataSync() {
         if (dataStore == null || repService == null || stalkManager == null) {
             return;
         }
-        synchronized (saveLock) {
-            dataStore.save(buildSnapshot());
+        long sequence = saveSequence.incrementAndGet();
+        OrderedSnapshotWriter.SaveResult result = snapshotWriter.saveIfNewer(sequence, buildSnapshot());
+        dirty.set(result == OrderedSnapshotWriter.SaveResult.FAILED);
+    }
+
+    private void saveSnapshot(PluginDataSnapshot snapshot, long sequence) {
+        OrderedSnapshotWriter.SaveResult result = snapshotWriter.saveIfNewer(sequence, snapshot);
+        if (result == OrderedSnapshotWriter.SaveResult.FAILED) {
+            dirty.set(true);
         }
-        dirty.set(false);
     }
 
     private PluginDataSnapshot buildSnapshot() {
