@@ -7,9 +7,10 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.config.RepConfig;
-import net.md_5.bungee.api.chat.ClickEvent;
-import net.md_5.bungee.api.chat.ComponentBuilder;
-import net.md_5.bungee.api.chat.HoverEvent;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import java.io.File;
 import java.io.IOException;
@@ -18,6 +19,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.enthusia.rep.discord.DiscordWebhook;
+
 public class RepService {
 
     private final CommendPlugin plugin;
@@ -25,6 +28,7 @@ public class RepService {
     private final File commendationFile;
     private final File removedFile;
     private final Map<UUID, Integer> repMap = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<RepCategory, Integer>> categoryScores = new ConcurrentHashMap<>();
 
     private final Map<UUID, List<Commendation>> byTarget = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, Commendation>> byGiver = new ConcurrentHashMap<>();
@@ -34,7 +38,14 @@ public class RepService {
     private final List<SuspiciousRepCase> suspiciousCases = Collections.synchronizedList(new ArrayList<>());
     private final List<RemovedRep> removedLog = Collections.synchronizedList(new ArrayList<>());
 
+    // Anti-abuse: track rep activity for reciprocity and cluster detection
+    private final Map<String, Long> repActivityLog = new ConcurrentHashMap<>(); // "giverUUID->targetUUID" -> timestamp
+    private static final long RECIPROCITY_WINDOW_MS = 24L * 60L * 60L * 1000L; // 24h
+    private static final long CLUSTER_WINDOW_MS = 6L * 60L * 60L * 1000L;      // 6h
+    private static final int CLUSTER_MIN_GIVERS = 3;                             // 3+ different givers = cluster
+
     private RepConfig repConfig;
+    private DiscordWebhook discordWebhook; // set by plugin after construction
 
     public RepService(CommendPlugin plugin) {
         this.plugin = plugin;
@@ -55,6 +66,21 @@ public class RepService {
                 UUID uuid = UUID.fromString(key);
                 int score = cfg.getInt(key + ".score", 0);
                 repMap.put(uuid, score);
+                // Load category scores
+                ConfigurationSection catSec = cfg.getConfigurationSection(key + ".categories");
+                if (catSec != null) {
+                    Map<RepCategory, Integer> cats = new ConcurrentHashMap<>();
+                    for (String catKey : catSec.getKeys(false)) {
+                        try {
+                            RepCategory cat = RepCategory.valueOf(catKey);
+                            cats.put(cat, catSec.getInt(catKey));
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
+                    if (!cats.isEmpty()) {
+                        categoryScores.put(uuid, cats);
+                    }
+                }
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -90,6 +116,13 @@ public class RepService {
         for (Map.Entry<UUID, Integer> entry : repMap.entrySet()) {
             String key = entry.getKey().toString();
             cfg.set(key + ".score", entry.getValue());
+            // Save category scores
+            Map<RepCategory, Integer> cats = categoryScores.get(entry.getKey());
+            if (cats != null && !cats.isEmpty()) {
+                for (Map.Entry<RepCategory, Integer> catEntry : cats.entrySet()) {
+                    cfg.set(key + ".categories." + catEntry.getKey().name(), catEntry.getValue());
+                }
+            }
         }
         try {
             cfg.save(repFile);
@@ -141,6 +174,38 @@ public class RepService {
         }
     }
 
+    public void adjustCategoryScore(UUID uuid, RepCategory category, int delta) {
+        categoryScores.compute(uuid, (id, map) -> {
+            if (map == null) map = new ConcurrentHashMap<>();
+            map.merge(category, delta, Integer::sum);
+            if (map.get(category) == 0) map.remove(category);
+            return map.isEmpty() ? null : map;
+        });
+    }
+
+    public int getCategoryScore(UUID uuid, RepCategory category) {
+        Map<RepCategory, Integer> map = categoryScores.get(uuid);
+        return map != null ? map.getOrDefault(category, 0) : 0;
+    }
+
+    public Map<RepCategory, Integer> getAllCategoryScores(UUID uuid) {
+        Map<RepCategory, Integer> map = categoryScores.get(uuid);
+        return map != null ? new HashMap<>(map) : Collections.emptyMap();
+    }
+
+    /**
+     * Returns the worst (most negative) score across all negative categories,
+     * and the best (most positive) across all positive categories.
+     */
+    public int getWorstNegativeCategoryScore(UUID uuid) {
+        Map<RepCategory, Integer> map = categoryScores.get(uuid);
+        if (map == null) return 0;
+        return map.entrySet().stream()
+                .filter(e -> !e.getKey().isPositive())
+                .mapToInt(Map.Entry::getValue)
+                .min().orElse(0);
+    }
+
     public Commendation getCommendation(UUID giver, UUID target) {
         Map<UUID, Commendation> map = byGiver.get(giver);
         if (map == null) return null;
@@ -149,6 +214,28 @@ public class RepService {
 
     public List<Commendation> getCommendationsAbout(UUID target) {
         return byTarget.getOrDefault(target, Collections.emptyList());
+    }
+
+    /**
+     * Returns all commendations RECEIVED by a player, sorted newest first.
+     */
+    public List<Commendation> getReceivedCommendations(UUID target) {
+        List<Commendation> list = byTarget.get(target);
+        if (list == null) return Collections.emptyList();
+        List<Commendation> sorted = new ArrayList<>(list);
+        sorted.sort(Comparator.comparingLong(Commendation::getCreatedAt).reversed());
+        return sorted;
+    }
+
+    /**
+     * Finds a specific commendation by giver, target, and category.
+     */
+    public Commendation findCommendation(UUID giver, UUID target, RepCategory category) {
+        Commendation existing = getCommendation(giver, target);
+        if (existing != null && existing.getCategory() == category) {
+            return existing;
+        }
+        return null;
     }
 
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
@@ -180,8 +267,12 @@ public class RepService {
             }
             Commendation c = new Commendation(giver, target, positive, category, reasonText, now, now, ipHash);
             cacheCommendation(c, true);
-            adjustScore(target, positive ? 1 : -1);
+            adjustScore(target, positive ? 1 : -2);
+            adjustCategoryScore(target, category, positive ? 1 : -2);
             logAltRecord(ipHash, giver, target, positive, now);
+            checkReciprocity(giver, target);
+            if (!positive) checkNegativeCluster(target);
+            if (discordWebhook != null) discordWebhook.logCommendation(c, getScore(target));
             removalCooldown.remove(key(giver, target));
             notifyTeleport(target);
             Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationGivenEvent(giver, target, positive));
@@ -196,14 +287,17 @@ public class RepService {
 
         int delta = 0;
         if (existing.isPositive() != positive) {
-            delta = positive ? 2 : -2;
+            delta = positive ? 3 : -3;
         }
+        // Remove old category contribution and add new
+        adjustCategoryScore(target, existing.getCategory(), existing.isPositive() ? -1 : 2);
         existing.setPositive(positive);
         existing.setCategory(category);
         existing.setReasonText(reasonText);
         existing.setLastEditedAt(now);
         existing.setIpHash(ipHash);
         adjustScore(target, delta);
+        adjustCategoryScore(target, category, positive ? 1 : -2);
         logAltRecord(ipHash, giver, target, positive, now);
         if (delta != 0) {
             notifyTeleport(target);
@@ -306,35 +400,82 @@ public class RepService {
         }
     }
 
+    /**
+     * Check for rep trading: A reps B, then B reps A within the reciprocity window.
+     */
+    private void checkReciprocity(UUID giver, UUID target) {
+        String reverseKey = target.toString() + "->" + giver.toString();
+        Long reverseTime = repActivityLog.get(reverseKey);
+        if (reverseTime != null) {
+            long elapsed = System.currentTimeMillis() - reverseTime;
+            if (elapsed <= RECIPROCITY_WINDOW_MS) {
+                SuspiciousRepCase c = new SuspiciousRepCase(target, "RECIPROCITY",
+                        List.of(giver, target), System.currentTimeMillis());
+                c.setDetail("Rep trading: " + nameOf(giver) + " and " + nameOf(target)
+                        + " exchanged rep within " + (elapsed / 3600000) + "h");
+                suspiciousCases.add(c);
+                notifyStaff(c);
+            }
+        }
+        // Record this activity
+        String forwardKey = giver.toString() + "->" + target.toString();
+        repActivityLog.put(forwardKey, System.currentTimeMillis());
+    }
+
+    /**
+     * Check for mass downrepping: 3+ different givers downrep the same target within CLUSTER_WINDOW.
+     */
+    private void checkNegativeCluster(UUID target) {
+        long now = System.currentTimeMillis();
+        long cutoff = now - CLUSTER_WINDOW_MS;
+        Set<UUID> recentDownreppers = new HashSet<>();
+
+        for (Map.Entry<String, Long> entry : repActivityLog.entrySet()) {
+            if (entry.getValue() < cutoff) continue;
+            String[] parts = entry.getKey().split("->");
+            if (parts.length != 2 || !parts[1].equals(target.toString())) continue;
+            // Check that this was a negative rep (we only track after successful commendation)
+            Commendation c = getCommendation(UUID.fromString(parts[0]), target);
+            if (c != null && !c.isPositive()) {
+                recentDownreppers.add(UUID.fromString(parts[0]));
+            }
+        }
+
+        if (recentDownreppers.size() >= CLUSTER_MIN_GIVERS) {
+            // Check if we already reported this cluster recently (dedup)
+            boolean alreadyReported = suspiciousCases.stream()
+                    .anyMatch(sc -> sc.getTarget().equals(target)
+                            && "CLUSTER_DOWNREP".equals(sc.ipHash())
+                            && now - sc.getCreatedAt() < CLUSTER_WINDOW_MS);
+            if (!alreadyReported) {
+                SuspiciousRepCase c = new SuspiciousRepCase(target, "CLUSTER_DOWNREP",
+                        new ArrayList<>(recentDownreppers), now);
+                c.setDetail("Mass downrep: " + recentDownreppers.size() + " players downrepped "
+                        + nameOf(target) + " within " + (CLUSTER_WINDOW_MS / 3600000) + "h");
+                suspiciousCases.add(c);
+                notifyStaff(c);
+            }
+        }
+    }
+
     private void notifyStaff(SuspiciousRepCase c) {
         Bukkit.getOnlinePlayers().stream()
                 .filter(p -> p.hasPermission("enthusiacommend.rep.alert"))
                 .forEach(p -> {
                     String targetArg = resolveTargetArg(c.getTarget());
                     String inspectCmd = "/rep admin inspect " + targetArg + " " + c.ipHash();
-                    ComponentBuilder builder = new ComponentBuilder("ALT REP ALERT: IP group ")
-                            .color(net.md_5.bungee.api.ChatColor.RED)
-                            .append(c.ipHash())
-                            .color(net.md_5.bungee.api.ChatColor.YELLOW)
-                            .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, inspectCmd))
-                            .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                    new ComponentBuilder("Click to inspect report")
-                                            .color(net.md_5.bungee.api.ChatColor.GRAY)
-                                            .create()))
-                            .append(" accounts ")
-                            .color(net.md_5.bungee.api.ChatColor.RED)
-                            .event((ClickEvent) null)
-                            .event((HoverEvent) null)
-                            .append(formatNames(c.givers()))
-                            .color(net.md_5.bungee.api.ChatColor.WHITE)
-                            .append(" down-repped ")
-                            .color(net.md_5.bungee.api.ChatColor.RED)
-                            .append(nameOf(c.getTarget()))
-                            .color(net.md_5.bungee.api.ChatColor.YELLOW)
-                            .append(".")
-                            .color(net.md_5.bungee.api.ChatColor.RED);
-                    p.spigot().sendMessage(builder.create());
-                }); // brief alert
+                    Component msg = Component.text("ALT REP ALERT: IP group ", NamedTextColor.RED)
+                            .append(Component.text(c.ipHash(), NamedTextColor.YELLOW)
+                                    .clickEvent(ClickEvent.runCommand(inspectCmd))
+                                    .hoverEvent(HoverEvent.showText(
+                                            Component.text("Click to inspect report", NamedTextColor.GRAY))))
+                            .append(Component.text(" accounts ", NamedTextColor.RED))
+                            .append(Component.text(formatNames(c.givers()), NamedTextColor.WHITE))
+                            .append(Component.text(" down-repped ", NamedTextColor.RED))
+                            .append(Component.text(nameOf(c.getTarget()), NamedTextColor.YELLOW))
+                            .append(Component.text(".", NamedTextColor.RED));
+                    p.sendMessage(msg);
+                });
     }
 
     private String formatNames(Collection<UUID> uuids) {
@@ -374,6 +515,10 @@ public class RepService {
         this.repConfig = repConfig;
     }
 
+    public void setDiscordWebhook(DiscordWebhook discordWebhook) {
+        this.discordWebhook = discordWebhook;
+    }
+
     public RemovedRep removeCommendationLogged(UUID remover, UUID giver, UUID target, boolean applyCooldown) {
         Commendation removed = removeCommendationInternal(giver, target);
         if (removed == null) return null;
@@ -400,7 +545,8 @@ public class RepService {
             return false; // already exists, refuse to overwrite
         }
         cacheCommendation(cloneCommendation(c), true);
-        adjustScore(c.getTarget(), c.isPositive() ? 1 : -1);
+        adjustScore(c.getTarget(), c.isPositive() ? 1 : -2);
+        adjustCategoryScore(c.getTarget(), c.getCategory(), c.isPositive() ? 1 : -2);
         removalCooldown.remove(key(c.getGiver(), c.getTarget()));
         removedLog.remove(record);
         notifyTeleport(c.getTarget());
@@ -427,7 +573,8 @@ public class RepService {
             list.removeIf(cm -> cm.getGiver().equals(giver));
             return list.isEmpty() ? null : list;
         });
-        adjustScore(target, existing.isPositive() ? -1 : 1);
+        adjustScore(target, existing.isPositive() ? -1 : 2);
+        adjustCategoryScore(target, existing.getCategory(), existing.isPositive() ? -1 : 2);
         notifyTeleport(target);
         return existing;
     }
@@ -465,6 +612,7 @@ public class RepService {
         private final List<UUID> givers;
         private final long createdAt;
         private boolean resolved;
+        private String detail;
 
         public SuspiciousRepCase(UUID target, String ipHash, List<UUID> givers, long createdAt) {
             this.target = target;
@@ -472,6 +620,7 @@ public class RepService {
             this.givers = givers;
             this.createdAt = createdAt;
             this.resolved = false;
+            this.detail = null;
         }
 
         public UUID getTarget() {
@@ -497,6 +646,14 @@ public class RepService {
         public void setResolved(boolean resolved) {
             this.resolved = resolved;
         }
+
+        public String getDetail() {
+            return detail;
+        }
+
+        public void setDetail(String detail) {
+            this.detail = detail;
+        }
     }
 
     public record CommendationResult(boolean success,
@@ -505,7 +662,7 @@ public class RepService {
                                      long cooldownRemainingMillis,
                                      int repDelta) {
         public static CommendationResult created(Commendation c) {
-            return new CommendationResult(true, true, c, 0, c.isPositive() ? 1 : -1);
+            return new CommendationResult(true, true, c, 0, c.isPositive() ? 1 : -2);
         }
 
         public static CommendationResult updated(Commendation c, int delta) {

@@ -12,6 +12,7 @@ public class RepConfig {
     private final int minActivePlaytimeHours;
     private final long editCooldownMillis;
     private final InputMode inputMode;
+    private final String discordWebhookUrl;
 
     private final double stalkCost;
     private final long stalkDurationMillis;
@@ -25,6 +26,8 @@ public class RepConfig {
         int editCooldownHours = config.getInt("rep.editCooldownHours", 24);
         this.editCooldownMillis = editCooldownHours * 60L * 60L * 1000L;
         this.inputMode = InputMode.from(config.getString("rep.inputMode", "ANVIL"));
+
+        this.discordWebhookUrl = config.getString("discord.webhookUrl", "");
 
         this.stalkCost = config.getDouble("stalk.cost", 100.0);
         int stalkDays = config.getInt("stalk.durationDays", 1);
@@ -65,6 +68,10 @@ public class RepConfig {
 
     public InputMode getInputMode() {
         return inputMode;
+    }
+
+    public String getDiscordWebhookUrl() {
+        return discordWebhookUrl;
     }
 
     public double getStalkCost() {
@@ -110,7 +117,6 @@ public class RepConfig {
     }
 
     public static class RepTierConfig {
-        public final Integer movementSpeedPercent;
         public final Integer potionDurationPercent;
         public final Integer fireworkDurationPercent;
         public final Integer pearlCooldownSeconds;
@@ -120,7 +126,7 @@ public class RepConfig {
         public final Boolean stalkable;
         public final Integer cashbackPercent;
 
-        private RepTierConfig(Integer movementSpeedPercent,
+        private RepTierConfig(
                               Integer potionDurationPercent,
                               Integer fireworkDurationPercent,
                               Integer pearlCooldownSeconds,
@@ -129,7 +135,6 @@ public class RepConfig {
                               ChatColor glowColor,
                               Boolean stalkable,
                               Integer cashbackPercent) {
-            this.movementSpeedPercent = movementSpeedPercent;
             this.potionDurationPercent = potionDurationPercent;
             this.fireworkDurationPercent = fireworkDurationPercent;
             this.pearlCooldownSeconds = pearlCooldownSeconds;
@@ -141,8 +146,7 @@ public class RepConfig {
         }
 
         public static RepTierConfig fromSection(ConfigurationSection sec) {
-            if (sec == null) return new RepTierConfig(null, null, null, null, null, null, null, null, null);
-            Integer move = sec.isSet("movement_speed_percent") ? sec.getInt("movement_speed_percent") : null;
+            if (sec == null) return new RepTierConfig(null, null, null, null, null, null, null, null);
             Integer potion = sec.isSet("potion_duration_percent") ? sec.getInt("potion_duration_percent") : null;
             Integer firework = sec.isSet("firework_duration_percent") ? sec.getInt("firework_duration_percent") : null;
             Integer pearl = sec.isSet("pearl_cooldown_seconds") ? sec.getInt("pearl_cooldown_seconds") : null;
@@ -157,7 +161,7 @@ public class RepConfig {
             }
             Boolean stalkable = sec.isSet("stalkable") ? sec.getBoolean("stalkable") : null;
             Integer cashback = sec.isSet("cashback_percent") ? sec.getInt("cashback_percent") : null;
-            return new RepTierConfig(move, potion, firework, pearl, wind, glow, glowColor, stalkable, cashback);
+            return new RepTierConfig(potion, firework, pearl, wind, glow, glowColor, stalkable, cashback);
         }
     }
 }

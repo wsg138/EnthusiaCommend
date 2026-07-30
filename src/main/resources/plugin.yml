@@ -3,7 +3,7 @@ main: org.enthusia.rep.CommendPlugin
 version: 1.0.0
 api-version: '1.21'
 author: Enthusia
-depend: [Vault, ProtocolLib]
+depend: [Vault]
 softdepend: [PlaceholderAPI, EnthusiaTeleport]
 
 commands:

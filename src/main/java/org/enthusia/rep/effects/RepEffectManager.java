@@ -1,10 +1,8 @@
 package org.enthusia.rep.effects;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.attribute.Attribute;
-import org.bukkit.attribute.AttributeInstance;
-import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Firework;
 import org.bukkit.entity.Player;
@@ -32,8 +30,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class RepEffectManager implements Listener {
 
-    private static final String SPEED_MODIFIER_NAME = "enthusia-rep-speed";
-
     private final CommendPlugin plugin;
     private RepConfig config;
     private final RegionManager regions;
@@ -42,7 +38,6 @@ public class RepEffectManager implements Listener {
     private final Map<UUID, Long> lastPearlMessage = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastWindMessage  = new ConcurrentHashMap<>();
 
-    private final Map<UUID, Double> baseMoveSpeed = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastRocketUse = new ConcurrentHashMap<>();
 
     private final Map<UUID, RepAppliedEffects> currentEffects = new ConcurrentHashMap<>();
@@ -77,23 +72,11 @@ public class RepEffectManager implements Listener {
         Player player = Bukkit.getPlayer(uuid);
         if (player == null) return;
 
-        resetMovementBase(uuid);
-        removeSpeedModifier(player);
         setGlowState(player, false);
         lastGlowState.remove(uuid);
     }
 
-    public void resetMovementBase(UUID uuid) {
-        Player player = Bukkit.getPlayer(uuid);
-        if (player == null) return;
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
-
-        double def = 0.1; // vanilla default
-        baseMoveSpeed.put(uuid, def);
-        attr.setBaseValue(def);
-        removeSpeedModifier(player);
-    }
+    public void resetMovementBase(UUID uuid) { /* removed - movement speed penalty stripped */ }
 
     public void tickEffects() {
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -108,8 +91,8 @@ public class RepEffectManager implements Listener {
 
             currentEffects.put(id, effects);
 
-            boolean inCombatArea = regions.isInSpawnOrWarzone(player.getLocation());
-            applyMovementAndGlow(player, effects, inCombatArea);
+            boolean inWarzone = regions.isInWarzone(player.getLocation());
+            applyGlow(player, inWarzone);
         }
     }
 
@@ -140,9 +123,6 @@ public class RepEffectManager implements Listener {
     }
 
     private void applyTier(RepAppliedEffects out, RepTierConfig tier) {
-        if (tier.movementSpeedPercent != null) {
-            out.movementSpeedPercent = tier.movementSpeedPercent;
-        }
         if (tier.potionDurationPercent != null) {
             out.potionDurationPercent = tier.potionDurationPercent;
         }
@@ -169,47 +149,7 @@ public class RepEffectManager implements Listener {
         }
     }
 
-    /* ================= Movement / Glow ================= */
-
-    private void applyMovementAndGlow(Player player, RepAppliedEffects effects, boolean inCombatArea) {
-        applyMovement(player, effects, inCombatArea);
-        applyGlow(player, inCombatArea);
-    }
-
-    private void applyMovement(Player player, RepAppliedEffects effects, boolean inCombatArea) {
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
-
-        UUID id = player.getUniqueId();
-
-        baseMoveSpeed.computeIfAbsent(id, key -> {
-            double v = attr.getBaseValue();
-            if (v < 0.05) v = 0.1;
-            if (v > 1.0) v = 0.1;
-            return v;
-        });
-        double original = baseMoveSpeed.get(id);
-
-        if (inCombatArea && effects.movementSpeedPercent != 0) {
-            double factor = 1.0 + (effects.movementSpeedPercent / 100.0);
-            if (factor < 0.05) factor = 0.05;
-            attr.setBaseValue(original * factor);
-        } else {
-            attr.setBaseValue(original);
-        }
-
-        removeSpeedModifier(player);
-    }
-
-    private void removeSpeedModifier(Player player) {
-        AttributeInstance attr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (attr == null) return;
-        for (AttributeModifier mod : new ArrayList<>(attr.getModifiers())) {
-            if (SPEED_MODIFIER_NAME.equals(mod.getName())) {
-                attr.removeModifier(mod);
-            }
-        }
-    }
+    /* ================= Glow ================= */
 
     private void applyGlow(Player player, boolean inCombatArea) {
         int score = repService.getScore(player.getUniqueId());
@@ -256,7 +196,7 @@ public class RepEffectManager implements Listener {
         Material type = item.getType();
         RepAppliedEffects effects = currentEffects.getOrDefault(uuid(player), new RepAppliedEffects());
 
-        if (type == Material.ENDER_PEARL && regions.isInSpawnOrWarzone(player.getLocation())) {
+        if (type == Material.ENDER_PEARL && regions.isInWarzone(player.getLocation())) {
             int repCooldownSeconds = effects.pearlCooldownSeconds;
 
             if (repCooldownSeconds > 0) {
@@ -280,7 +220,7 @@ public class RepEffectManager implements Listener {
             }
         }
 
-        if (type == Material.WIND_CHARGE && regions.isInSpawnOrWarzone(player.getLocation())) {
+        if (type == Material.WIND_CHARGE && regions.isInWarzone(player.getLocation())) {
             int repCooldownSeconds = effects.windCooldownSeconds;
 
             if (repCooldownSeconds > 0) {

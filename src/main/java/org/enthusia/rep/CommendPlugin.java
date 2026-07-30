@@ -11,6 +11,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
+import org.enthusia.rep.discord.DiscordWebhook;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.gui.RepGuiManager;
 import org.enthusia.rep.integration.TeleportIntegration;
@@ -41,6 +42,7 @@ public final class CommendPlugin extends JavaPlugin {
     private TeleportIntegration teleportIntegration;
     private PlaytimeService playtimeService;
     private SkinCache skinCache;
+    private DiscordWebhook discordWebhook;
 
     public static CommendPlugin getInstance() {
         return instance;
@@ -90,6 +92,10 @@ public final class CommendPlugin extends JavaPlugin {
         return skinCache;
     }
 
+    public DiscordWebhook getDiscordWebhook() {
+        return discordWebhook;
+    }
+
     @Override
     public void onEnable() {
         instance = this;
@@ -107,6 +113,8 @@ public final class CommendPlugin extends JavaPlugin {
         // Core services
         this.regionManager = new RegionManager(this);
         this.repService = new RepService(this);
+        this.discordWebhook = new DiscordWebhook(repConfig.getDiscordWebhookUrl(), repService, getLogger());
+        repService.setDiscordWebhook(discordWebhook);
         this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService);
         this.stalkManager = new StalkManager(this, regionManager);
         this.skinCache = new SkinCache(this);

@@ -55,6 +55,10 @@ stalk:
   cost: 100.0           # how much it costs to stalk someone
   durationDays: 1       # how long the subscription lasts in days
 
+# Discord webhook for staff logging (leave empty to disable)
+discord:
+  webhookUrl: ""
+
 regions:
   # Simple cuboid regions. Adjust coords to your spawn/warzone.
   spawn:

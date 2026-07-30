@@ -165,7 +165,7 @@ public class StalkManager implements Listener {
         UUID id = player.getUniqueId();
 
         boolean wasIn = lastInWarzone.getOrDefault(id, false);
-        boolean nowIn = regions.isInWarzone(event.getTo());
+        boolean nowIn = regions.isInWarzone(event.getTo()) && !regions.isInSpawn(event.getTo());
 
         if (wasIn == nowIn) {
             return; // no change

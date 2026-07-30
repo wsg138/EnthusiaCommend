@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -253,7 +254,8 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
         if (args.length >= 3 && args[1].equalsIgnoreCase("cancel")) {
             OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
             plugin.getStalkManager().cancelSubscription(player.getUniqueId(), target.getUniqueId());
-            sender.sendMessage(ChatColor.GOLD + "Cancelled stalk on " + ChatColor.YELLOW + target.getName());
+            player.sendMessage(plugin.getMessages().get("stalk.cancelled",
+                    Map.of("target", target.getName() != null ? target.getName() : args[2])));
             return true;
         }
 
@@ -263,7 +265,7 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         if (!plugin.getStalkManager().isStalkable(target.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + "That player is not stalkable (needs rep <= -12).");
+            player.sendMessage(plugin.getMessages().get("stalk.not-stalkable"));
             return true;
         }
         int days = 1;
@@ -275,18 +277,20 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
 
         double cost = plugin.getRepConfig().getStalkCost() * days;
         if (plugin.getEconomy() == null) {
-            sender.sendMessage(ChatColor.RED + "Economy not set up; cannot purchase stalk.");
+            player.sendMessage(plugin.getMessages().get("stalk.no-economy"));
             return true;
         }
         if (plugin.getEconomy().getBalance(player) < cost) {
-            sender.sendMessage(ChatColor.RED + "You need $" + cost + " to stalk for " + days + " day(s).");
+            player.sendMessage(plugin.getMessages().get("stalk.not-enough",
+                    Map.of("cost", String.format(Locale.US, "%.0f", cost), "days", String.valueOf(days))));
             return true;
         }
         plugin.getEconomy().withdrawPlayer(player, cost);
         long duration = days * 24L * 60L * 60L * 1000L;
         plugin.getStalkManager().addSubscription(player.getUniqueId(), target.getUniqueId(), duration);
-        sender.sendMessage(ChatColor.GOLD + "You are now stalking " + ChatColor.YELLOW + target.getName()
-                + ChatColor.GOLD + " for " + days + " day(s).");
+        player.sendMessage(plugin.getMessages().get("stalk.purchased",
+                Map.of("target", target.getName() != null ? target.getName() : args[1],
+                        "days", String.valueOf(days))));
         return true;
     }
 
@@ -550,6 +554,38 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        // /rep admin history <player> [page]
+        if (sub.equals("history")) {
+            if (args.length < 3) {
+                sender.sendMessage(ChatColor.RED + "Usage: /rep admin history <player> [page]");
+                return;
+            }
+            OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
+            int page = 1;
+            if (args.length >= 4) {
+                try { page = Integer.parseInt(args[3]); } catch (NumberFormatException ignored) {}
+            }
+            handleHistory(sender, target, page);
+            return;
+        }
+
+        // /rep admin remove <target> <sender> <category>
+        if (sub.equals("remove")) {
+            if (args.length < 5) {
+                sender.sendMessage(ChatColor.RED + "Usage: /rep admin remove <target> <sender> <category>");
+                return;
+            }
+            OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
+            OfflinePlayer giver = Bukkit.getOfflinePlayer(args[3]);
+            RepCategory category = parseCategory(args[4]);
+            if (category == null) {
+                sender.sendMessage(ChatColor.RED + "Unknown category: " + args[4]);
+                return;
+            }
+            handleSurgicalRemove(sender, target, giver, category);
+            return;
+        }
+
         // /rep admin reports [page] (GUI if player)
         if (sub.equals("reports")) {
             int page = 1;
@@ -603,6 +639,57 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.RED + "Unknown admin subcommand. Use /rep admin help.");
     }
 
+    private void handleHistory(CommandSender sender, OfflinePlayer target, int page) {
+        List<Commendation> received = repService.getReceivedCommendations(target.getUniqueId());
+        if (received.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + target.getName() + ChatColor.GRAY + " has not received any commendations.");
+            return;
+        }
+        int pageSize = 10;
+        int maxPage = Math.max(1, (int) Math.ceil(received.size() / (double) pageSize));
+        if (page < 1) page = 1;
+        if (page > maxPage) page = maxPage;
+
+        sender.sendMessage(ChatColor.GOLD + "=== Rep history for " + ChatColor.YELLOW + target.getName()
+                + ChatColor.GOLD + " (" + page + "/" + maxPage + ") ===");
+
+        int start = (page - 1) * pageSize;
+        int end = Math.min(start + pageSize, received.size());
+        for (int i = start; i < end; i++) {
+            Commendation c = received.get(i);
+            String value = c.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-2";
+            sender.sendMessage(ChatColor.YELLOW + repService.nameOf(c.getGiver())
+                    + ChatColor.GRAY + " → " + ChatColor.WHITE + value
+                    + ChatColor.GRAY + " [" + ChatColor.YELLOW + c.getCategory().name() + ChatColor.GRAY + "] "
+                    + ChatColor.WHITE + truncateReason(c.getReasonText(), 60)
+                    + ChatColor.DARK_GRAY + " " + dateFmt.format(Instant.ofEpochMilli(c.getCreatedAt())));
+        }
+    }
+
+    private void handleSurgicalRemove(CommandSender sender, OfflinePlayer target, OfflinePlayer giver, RepCategory category) {
+        Commendation c = repService.findCommendation(giver.getUniqueId(), target.getUniqueId(), category);
+        if (c == null) {
+            sender.sendMessage(ChatColor.RED + "No commendation found from " + giver.getName()
+                    + " to " + target.getName() + " in category " + category.name() + ".");
+            return;
+        }
+        UUID remover = sender instanceof Player p ? p.getUniqueId() : null;
+        RepService.RemovedRep record = repService.removeCommendationLogged(
+                remover, giver.getUniqueId(), target.getUniqueId(), false);
+        if (record != null) {
+            sender.sendMessage(ChatColor.GOLD + "Removed " + (c.isPositive() ? ChatColor.GREEN + "+1" : ChatColor.RED + "-2")
+                    + ChatColor.GOLD + " rep from " + ChatColor.YELLOW + giver.getName()
+                    + ChatColor.GOLD + " → " + ChatColor.YELLOW + target.getName()
+                    + ChatColor.GOLD + " [" + category.name() + "]"
+                    + ChatColor.GRAY + " (ID: " + record.id() + ")");
+        }
+    }
+
+    private String truncateReason(String reason, int max) {
+        if (reason == null || reason.isEmpty()) return "(no reason)";
+        return reason.length() <= max ? reason : reason.substring(0, max - 3) + "...";
+    }
+
     private void sendAdminHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== Rep Admin Commands ===");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin get <player> " + ChatColor.GRAY + "- view a player's total rep");
@@ -613,6 +700,8 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.YELLOW + "/rep admin inspect <player> [ipHash] " + ChatColor.GRAY + "- view alt rep alerts");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin resolve <player> <ipHash> " + ChatColor.GRAY + "- mark alert as resolved");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin reports [page] " + ChatColor.GRAY + "- view active rep reports (GUI)");
+        sender.sendMessage(ChatColor.YELLOW + "/rep admin history <player> [page] " + ChatColor.GRAY + "- view player rep history");
+        sender.sendMessage(ChatColor.YELLOW + "/rep admin remove <target> <sender> <category> " + ChatColor.GRAY + "- surgical remove one commendation");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin removed [page] " + ChatColor.GRAY + "- view removed reps log (GUI)");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin restore <id> " + ChatColor.GRAY + "- undo a removal");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin removeentry <player> <id> " + ChatColor.GRAY + "- remove a specific rep story");
@@ -667,6 +756,8 @@ public class CommendCommand implements CommandExecutor, TabCompleter {
             if ("inspect".startsWith(prefix)) result.add("inspect");
             if ("resolve".startsWith(prefix)) result.add("resolve");
             if ("reports".startsWith(prefix)) result.add("reports");
+            if ("history".startsWith(prefix)) result.add("history");
+            if ("remove".startsWith(prefix)) result.add("remove");
             if ("removed".startsWith(prefix)) result.add("removed");
             if ("restore".startsWith(prefix)) result.add("restore");
             if ("undo".startsWith(prefix)) result.add("undo");

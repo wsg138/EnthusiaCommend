@@ -9,6 +9,13 @@
     <version>1.0.0</version>
     <name>EnthusiaCommend</name>
 
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License v3.0</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.txt</url>
+        </license>
+    </licenses>
+
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
@@ -41,7 +48,7 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.8-R0.1-SNAPSHOT</version>
+            <version>1.21.11-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
 
@@ -61,18 +68,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- GlowingEntities for scoreboard-safe glowing (shaded) -->
+        <!-- BungeeCord Chat (required by Paper API for backwards compat) -->
         <dependency>
-            <groupId>fr.skytasul</groupId>
-            <artifactId>glowingentities</artifactId>
-            <version>1.4.9</version>
-        </dependency>
-
-        <!-- ProtocolLib for packet-based glow (provided at runtime) -->
-        <dependency>
-            <groupId>net.dmulloy2</groupId>
-            <artifactId>ProtocolLib</artifactId>
-            <version>5.4.0</version>
+            <groupId>net.md-5</groupId>
+            <artifactId>bungeecord-chat</artifactId>
+            <version>1.21-R0.2-deprecated+build.21</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -92,15 +92,8 @@
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <artifactSet>
-                                <excludes>
-                                    <exclude>net.dmulloy2:ProtocolLib</exclude>
-                                </excludes>
                             </artifactSet>
                             <relocations>
-                                <relocation>
-                                    <pattern>fr.skytasul.glowingentities</pattern>
-                                    <shadedPattern>org.enthusia.rep.shadow.glowingentities</shadedPattern>
-                                </relocation>
                             </relocations>
                         </configuration>
                     </execution>

@@ -4,7 +4,6 @@ package org.enthusia.rep.effects;
 import org.bukkit.ChatColor;
 
 public class RepAppliedEffects {
-    public int movementSpeedPercent = 0;
     public int potionDurationPercent = 0;
     public int fireworkDurationPercent = 0;
     public int pearlCooldownSeconds = 0;
@@ -16,9 +15,6 @@ public class RepAppliedEffects {
 
     public String describe() {
         StringBuilder sb = new StringBuilder();
-        if (movementSpeedPercent != 0) {
-            sb.append("Movement: ").append(formatPercent(movementSpeedPercent)).append("\n");
-        }
         if (potionDurationPercent != 0) {
             sb.append("Potion duration: ").append(formatPercent(potionDurationPercent)).append("\n");
         }

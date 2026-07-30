@@ -107,7 +107,14 @@ public class Commendation {
             UUID giver = UUID.fromString(sec.getString("giver"));
             UUID target = UUID.fromString(sec.getString("target"));
             boolean positive = sec.getBoolean("positive", true);
-            RepCategory category = RepCategory.valueOf(sec.getString("category", RepCategory.OTHER_POSITIVE.name()));
+            String catRaw = sec.getString("category", RepCategory.WAS_KIND.name());
+            RepCategory category;
+            try {
+                category = RepCategory.valueOf(catRaw);
+            } catch (IllegalArgumentException e) {
+                // Migration: old "Other" categories map to defaults
+                category = "OTHER_NEGATIVE".equals(catRaw) ? RepCategory.SCAMMED : RepCategory.WAS_KIND;
+            }
             String reason = sec.getString("reason", "");
             long createdAt = sec.getLong("createdAt", System.currentTimeMillis());
             long lastEditedAt = sec.getLong("lastEditedAt", createdAt);

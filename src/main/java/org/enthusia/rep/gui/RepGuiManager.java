@@ -10,6 +10,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
@@ -34,9 +35,10 @@ import org.enthusia.rep.rep.RepCategory;
 import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.effects.RepAppliedEffects;
-import net.md_5.bungee.api.chat.ComponentBuilder;
-import net.md_5.bungee.api.chat.HoverEvent;
-import net.md_5.bungee.api.chat.ClickEvent;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -317,7 +319,7 @@ public class RepGuiManager implements Listener {
         }
 
         List<RepCategory> cats = positive ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 11, 12, 14, 15, 16};
+        int[] slots = {10, 12, 14, 16, 20};
         for (int i = 0; i < cats.size() && i < slots.length; i++) {
             RepCategory cat = cats.get(i);
             Material mat = positive ? Material.LIME_CONCRETE : Material.RED_CONCRETE;
@@ -336,6 +338,11 @@ public class RepGuiManager implements Listener {
         if (event.getInventory().getHolder() == null) return;
 
         InventoryHolder holder = event.getInventory().getHolder();
+
+        // Block all item manipulation in our custom GUIs
+        if (isOurHolder(holder)) {
+            event.setCancelled(true);
+        }
 
         if (holder instanceof ProfileHolder profileHolder) {
             event.setCancelled(true);
@@ -395,7 +402,7 @@ public class RepGuiManager implements Listener {
             if (clicked == null || clicked.getType() == Material.AIR) return;
             int slot = event.getRawSlot();
             List<RepCategory> cats = reasonHolder.positive ? positiveCategories() : negativeCategories();
-            int[] slots = {10, 11, 12, 14, 15, 16};
+            int[] slots = {10, 12, 14, 16, 20};
             for (int i = 0; i < cats.size() && i < slots.length; i++) {
                 if (slot == slots[i]) {
                     if (!repService.canEdit(player.getUniqueId(), reasonHolder.targetId)) {
@@ -559,11 +566,9 @@ public class RepGuiManager implements Listener {
     private void startChatFlow(Player player, UUID targetId, RepCategory category, int returnPage) {
         pendingChat.put(player.getUniqueId(), new PendingChat(targetId, category, returnPage));
         player.sendMessage(ChatColor.GOLD + "Type your rep story in chat now. It will be private. Type 'cancel' to abort.");
-        player.spigot().sendMessage(new ComponentBuilder(ChatColor.YELLOW + "[Click to cancel]")
-                .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/rep-cancel"))
-                .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        new ComponentBuilder(ChatColor.RED + "Cancel this rep").create()))
-                .create());
+        player.sendMessage(Component.text("[Click to cancel]", NamedTextColor.YELLOW)
+                .clickEvent(ClickEvent.runCommand("/rep-cancel"))
+                .hoverEvent(HoverEvent.showText(Component.text("Cancel this rep", NamedTextColor.RED))));
     }
 
     private void startAnvilFlow(Player player, UUID targetId, RepCategory category, int returnPage) {
@@ -620,7 +625,7 @@ public class RepGuiManager implements Listener {
                 player.getUniqueId(),
                 targetId,
                 category != null ? category.isPositive() : true,
-                category != null ? category : RepCategory.OTHER_POSITIVE,
+                category != null ? category : RepCategory.WAS_KIND,
                 text,
                 ipHash
         );
@@ -1016,10 +1021,6 @@ public class RepGuiManager implements Listener {
         lore.add(ChatColor.GRAY + "Active effects:");
 
         boolean any = false;
-        if (eff.movementSpeedPercent != 0) {
-            lore.add(ChatColor.WHITE + "• Movement speed " + ChatColor.GRAY + "(Spawn): " + ChatColor.YELLOW + formatPercent(eff.movementSpeedPercent));
-            any = true;
-        }
         if (eff.potionDurationPercent != 0) {
             lore.add(ChatColor.WHITE + "• Potion duration " + ChatColor.GRAY + "(Spawn): " + ChatColor.YELLOW + formatPercent(eff.potionDurationPercent));
             any = true;
@@ -1065,8 +1066,7 @@ public class RepGuiManager implements Listener {
                 RepCategory.HELPED_ME,
                 RepCategory.GAVE_ITEMS,
                 RepCategory.TRUSTWORTHY,
-                RepCategory.GOOD_STALL,
-                RepCategory.OTHER_POSITIVE
+                RepCategory.GOOD_STALL
         );
     }
 
@@ -1076,8 +1076,7 @@ public class RepGuiManager implements Listener {
                 RepCategory.SPAWN_KILLED,
                 RepCategory.GRIEFED,
                 RepCategory.TRAPPED,
-                RepCategory.SCAM_STALL,
-                RepCategory.OTHER_NEGATIVE
+                RepCategory.SCAM_STALL
         );
     }
 
@@ -1088,13 +1087,11 @@ public class RepGuiManager implements Listener {
             case GAVE_ITEMS -> "Gave Items/Money";
             case TRUSTWORTHY -> "Trustworthy";
             case GOOD_STALL -> "Good Stall";
-            case OTHER_POSITIVE -> "Other";
             case SCAMMED -> "Scammed";
             case SPAWN_KILLED -> "Spawn Killed";
             case GRIEFED -> "Griefed";
             case TRAPPED -> "Trapped";
             case SCAM_STALL -> "Scam Stall";
-            case OTHER_NEGATIVE -> "Other";
         };
     }
 
@@ -1249,6 +1246,9 @@ public class RepGuiManager implements Listener {
             List<String> lore = new ArrayList<>();
             lore.add(ChatColor.GRAY + "IP: " + ChatColor.WHITE + c.ipHash());
             lore.add(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(c.givers()));
+            if (c.getDetail() != null) {
+                lore.add(ChatColor.RED + c.getDetail());
+            }
             lore.add(ChatColor.GRAY + "Created: " + ChatColor.WHITE + dateFmt.format(Instant.ofEpochMilli(c.getCreatedAt())));
             lore.add(ChatColor.DARK_GRAY + "----------------");
             lore.add(ChatColor.YELLOW + "Click to post details in chat.");
@@ -1299,22 +1299,20 @@ public class RepGuiManager implements Listener {
         admin.sendMessage(ChatColor.GOLD + "ALT REP REPORT: " + ChatColor.YELLOW + targetName
                 + ChatColor.GRAY + " (IP " + ChatColor.YELLOW + c.ipHash() + ChatColor.GRAY + ")");
         admin.sendMessage(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(c.givers()));
+        if (c.getDetail() != null) {
+            admin.sendMessage(ChatColor.RED + c.getDetail());
+        }
         admin.sendMessage(ChatColor.GRAY + "Created: " + ChatColor.WHITE + dateFmt.format(Instant.ofEpochMilli(c.getCreatedAt())));
 
         String inspectCmd = "/rep admin inspect " + targetArg + " " + c.ipHash();
         String resolveCmd = "/rep admin resolve " + targetArg + " " + c.ipHash();
-        admin.spigot().sendMessage(new ComponentBuilder(ChatColor.YELLOW + "Inspect report")
-                .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, inspectCmd))
-                .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        new ComponentBuilder(ChatColor.GRAY + "Click to inspect this report").create()))
-                .append(ChatColor.GRAY + " | ")
-                .event((ClickEvent) null)
-                .event((HoverEvent) null)
-                .append(ChatColor.RED + "Resolve report")
-                .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, resolveCmd))
-                .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        new ComponentBuilder(ChatColor.GRAY + "Mark this report as resolved").create()))
-                .create());
+        admin.sendMessage(Component.text("Inspect report", NamedTextColor.YELLOW)
+                .clickEvent(ClickEvent.runCommand(inspectCmd))
+                .hoverEvent(HoverEvent.showText(Component.text("Click to inspect this report", NamedTextColor.GRAY)))
+                .append(Component.text(" | ", NamedTextColor.GRAY))
+                .append(Component.text("Resolve report", NamedTextColor.RED)
+                        .clickEvent(ClickEvent.runCommand(resolveCmd))
+                        .hoverEvent(HoverEvent.showText(Component.text("Mark this report as resolved", NamedTextColor.GRAY)))));
     }
 
     private String preview(String text) {
@@ -1358,5 +1356,24 @@ public class RepGuiManager implements Listener {
         if (event.getPlayer() instanceof Player player) {
             reopenFromReview(player);
         }
+    }
+
+    @EventHandler
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() == null) return;
+        if (isOurHolder(event.getInventory().getHolder())) {
+            event.setCancelled(true);
+        }
+    }
+
+    private boolean isOurHolder(InventoryHolder holder) {
+        return holder instanceof ProfileHolder
+            || holder instanceof ReasonHolder
+            || holder instanceof AnvilHolder
+            || holder instanceof InputChoiceHolder
+            || holder instanceof ConfirmRemovalHolder
+            || holder instanceof RemovedLogHolder
+            || holder instanceof ActiveReportsHolder
+            || holder instanceof ConfirmRestoreHolder;
     }
 }
