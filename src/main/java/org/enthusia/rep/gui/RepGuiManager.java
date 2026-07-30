@@ -1244,7 +1244,7 @@ public class RepGuiManager implements Listener {
         if (meta != null) {
             meta.setDisplayName(ChatColor.YELLOW + repService.nameOf(c.getTarget()));
             List<String> lore = new ArrayList<>();
-            lore.add(ChatColor.GRAY + "IP: " + ChatColor.WHITE + c.ipHash());
+            lore.add(ChatColor.GRAY + (c.ipHash() != null ? "IP: " : "Alert: ") + ChatColor.WHITE + (c.ipHash() != null ? c.ipHash() : c.getAlertType().name()));
             lore.add(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(c.givers()));
             if (c.getDetail() != null) {
                 lore.add(ChatColor.RED + c.getDetail());
@@ -1296,16 +1296,19 @@ public class RepGuiManager implements Listener {
     private void sendReportDetails(Player admin, RepService.SuspiciousRepCase c) {
         String targetName = repService.nameOf(c.getTarget());
         String targetArg = resolveTargetArg(c.getTarget());
-        admin.sendMessage(ChatColor.GOLD + "ALT REP REPORT: " + ChatColor.YELLOW + targetName
-                + ChatColor.GRAY + " (IP " + ChatColor.YELLOW + c.ipHash() + ChatColor.GRAY + ")");
+        String alertLabel = c.ipHash() != null ? "(IP " + c.ipHash() + ")" : "(" + c.getAlertType().name() + ")";
+        admin.sendMessage(ChatColor.GOLD + (c.ipHash() != null ? "ALT REP REPORT: " : "REP ALERT: ")
+                + ChatColor.YELLOW + targetName
+                + ChatColor.GRAY + " " + alertLabel);
         admin.sendMessage(ChatColor.GRAY + "Accounts: " + ChatColor.WHITE + formatNames(c.givers()));
         if (c.getDetail() != null) {
             admin.sendMessage(ChatColor.RED + c.getDetail());
         }
         admin.sendMessage(ChatColor.GRAY + "Created: " + ChatColor.WHITE + dateFmt.format(Instant.ofEpochMilli(c.getCreatedAt())));
 
-        String inspectCmd = "/rep admin inspect " + targetArg + " " + c.ipHash();
-        String resolveCmd = "/rep admin resolve " + targetArg + " " + c.ipHash();
+        String inspectArg = c.ipHash() != null ? c.ipHash() : c.getAlertType().name();
+        String inspectCmd = "/rep admin inspect " + targetArg + " " + inspectArg;
+        String resolveCmd = "/rep admin resolve " + targetArg + " " + inspectArg;
         admin.sendMessage(Component.text("Inspect report", NamedTextColor.YELLOW)
                 .clickEvent(ClickEvent.runCommand(inspectCmd))
                 .hoverEvent(HoverEvent.showText(Component.text("Click to inspect this report", NamedTextColor.GRAY)))

@@ -38,14 +38,9 @@ public class RepService {
     private final List<SuspiciousRepCase> suspiciousCases = Collections.synchronizedList(new ArrayList<>());
     private final List<RemovedRep> removedLog = Collections.synchronizedList(new ArrayList<>());
 
-    // Anti-abuse: track rep activity for reciprocity and cluster detection
-    private final Map<String, Long> repActivityLog = new ConcurrentHashMap<>(); // "giverUUID->targetUUID" -> timestamp
-    private static final long RECIPROCITY_WINDOW_MS = 24L * 60L * 60L * 1000L; // 24h
-    private static final long CLUSTER_WINDOW_MS = 6L * 60L * 60L * 1000L;      // 6h
-    private static final int CLUSTER_MIN_GIVERS = 3;                             // 3+ different givers = cluster
-
     private RepConfig repConfig;
-    private DiscordWebhook discordWebhook; // set by plugin after construction
+    private DiscordWebhook discordWebhook;
+    private AntiAbuseService antiAbuseService;
 
     public RepService(CommendPlugin plugin) {
         this.plugin = plugin;
@@ -53,6 +48,7 @@ public class RepService {
         this.repFile = new File(plugin.getDataFolder(), "reputation.yml");
         this.commendationFile = new File(plugin.getDataFolder(), "commendations.yml");
         this.removedFile = new File(plugin.getDataFolder(), "removed-rep.yml");
+        this.antiAbuseService = new AntiAbuseService(this);
         loadRepScores();
         loadCommendations();
         loadRemoved();
@@ -111,7 +107,15 @@ public class RepService {
         }
     }
 
+    public AntiAbuseService getAntiAbuseService() {
+        return antiAbuseService;
+    }
+
     public void saveAll() {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> saveAllSync());
+    }
+
+    private void saveAllSync() {
         YamlConfiguration cfg = new YamlConfiguration();
         for (Map.Entry<UUID, Integer> entry : repMap.entrySet()) {
             String key = entry.getKey().toString();
@@ -155,6 +159,8 @@ public class RepService {
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to save removed-rep.yml: " + e.getMessage());
         }
+
+        antiAbuseService.pruneStale();
     }
 
     public int getScore(UUID uuid) {
@@ -269,8 +275,13 @@ public class RepService {
             adjustScore(target, positive ? 1 : -2);
             adjustCategoryScore(target, category, positive ? 1 : -2);
             logAltRecord(ipHash, giver, target, positive, now);
-            checkReciprocity(giver, target);
-            if (!positive) checkNegativeCluster(target);
+            antiAbuseService.recordActivity(giver, target);
+            SuspiciousRepCase reciprocityAlert = antiAbuseService.checkReciprocity(giver, target);
+            if (reciprocityAlert != null) { suspiciousCases.add(reciprocityAlert); notifyStaff(reciprocityAlert); }
+            if (!positive) {
+                SuspiciousRepCase clusterAlert = antiAbuseService.checkNegativeCluster(target, suspiciousCases);
+                if (clusterAlert != null) { suspiciousCases.add(clusterAlert); notifyStaff(clusterAlert); }
+            }
             if (discordWebhook != null) discordWebhook.logCommendation(c, getScore(target));
             removalCooldown.remove(key(giver, target));
             notifyTeleport(target);
@@ -288,6 +299,7 @@ public class RepService {
         if (existing.isPositive() != positive) {
             delta = positive ? 3 : -3;
         }
+        RepCategory oldCategory = existing.getCategory();
         // Remove old category contribution and add new
         adjustCategoryScore(target, existing.getCategory(), existing.isPositive() ? -1 : 2);
         existing.setPositive(positive);
@@ -298,9 +310,14 @@ public class RepService {
         adjustScore(target, delta);
         adjustCategoryScore(target, category, positive ? 1 : -2);
         logAltRecord(ipHash, giver, target, positive, now);
-        checkReciprocity(giver, target);
-        if (!positive) checkNegativeCluster(target);
-        if (discordWebhook != null && (delta != 0 || !existing.getCategory().equals(category))) {
+        antiAbuseService.recordActivity(giver, target);
+        SuspiciousRepCase reciprocityAlert = antiAbuseService.checkReciprocity(giver, target);
+        if (reciprocityAlert != null) { suspiciousCases.add(reciprocityAlert); notifyStaff(reciprocityAlert); }
+        if (!positive) {
+            SuspiciousRepCase clusterAlert = antiAbuseService.checkNegativeCluster(target, suspiciousCases);
+            if (clusterAlert != null) { suspiciousCases.add(clusterAlert); notifyStaff(clusterAlert); }
+        }
+        if (discordWebhook != null && (delta != 0 || !oldCategory.equals(category))) {
             discordWebhook.logCommendation(existing, getScore(target));
         }
         if (delta != 0) {
@@ -397,65 +414,7 @@ public class RepService {
                 }
             }
             if (givers.size() >= 2) {
-                SuspiciousRepCase c = new SuspiciousRepCase(target, ipHash, new ArrayList<>(givers), time);
-                suspiciousCases.add(c);
-                notifyStaff(c);
-            }
-        }
-    }
-
-    /**
-     * Check for rep trading: A reps B, then B reps A within the reciprocity window.
-     */
-    private void checkReciprocity(UUID giver, UUID target) {
-        String reverseKey = target.toString() + "->" + giver.toString();
-        Long reverseTime = repActivityLog.get(reverseKey);
-        if (reverseTime != null) {
-            long elapsed = System.currentTimeMillis() - reverseTime;
-            if (elapsed <= RECIPROCITY_WINDOW_MS) {
-                SuspiciousRepCase c = new SuspiciousRepCase(target, "RECIPROCITY",
-                        List.of(giver, target), System.currentTimeMillis());
-                c.setDetail("Rep trading: " + nameOf(giver) + " and " + nameOf(target)
-                        + " exchanged rep within " + (elapsed / 3600000) + "h");
-                suspiciousCases.add(c);
-                notifyStaff(c);
-            }
-        }
-        // Record this activity
-        String forwardKey = giver.toString() + "->" + target.toString();
-        repActivityLog.put(forwardKey, System.currentTimeMillis());
-    }
-
-    /**
-     * Check for mass downrepping: 3+ different givers downrep the same target within CLUSTER_WINDOW.
-     */
-    private void checkNegativeCluster(UUID target) {
-        long now = System.currentTimeMillis();
-        long cutoff = now - CLUSTER_WINDOW_MS;
-        Set<UUID> recentDownreppers = new HashSet<>();
-
-        for (Map.Entry<String, Long> entry : repActivityLog.entrySet()) {
-            if (entry.getValue() < cutoff) continue;
-            String[] parts = entry.getKey().split("->");
-            if (parts.length != 2 || !parts[1].equals(target.toString())) continue;
-            // Check that this was a negative rep (we only track after successful commendation)
-            Commendation c = getCommendation(UUID.fromString(parts[0]), target);
-            if (c != null && !c.isPositive()) {
-                recentDownreppers.add(UUID.fromString(parts[0]));
-            }
-        }
-
-        if (recentDownreppers.size() >= CLUSTER_MIN_GIVERS) {
-            // Check if we already reported this cluster recently (dedup)
-            boolean alreadyReported = suspiciousCases.stream()
-                    .anyMatch(sc -> sc.getTarget().equals(target)
-                            && "CLUSTER_DOWNREP".equals(sc.ipHash())
-                            && now - sc.getCreatedAt() < CLUSTER_WINDOW_MS);
-            if (!alreadyReported) {
-                SuspiciousRepCase c = new SuspiciousRepCase(target, "CLUSTER_DOWNREP",
-                        new ArrayList<>(recentDownreppers), now);
-                c.setDetail("Mass downrep: " + recentDownreppers.size() + " players downrepped "
-                        + nameOf(target) + " within " + (CLUSTER_WINDOW_MS / 3600000) + "h");
+                SuspiciousRepCase c = new SuspiciousRepCase(target, AlertType.ALT_ABUSE, ipHash, new ArrayList<>(givers), time);
                 suspiciousCases.add(c);
                 notifyStaff(c);
             }
@@ -467,17 +426,38 @@ public class RepService {
                 .filter(p -> p.hasPermission("enthusiacommend.rep.alert"))
                 .forEach(p -> {
                     String targetArg = resolveTargetArg(c.getTarget());
-                    String inspectCmd = "/rep admin inspect " + targetArg + " " + c.ipHash();
-                    Component msg = Component.text("ALT REP ALERT: IP group ", NamedTextColor.RED)
-                            .append(Component.text(c.ipHash(), NamedTextColor.YELLOW)
-                                    .clickEvent(ClickEvent.runCommand(inspectCmd))
-                                    .hoverEvent(HoverEvent.showText(
-                                            Component.text("Click to inspect report", NamedTextColor.GRAY))))
-                            .append(Component.text(" accounts ", NamedTextColor.RED))
-                            .append(Component.text(formatNames(c.givers()), NamedTextColor.WHITE))
-                            .append(Component.text(" down-repped ", NamedTextColor.RED))
-                            .append(Component.text(nameOf(c.getTarget()), NamedTextColor.YELLOW))
-                            .append(Component.text(".", NamedTextColor.RED));
+                    String inspectCmd = "/rep admin inspect " + targetArg + " "
+                            + (c.ipHash() != null ? c.ipHash() : c.getAlertType().name());
+                    String prefix;
+                    Component msg;
+                    switch (c.getAlertType()) {
+                        case RECIPROCITY -> {
+                            prefix = "REP TRADING ALERT: ";
+                            msg = Component.text(prefix, NamedTextColor.RED)
+                                    .append(Component.text(formatNames(c.givers()), NamedTextColor.WHITE))
+                                    .append(Component.text(" exchanged rep within 24h.", NamedTextColor.RED));
+                        }
+                        case CLUSTER_DOWNREP -> {
+                            prefix = "MASS DOWNREP ALERT: ";
+                            msg = Component.text(prefix, NamedTextColor.RED)
+                                    .append(Component.text(c.givers().size() + " accounts ", NamedTextColor.WHITE))
+                                    .append(Component.text("downrepped ", NamedTextColor.RED))
+                                    .append(Component.text(nameOf(c.getTarget()), NamedTextColor.YELLOW));
+                        }
+                        default -> { // ALT_ABUSE
+                            prefix = "ALT REP ALERT: IP group ";
+                            msg = Component.text(prefix, NamedTextColor.RED)
+                                    .append(Component.text(c.ipHash(), NamedTextColor.YELLOW)
+                                            .clickEvent(ClickEvent.runCommand(inspectCmd))
+                                            .hoverEvent(HoverEvent.showText(
+                                                    Component.text("Click to inspect report", NamedTextColor.GRAY))))
+                                    .append(Component.text(" accounts ", NamedTextColor.RED))
+                                    .append(Component.text(formatNames(c.givers()), NamedTextColor.WHITE))
+                                    .append(Component.text(" down-repped ", NamedTextColor.RED))
+                                    .append(Component.text(nameOf(c.getTarget()), NamedTextColor.YELLOW))
+                                    .append(Component.text(".", NamedTextColor.RED));
+                        }
+                    }
                     p.sendMessage(msg);
                 });
     }
@@ -612,14 +592,16 @@ public class RepService {
 
     public static final class SuspiciousRepCase {
         private final UUID target;
-        private final String ipHash;
+        private final AlertType alertType;
+        private final String ipHash; // legacy — null for RECIPROCITY/CLUSTER_DOWNREP
         private final List<UUID> givers;
         private final long createdAt;
         private boolean resolved;
         private String detail;
 
-        public SuspiciousRepCase(UUID target, String ipHash, List<UUID> givers, long createdAt) {
+        public SuspiciousRepCase(UUID target, AlertType alertType, String ipHash, List<UUID> givers, long createdAt) {
             this.target = target;
+            this.alertType = alertType;
             this.ipHash = ipHash;
             this.givers = givers;
             this.createdAt = createdAt;
@@ -627,17 +609,16 @@ public class RepService {
             this.detail = null;
         }
 
-        public UUID getTarget() {
-            return target;
+        /** Convenience for non-IP alerts (RECIPROCITY, CLUSTER_DOWNREP). */
+        public SuspiciousRepCase(UUID target, AlertType alertType, List<UUID> givers) {
+            this(target, alertType, null, givers, System.currentTimeMillis());
         }
 
-        public String ipHash() {
-            return ipHash;
-        }
+        public UUID getTarget() { return target; }
 
-        public List<UUID> givers() {
-            return givers;
-        }
+        public String ipHash() { return ipHash; }
+        public AlertType getAlertType() { return alertType; }
+        public List<UUID> givers() { return givers; }
 
         public long getCreatedAt() {
             return createdAt;
