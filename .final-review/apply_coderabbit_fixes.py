@@ -1,12 +1,22 @@
 from pathlib import Path
+import re
 
 
 def replace_once(path: str, old: str, new: str) -> None:
     file = Path(path)
     text = file.read_text(encoding="utf-8")
     if old not in text:
-        raise SystemExit(f"Expected block not found in {path}: {old[:120]!r}")
+        raise SystemExit(f"Expected block not found in {path}: {old[:100]!r}")
     file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def replace_regex(path: str, pattern: str, replacement: str) -> None:
+    file = Path(path)
+    text = file.read_text(encoding="utf-8")
+    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
+    if count != 1:
+        raise SystemExit(f"Expected one regex match in {path}, found {count}")
+    file.write_text(updated, encoding="utf-8")
 
 
 replace_once(
@@ -34,18 +44,9 @@ replace_once(
     }'''
 )
 
-replace_once(
+replace_regex(
     "src/main/java/org/enthusia/rep/discord/DiscordWebhookService.java",
-    '''    private static String escape(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("\\\\", "\\\\\\\\")
-                .replace("\\\"", "\\\\\\\"")
-                .replace("\\r", "\\\\r")
-                .replace("\\n", "\\\\n")
-                .replace("\\t", "\\\\t");
-    }''',
+    r'''    private static String escape\(String value\) \{.*?\n    \}\n\n    private static URI validate''',
     '''    static String escape(String value) {
         if (value == null) {
             return "";
@@ -55,7 +56,7 @@ replace_once(
             char character = value.charAt(index);
             switch (character) {
                 case '\\\\' -> escaped.append("\\\\\\\\");
-                case '\"' -> escaped.append("\\\\\\\"");
+                case '"' -> escaped.append("\\\\\\\"");
                 case '\\b' -> escaped.append("\\\\b");
                 case '\\f' -> escaped.append("\\\\f");
                 case '\\r' -> escaped.append("\\\\r");
@@ -71,24 +72,14 @@ replace_once(
             }
         }
         return escaped.toString();
-    }'''
+    }
+
+    private static URI validate'''
 )
 
-replace_once(
+replace_regex(
     "src/main/java/org/enthusia/rep/rep/Commendation.java",
-    '''    public synchronized int applyUpdate(boolean newPositive, RepCategory newCategory, String newReasonText,
-                                        long newLastEditedAt, String newIpHash) {
-        int oldValue = scoreValue;
-        boolean polarityChanged = positive != newPositive;
-        int newValue = polarityChanged ? newCategory.defaultScoreValue() : oldValue;
-        positive = newPositive;
-        category = newCategory;
-        reasonText = newReasonText == null ? "" : newReasonText;
-        lastEditedAt = newLastEditedAt;
-        ipHash = newIpHash;
-        scoreValue = normalizeScoreValue(newPositive, newValue);
-        return scoreValue - oldValue;
-    }''',
+    r'''    public synchronized int applyUpdate\(boolean newPositive, RepCategory newCategory, String newReasonText,\n\s+long newLastEditedAt, String newIpHash\) \{.*?\n    \}\n\n    public synchronized Commendation snapshot''',
     '''    public synchronized int applyUpdate(boolean newPositive, RepCategory newCategory, String newReasonText,
                                         long newLastEditedAt, String newIpHash) {
         int oldValue = scoreValue;
@@ -104,29 +95,14 @@ replace_once(
         ipHash = newIpHash;
         scoreValue = normalizeScoreValue(newPositive, newValue);
         return scoreValue - oldValue;
-    }'''
+    }
+
+    public synchronized Commendation snapshot'''
 )
 
-replace_once(
+replace_regex(
     "src/main/java/org/enthusia/rep/rep/RepService.java",
-    '''    public record CommendationResult(boolean success, boolean created, Commendation commendation,
-                                      long cooldownRemainingMillis, int repDelta) {
-        public static CommendationResult created(Commendation commendation) {
-            return new CommendationResult(true, true, commendation, 0L, commendation.getScoreValue());
-        }
-
-        public static CommendationResult updated(Commendation commendation, int delta) {
-            return new CommendationResult(true, false, commendation, 0L, delta);
-        }
-
-        public static CommendationResult cooldown(long remainingMillis) {
-            return new CommendationResult(false, false, null, remainingMillis, 0);
-        }
-
-        public static CommendationResult invalid() {
-            return new CommendationResult(false, false, null, 0L, 0);
-        }
-    }''',
+    r'''    public record CommendationResult\(boolean success, boolean created, Commendation commendation,\n\s+long cooldownRemainingMillis, int repDelta\) \{.*?\n    \}\n\n    public static final class RemovedRep''',
     '''    public record CommendationResult(boolean success, boolean created, Commendation commendation,
                                       long cooldownRemainingMillis, int repDelta, Failure failure) {
         public enum Failure {
@@ -151,7 +127,9 @@ replace_once(
         public static CommendationResult invalid() {
             return new CommendationResult(false, false, null, 0L, 0, Failure.INVALID_CATEGORY);
         }
-    }'''
+    }
+
+    public static final class RemovedRep'''
 )
 
 replace_once(
@@ -189,7 +167,6 @@ class RepConfigThresholdTest {
     @Test
     void detectsLeavingAnEffectAtItsExactBoundary() {
         RepConfig config = new RepConfig(new YamlConfiguration());
-
         assertTrue(config.crossedEffectThreshold(-10, -9));
         assertTrue(config.crossedEffectThreshold(10, 9));
         assertFalse(config.crossedEffectThreshold(-9, -8));
@@ -221,36 +198,10 @@ replace_once(
 
 replace_once(
     "src/test/java/org/enthusia/rep/rep/CommendationMigrationTest.java",
-    '''    void atomicUpdatePreservesWeightUntilPolarityChangesAndSnapshotIsDetached() {
-        Commendation commendation = new Commendation(
-                UUID.randomUUID(), UUID.randomUUID(), false, RepCategory.SCAMMED,
-                "legacy", 1L, 1L, null, -1);
-
-        assertEquals(0, commendation.applyUpdate(false, RepCategory.GRIEFED, "edited", 2L, "hash"));
-        assertEquals(-1, commendation.getScoreValue());
-        Commendation snapshot = commendation.snapshot();
-
-        assertEquals(2, commendation.applyUpdate(true, RepCategory.WAS_KIND, "positive", 3L, null));
-        assertEquals(1, commendation.getScoreValue());
-        assertFalse(snapshot.isPositive());
-        assertEquals(-1, snapshot.getScoreValue());
-        assertEquals("edited", snapshot.getReasonText());
+    '''        assertEquals("edited", snapshot.getReasonText());
     }
 }''',
-    '''    void atomicUpdatePreservesWeightUntilPolarityChangesAndSnapshotIsDetached() {
-        Commendation commendation = new Commendation(
-                UUID.randomUUID(), UUID.randomUUID(), false, RepCategory.SCAMMED,
-                "legacy", 1L, 1L, null, -1);
-
-        assertEquals(0, commendation.applyUpdate(false, RepCategory.GRIEFED, "edited", 2L, "hash"));
-        assertEquals(-1, commendation.getScoreValue());
-        Commendation snapshot = commendation.snapshot();
-
-        assertEquals(2, commendation.applyUpdate(true, RepCategory.WAS_KIND, "positive", 3L, null));
-        assertEquals(1, commendation.getScoreValue());
-        assertFalse(snapshot.isPositive());
-        assertEquals(-1, snapshot.getScoreValue());
-        assertEquals("edited", snapshot.getReasonText());
+    '''        assertEquals("edited", snapshot.getReasonText());
     }
 
     @Test
@@ -262,8 +213,8 @@ replace_once(
         assertEquals(2, commendation.applyUpdate(true, null, "positive", 2L, null));
         assertEquals(RepCategory.WAS_KIND, commendation.getCategory());
         assertEquals(1, commendation.getScoreValue());
-
-        assertEquals(0, commendation.applyUpdate(true, RepCategory.OTHER_POSITIVE, "legacy category", 3L, null));
+        assertEquals(0, commendation.applyUpdate(true, RepCategory.OTHER_POSITIVE,
+                "legacy category", 3L, null));
         assertEquals(RepCategory.WAS_KIND, commendation.getCategory());
     }
 }'''
