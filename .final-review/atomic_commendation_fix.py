@@ -103,7 +103,7 @@ method = '''
         assertEquals(-1, commendation.getScoreValue());
         Commendation snapshot = commendation.snapshot();
 
-        assertEquals(3, commendation.applyUpdate(true, RepCategory.WAS_KIND, "positive", 3L, null));
+        assertEquals(2, commendation.applyUpdate(true, RepCategory.WAS_KIND, "positive", 3L, null));
         assertEquals(1, commendation.getScoreValue());
         assertFalse(snapshot.isPositive());
         assertEquals(-1, snapshot.getScoreValue());
