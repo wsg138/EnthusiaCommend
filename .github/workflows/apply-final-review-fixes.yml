@@ -28,6 +28,16 @@ jobs:
         run: |
           if [ -f .final-review/apply_coderabbit_fixes.py ]; then
             mkdir -p src/test/java/org/enthusia/rep/config
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.final-review/apply_coderabbit_fixes.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              're.subn(pattern, replacement, text, count=1, flags=re.DOTALL)',
+              're.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)'
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
             python3 .final-review/apply_coderabbit_fixes.py
             rm -f .final-review/apply_coderabbit_fixes.py
           else
