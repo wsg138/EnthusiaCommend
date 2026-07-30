@@ -76,9 +76,12 @@ public class Commendation {
                                         long newLastEditedAt, String newIpHash) {
         int oldValue = scoreValue;
         boolean polarityChanged = positive != newPositive;
-        int newValue = polarityChanged ? newCategory.defaultScoreValue() : oldValue;
+        RepCategory normalizedCategory = newCategory == null
+                ? (newPositive ? RepCategory.WAS_KIND : RepCategory.SCAMMED)
+                : newCategory.migratedCategory();
+        int newValue = polarityChanged ? normalizedCategory.defaultScoreValue() : oldValue;
         positive = newPositive;
-        category = newCategory;
+        category = normalizedCategory;
         reasonText = newReasonText == null ? "" : newReasonText;
         lastEditedAt = newLastEditedAt;
         ipHash = newIpHash;

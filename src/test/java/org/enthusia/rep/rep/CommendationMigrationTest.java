@@ -68,4 +68,18 @@ class CommendationMigrationTest {
         assertEquals(-1, snapshot.getScoreValue());
         assertEquals("edited", snapshot.getReasonText());
     }
+
+    @Test
+    void atomicUpdateMaintainsCategoryInvariant() {
+        Commendation commendation = new Commendation(
+                UUID.randomUUID(), UUID.randomUUID(), false, RepCategory.SCAMMED,
+                "legacy", 1L, 1L, null, -1);
+
+        assertEquals(2, commendation.applyUpdate(true, null, "positive", 2L, null));
+        assertEquals(RepCategory.WAS_KIND, commendation.getCategory());
+        assertEquals(1, commendation.getScoreValue());
+        assertEquals(0, commendation.applyUpdate(true, RepCategory.OTHER_POSITIVE,
+                "legacy category", 3L, null));
+        assertEquals(RepCategory.WAS_KIND, commendation.getCategory());
+    }
 }

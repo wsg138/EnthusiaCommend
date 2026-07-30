@@ -122,8 +122,9 @@ public final class RepConfig {
     public boolean crossedEffectThreshold(int oldScore, int newScore) {
         if (oldScore == newScore) return false;
         for (int threshold : effectThresholds.activeMilestones()) {
-            if ((oldScore < threshold && newScore >= threshold)
-                    || (oldScore > threshold && newScore <= threshold)) {
+            boolean oldActive = threshold <= 0 ? oldScore <= threshold : oldScore >= threshold;
+            boolean newActive = threshold <= 0 ? newScore <= threshold : newScore >= threshold;
+            if (oldActive != newActive) {
                 return true;
             }
         }

@@ -870,21 +870,28 @@ public final class RepService {
     }
 
     public record CommendationResult(boolean success, boolean created, Commendation commendation,
-                                     long cooldownRemainingMillis, int repDelta) {
+                                      long cooldownRemainingMillis, int repDelta, Failure failure) {
+        public enum Failure {
+            NONE,
+            COOLDOWN,
+            INVALID_CATEGORY
+        }
+
         public static CommendationResult created(Commendation commendation) {
-            return new CommendationResult(true, true, commendation, 0L, commendation.getScoreValue());
+            return new CommendationResult(true, true, commendation, 0L,
+                    commendation.getScoreValue(), Failure.NONE);
         }
 
         public static CommendationResult updated(Commendation commendation, int delta) {
-            return new CommendationResult(true, false, commendation, 0L, delta);
+            return new CommendationResult(true, false, commendation, 0L, delta, Failure.NONE);
         }
 
         public static CommendationResult cooldown(long remainingMillis) {
-            return new CommendationResult(false, false, null, remainingMillis, 0);
+            return new CommendationResult(false, false, null, remainingMillis, 0, Failure.COOLDOWN);
         }
 
         public static CommendationResult invalid() {
-            return new CommendationResult(false, false, null, 0L, 0);
+            return new CommendationResult(false, false, null, 0L, 0, Failure.INVALID_CATEGORY);
         }
     }
 

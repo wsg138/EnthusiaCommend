@@ -835,8 +835,15 @@ public final class RepGuiManager implements Listener {
         );
 
         if (!result.success()) {
-            long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
-            player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of("hours", String.valueOf(hoursLeft))));
+            if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
+                player.sendMessage(plugin.getMessages().get("rep.category-invalid", Map.of(
+                        "list", "Was Kind, Helped Me, Gave Items/Money, Trustworthy, Good Stall, "
+                                + "Scammed, Spawn Killed, Griefed, Trapped, Scam Stall")));
+            } else {
+                long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
+                player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(
+                        "hours", String.valueOf(Math.max(1L, hoursLeft)))));
+            }
             openProfile(player, Bukkit.getOfflinePlayer(targetId), returnPage);
             return;
         }
