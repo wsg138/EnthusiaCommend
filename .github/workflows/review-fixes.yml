@@ -25,7 +25,9 @@ jobs:
           cache: maven
 
       - name: Apply focused review fixes
-        run: python3 .review-fixes/patch_gui.py
+        run: |
+          python3 .review-fixes/patch_gui.py
+          python3 .review-fixes/patch_plan.py
 
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
@@ -36,7 +38,8 @@ jobs:
             src/main/java/org/enthusia/rep/gui/RepGuiManager.java \
             src/main/java/org/enthusia/rep/command/CommendCommand.java \
             src/main/java/org/enthusia/rep/rep/RepService.java \
-            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java; then
+            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java \
+            src/main/java/org/enthusia/rep/integration/plan/PlanReputationDataExtension.java; then
             echo "No source changes to publish."
             exit 0
           fi
@@ -46,6 +49,7 @@ jobs:
             src/main/java/org/enthusia/rep/gui/RepGuiManager.java \
             src/main/java/org/enthusia/rep/command/CommendCommand.java \
             src/main/java/org/enthusia/rep/rep/RepService.java \
-            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java
-          git commit -m "fix: align weighted GUI, categories, and rep history"
+            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java \
+            src/main/java/org/enthusia/rep/integration/plan/PlanReputationDataExtension.java
+          git commit -m "fix: align weighted displays, categories, and rep history"
           git push origin HEAD:feature/rep-system-v2-mainline
