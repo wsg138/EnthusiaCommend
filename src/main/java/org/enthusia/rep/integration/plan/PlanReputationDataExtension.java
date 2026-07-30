@@ -139,13 +139,13 @@ public final class PlanReputationDataExtension implements DataExtension {
                 .columnThree("Change", new Icon(Family.SOLID, "plus-minus", Color.AMBER))
                 .columnFour("Reason", new Icon(Family.SOLID, "message", Color.GREY));
 
-        for (Commendation commendation : plugin.getRepService().getCommendationsAbout(playerId).stream()
+        for (Commendation commendation : plugin.getRepService().getCommendationSnapshotsAbout(playerId).stream()
                 .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
                 .limit(10)
                 .toList()) {
             table.addRow(
                     dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
-                    plugin.getAnalyticsService().nameOf(commendation.getGiver()),
+                    plugin.getRepService().cachedNameOf(commendation.getGiver()),
                     signedValue(commendation.getScoreValue()),
                     commendation.getReasonText()
             );
@@ -163,11 +163,11 @@ public final class PlanReputationDataExtension implements DataExtension {
                 .columnFour("Change", new Icon(Family.SOLID, "plus-minus", Color.AMBER))
                 .columnFive("Reason", new Icon(Family.SOLID, "message", Color.GREY));
 
-        for (Commendation commendation : plugin.getRepService().recentCommendations(10)) {
+        for (Commendation commendation : plugin.getRepService().recentCommendationSnapshots(10)) {
             table.addRow(
                     dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
-                    plugin.getAnalyticsService().nameOf(commendation.getTarget()),
-                    plugin.getAnalyticsService().nameOf(commendation.getGiver()),
+                    plugin.getRepService().cachedNameOf(commendation.getTarget()),
+                    plugin.getRepService().cachedNameOf(commendation.getGiver()),
                     signedValue(commendation.getScoreValue()),
                     commendation.getReasonText()
             );

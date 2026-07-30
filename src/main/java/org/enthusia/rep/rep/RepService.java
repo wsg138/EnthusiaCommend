@@ -44,6 +44,7 @@ public final class RepService {
     private volatile org.enthusia.rep.config.RepConfig repConfig;
 
     private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
+    private final Map<UUID, String> knownNames = new ConcurrentHashMap<>();
     private final Map<UUID, List<Commendation>> commendationsByTarget = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, Commendation>> commendationsByGiver = new ConcurrentHashMap<>();
     private final Map<RepPair, Long> removalCooldowns = new ConcurrentHashMap<>();
@@ -288,6 +289,31 @@ public final class RepService {
                 .toList();
     }
 
+    /** Immutable copies safe for asynchronous integrations such as Plan. */
+    public List<Commendation> getCommendationSnapshotsAbout(UUID targetId) {
+        List<Commendation> entries = commendationsByTarget.get(targetId);
+        if (entries == null) {
+            return List.of();
+        }
+        synchronized (entries) {
+            return entries.stream().map(this::cloneCommendation).toList();
+        }
+    }
+
+    /** Immutable copies safe for asynchronous integrations such as Plan. */
+    public List<Commendation> recentCommendationSnapshots(int limit) {
+        List<Commendation> snapshots = new ArrayList<>();
+        for (List<Commendation> entries : commendationsByTarget.values()) {
+            synchronized (entries) {
+                entries.stream().map(this::cloneCommendation).forEach(snapshots::add);
+            }
+        }
+        return snapshots.stream()
+                .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
         Comparator<Map.Entry<UUID, Integer>> comparator = Map.Entry.comparingByValue();
         if (!lowest) {
@@ -301,7 +327,22 @@ public final class RepService {
 
     public String nameOf(UUID playerId) {
         OfflinePlayer player = Bukkit.getOfflinePlayer(playerId);
-        return player.getName() != null ? player.getName() : playerId.toString().substring(0, 8);
+        rememberName(playerId, player.getName());
+        return cachedNameOf(playerId);
+    }
+
+    public void rememberName(UUID playerId, String playerName) {
+        if (playerId != null && playerName != null && !playerName.isBlank()) {
+            knownNames.put(playerId, playerName);
+        }
+    }
+
+    /** Does not access Bukkit and is safe for asynchronous integrations. */
+    public String cachedNameOf(UUID playerId) {
+        if (playerId == null) {
+            return "unknown";
+        }
+        return knownNames.getOrDefault(playerId, playerId.toString().substring(0, 8));
     }
 
     public CommendationResult addOrUpdateCommendation(

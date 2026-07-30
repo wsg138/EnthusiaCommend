@@ -95,6 +95,9 @@ public final class CommendPlugin extends JavaPlugin {
                 analyticsService,
                 this::handleAuditRecord
         );
+        for (var player : Bukkit.getOnlinePlayers()) {
+            repService.rememberName(player.getUniqueId(), player.getName());
+        }
         this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
