@@ -40,7 +40,7 @@ def patch_gui() -> None:
     text = text.replace(old_profile, new_profile)
 
     text, replacements = re.subn(
-        r'\((\w+)\.isPositive\(\) \? ChatColor\.GREEN \+ "\+1" : ChatColor\.RED \+ "-1"\)',
+        r'(\w+)\.isPositive\(\) \? ChatColor\.GREEN \+ "\+1" : ChatColor\.RED \+ "-1"',
         r'coloredValue(\1.getScoreValue())',
         text
     )
