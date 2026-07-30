@@ -30,14 +30,20 @@ jobs:
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
 
-      - name: Publish source fix
+      - name: Publish source fixes
         run: |
-          if git diff --quiet -- src/main/java/org/enthusia/rep/gui/RepGuiManager.java; then
+          if git diff --quiet -- \
+            src/main/java/org/enthusia/rep/gui/RepGuiManager.java \
+            src/main/java/org/enthusia/rep/rep/RepService.java \
+            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java; then
             echo "No source changes to publish."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/main/java/org/enthusia/rep/gui/RepGuiManager.java
-          git commit -m "fix: align rep GUI with weighted categories and reports"
+          git add \
+            src/main/java/org/enthusia/rep/gui/RepGuiManager.java \
+            src/main/java/org/enthusia/rep/rep/RepService.java \
+            src/main/java/org/enthusia/rep/analytics/ReputationAnalyticsService.java
+          git commit -m "fix: align weighted GUI and complete rep history"
           git push origin HEAD:feature/rep-system-v2-mainline
