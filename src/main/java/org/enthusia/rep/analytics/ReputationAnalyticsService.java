@@ -123,7 +123,10 @@ public final class ReputationAnalyticsService {
             int oldTotal,
             int newTotal
     ) {
-        if (targetId == null || amount == 0 || oldTotal == newTotal) {
+        boolean metadataOnlyUpdate = action == ReputationChangeAction.UPDATE
+                && amount == 0
+                && oldTotal == newTotal;
+        if (targetId == null || (!metadataOnlyUpdate && (amount == 0 || oldTotal == newTotal))) {
             return;
         }
         ReputationChangeRecord record = new ReputationChangeRecord(

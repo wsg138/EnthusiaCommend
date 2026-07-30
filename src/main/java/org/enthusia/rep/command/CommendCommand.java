@@ -409,8 +409,9 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             ReputationChangeRecord change = history.get(i);
             String actor = plugin.getAnalyticsService().actorName(change);
             String category = change.category() == null ? "" : " [" + displayName(change.category()) + "]";
+            String action = change.action().name().toLowerCase(Locale.ROOT).replace('_', ' ');
             sender.sendMessage(ChatColor.DARK_GRAY + dateFormatter.format(Instant.ofEpochMilli(change.timestamp()))
-                    + " " + coloredValue(change.amount()) + ChatColor.GRAY + category
+                    + " " + ChatColor.AQUA + action + " " + coloredValue(change.amount()) + ChatColor.GRAY + category
                     + " by " + ChatColor.WHITE + actor + ChatColor.GRAY + " -> "
                     + plugin.getRepConfig().formatColoredScore(change.newTotal())
                     + ChatColor.DARK_GRAY + " (" + trimPreview(change.reason()) + ")");
@@ -524,7 +525,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         if (raw == null) return null;
         String normalized = raw.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
         try {
-            RepCategory category = RepCategory.valueOf(normalized).migratedCategory();
+            RepCategory category = RepCategory.valueOf(normalized);
             return category.isSelectable() ? category : null;
         } catch (IllegalArgumentException ignored) {
             return null;

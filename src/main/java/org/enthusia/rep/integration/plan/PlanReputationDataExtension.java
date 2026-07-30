@@ -146,7 +146,7 @@ public final class PlanReputationDataExtension implements DataExtension {
             table.addRow(
                     dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
                     plugin.getAnalyticsService().nameOf(commendation.getGiver()),
-                    commendation.isPositive() ? "+1" : "-1",
+                    signedValue(commendation.getScoreValue()),
                     commendation.getReasonText()
             );
         }
@@ -168,11 +168,15 @@ public final class PlanReputationDataExtension implements DataExtension {
                     dateFormatter.format(Instant.ofEpochMilli(commendation.getLastEditedAt())),
                     plugin.getAnalyticsService().nameOf(commendation.getTarget()),
                     plugin.getAnalyticsService().nameOf(commendation.getGiver()),
-                    commendation.isPositive() ? "+1" : "-1",
+                    signedValue(commendation.getScoreValue()),
                     commendation.getReasonText()
             );
         }
         return table.build();
     }
 
+
+    private String signedValue(int value) {
+        return value > 0 ? "+" + value : String.valueOf(value);
+    }
 }

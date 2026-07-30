@@ -351,9 +351,9 @@ public final class RepService {
 
         if (delta != 0) {
             applyScore(targetId, oldScore + delta, true);
-            recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
-                    normalizedCategory, reasonText, oldScore, oldScore + delta);
         }
+        recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
+                normalizedCategory, reasonText, oldScore, oldScore + delta);
         removalCooldowns.remove(key(giverId, targetId));
         rebuildAntiAbuseIndex();
         runAntiAbuseChecks(existing, now);
