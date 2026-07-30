@@ -137,5 +137,40 @@ def patch_history() -> None:
     analytics_path.write_text(analytics.replace(old_guard, new_guard), encoding="utf-8")
 
 
+def patch_command() -> None:
+    path = Path("src/main/java/org/enthusia/rep/command/CommendCommand.java")
+    text = path.read_text(encoding="utf-8")
+
+    old_parser = '''        try {
+            RepCategory category = RepCategory.valueOf(normalized).migratedCategory();
+            return category.isSelectable() ? category : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }'''
+    new_parser = '''        try {
+            RepCategory category = RepCategory.valueOf(normalized);
+            return category.isSelectable() ? category : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }'''
+    if old_parser not in text:
+        raise SystemExit("direct command category parser block not found")
+    text = text.replace(old_parser, new_parser)
+
+    old_history = '''            sender.sendMessage(ChatColor.DARK_GRAY + dateFormatter.format(Instant.ofEpochMilli(change.timestamp()))
+                    + " " + coloredValue(change.amount()) + ChatColor.GRAY + category
+                    + " by " + ChatColor.WHITE + actor + ChatColor.GRAY + " -> "'''
+    new_history = '''            String action = change.action().name().toLowerCase(Locale.ROOT).replace('_', ' ');
+            sender.sendMessage(ChatColor.DARK_GRAY + dateFormatter.format(Instant.ofEpochMilli(change.timestamp()))
+                    + " " + ChatColor.AQUA + action + " " + coloredValue(change.amount()) + ChatColor.GRAY + category
+                    + " by " + ChatColor.WHITE + actor + ChatColor.GRAY + " -> "'''
+    if old_history not in text:
+        raise SystemExit("history display block not found")
+    text = text.replace(old_history, new_history)
+
+    path.write_text(text, encoding="utf-8")
+
+
 patch_gui()
 patch_history()
+patch_command()
