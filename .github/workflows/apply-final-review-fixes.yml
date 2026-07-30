@@ -27,6 +27,7 @@ jobs:
       - name: Apply reviewed corrections
         run: |
           if [ -f .final-review/apply_coderabbit_fixes.py ]; then
+            mkdir -p src/test/java/org/enthusia/rep/config
             python3 .final-review/apply_coderabbit_fixes.py
             rm -f .final-review/apply_coderabbit_fixes.py
           else
