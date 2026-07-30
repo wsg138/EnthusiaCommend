@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,7 +43,7 @@ public class DiscordWebhook {
                 String giverName = repService.nameOf(c.getGiver());
                 String targetName = repService.nameOf(c.getTarget());
                 String sign = c.isPositive() ? "+" : "";
-                int color = c.isPositive() ? 0x57F287 : 0xED4245; // Discord green / red
+                int color = c.isPositive() ? 0x57F287 : 0xED4245;
 
                 String json = String.format(
                         "{\"embeds\":[{" +
@@ -80,18 +81,20 @@ public class DiscordWebhook {
                 }
 
                 int code = conn.getResponseCode();
-                if (code != 200 && code != 204) {
+                if (code != 200 && code != 204 && logger.isLoggable(Level.WARNING)) {
                     logger.warning("Discord webhook returned HTTP " + code);
                 }
                 conn.disconnect();
             } catch (Exception e) {
-                logger.log(Level.WARNING, "Failed to send Discord webhook: " + e.getMessage());
+                if (logger.isLoggable(Level.WARNING)) {
+                    logger.warning("Failed to send Discord webhook: " + e.getMessage());
+                }
             }
         });
     }
 
     private static String formatCategory(Commendation c) {
-        String name = c.getCategory().name().replace('_', ' ').toLowerCase();
+        String name = c.getCategory().name().replace('_', ' ').toLowerCase(Locale.ROOT);
         // Capitalize words
         StringBuilder sb = new StringBuilder();
         for (String word : name.split(" ")) {

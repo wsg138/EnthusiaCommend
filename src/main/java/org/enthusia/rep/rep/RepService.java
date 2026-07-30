@@ -194,8 +194,7 @@ public class RepService {
     }
 
     /**
-     * Returns the worst (most negative) score across all negative categories,
-     * and the best (most positive) across all positive categories.
+     * Returns the worst (most negative) score across all negative categories.
      */
     public int getWorstNegativeCategoryScore(UUID uuid) {
         Map<RepCategory, Integer> map = categoryScores.get(uuid);
@@ -299,6 +298,11 @@ public class RepService {
         adjustScore(target, delta);
         adjustCategoryScore(target, category, positive ? 1 : -2);
         logAltRecord(ipHash, giver, target, positive, now);
+        checkReciprocity(giver, target);
+        if (!positive) checkNegativeCluster(target);
+        if (discordWebhook != null && (delta != 0 || !existing.getCategory().equals(category))) {
+            discordWebhook.logCommendation(existing, getScore(target));
+        }
         if (delta != 0) {
             notifyTeleport(target);
         }
@@ -694,7 +698,12 @@ public class RepService {
                 UUID target = UUID.fromString(String.valueOf(raw.get("target")));
                 boolean positive = raw.get("positive") instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(raw.get("positive")));
                 String catRaw = String.valueOf(raw.get("category"));
-                RepCategory category = RepCategory.valueOf(catRaw);
+                RepCategory category;
+                try {
+                    category = RepCategory.valueOf(catRaw);
+                } catch (IllegalArgumentException e) {
+                    category = "OTHER_NEGATIVE".equals(catRaw) ? RepCategory.SCAMMED : RepCategory.WAS_KIND;
+                }
                 String reason = Objects.toString(raw.get("reason"), "");
                 long createdAt = raw.get("createdAt") instanceof Number n ? n.longValue() : System.currentTimeMillis();
                 long lastEditedAt = raw.get("lastEditedAt") instanceof Number n2 ? n2.longValue() : createdAt;

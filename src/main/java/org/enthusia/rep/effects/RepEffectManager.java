@@ -92,7 +92,7 @@ public class RepEffectManager implements Listener {
             currentEffects.put(id, effects);
 
             boolean inWarzone = regions.isInWarzone(player.getLocation());
-            applyGlow(player, inWarzone);
+            applyGlow(player, inWarzone && effects.glow);
         }
     }
 

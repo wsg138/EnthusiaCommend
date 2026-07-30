@@ -201,6 +201,11 @@ public final class CommendPlugin extends JavaPlugin {
         if (teleportIntegration != null) {
             teleportIntegration.refresh();
         }
+        // Rebind webhook on config reload
+        this.discordWebhook = new DiscordWebhook(repConfig.getDiscordWebhookUrl(), repService, getLogger());
+        if (repService != null) {
+            repService.setDiscordWebhook(discordWebhook);
+        }
         if (configUpdated) {
             getLogger().info("config.yml was missing settings and has been updated with defaults.");
         }
