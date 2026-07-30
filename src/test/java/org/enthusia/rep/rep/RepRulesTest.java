@@ -47,4 +47,14 @@ class RepRulesTest {
         assertEquals(RepCategory.SCAMMED, RepCategory.OTHER_NEGATIVE.migratedCategory());
         assertEquals(-2, RepCategory.GRIEFED.defaultScoreValue());
     }
+
+    @Test
+    void publicCategoryValidationRejectsLegacyAndMismatchedCategories() {
+        assertEquals(RepCategory.WAS_KIND, RepRules.acceptedCategory(null, true));
+        assertEquals(RepCategory.SCAMMED, RepRules.acceptedCategory(null, false));
+        assertEquals(RepCategory.GRIEFED, RepRules.acceptedCategory(RepCategory.GRIEFED, false));
+        assertNull(RepRules.acceptedCategory(RepCategory.OTHER_NEGATIVE, false));
+        assertNull(RepRules.acceptedCategory(RepCategory.OTHER_POSITIVE, true));
+        assertNull(RepRules.acceptedCategory(RepCategory.WAS_KIND, false));
+    }
 }

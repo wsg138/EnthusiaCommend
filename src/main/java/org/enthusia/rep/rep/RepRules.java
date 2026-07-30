@@ -31,6 +31,13 @@ public final class RepRules {
         return scores;
     }
 
+    public static RepCategory acceptedCategory(RepCategory category, boolean positive) {
+        RepCategory candidate = category == null
+                ? (positive ? RepCategory.WAS_KIND : RepCategory.SCAMMED)
+                : category;
+        return candidate.isSelectable() && candidate.isPositive() == positive ? candidate : null;
+    }
+
     public static boolean isRecentReciprocal(Commendation reverse, long nowMillis) {
         return reverse != null
                 && nowMillis >= reverse.getLastEditedAt()

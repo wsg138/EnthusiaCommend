@@ -65,9 +65,6 @@ public final class DiscordWebhookService implements AutoCloseable {
     }
 
     private void send(LogEntry entry) {
-        if (closed.get()) {
-            return;
-        }
         try {
             HttpRequest request = HttpRequest.newBuilder(webhookUri)
                     .timeout(Duration.ofSeconds(8))
@@ -99,7 +96,7 @@ public final class DiscordWebhookService implements AutoCloseable {
                 + field("Value", signed(entry.scoreValue()), true) + ","
                 + field("New Total", Integer.toString(entry.newTotal()), true) + ","
                 + field("Category", formatCategory(entry.category()), true) + ","
-                + field("Reason", truncate(entry.reason(), 1024), false)
+                + field("Reason", displayReason(entry.reason(), 1024), false)
                 + "],"
                 + "\"timestamp\":\"" + entry.timestamp().toString() + "\""
                 + "}]}";
@@ -125,8 +122,8 @@ public final class DiscordWebhookService implements AutoCloseable {
         return output.toString();
     }
 
-    private static String truncate(String value, int maxLength) {
-        String safe = value == null ? "" : value;
+    static String displayReason(String value, int maxLength) {
+        String safe = value == null || value.isBlank() ? "(none)" : value;
         return safe.length() <= maxLength ? safe : safe.substring(0, maxLength - 3) + "...";
     }
 

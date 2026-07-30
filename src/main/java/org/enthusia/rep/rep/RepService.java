@@ -297,10 +297,8 @@ public final class RepService {
             String reasonText,
             String ipHash
     ) {
-        RepCategory normalizedCategory = category == null
-                ? (positive ? RepCategory.WAS_KIND : RepCategory.SCAMMED)
-                : category.migratedCategory();
-        if (!normalizedCategory.isSelectable() || normalizedCategory.isPositive() != positive) {
+        RepCategory normalizedCategory = RepRules.acceptedCategory(category, positive);
+        if (normalizedCategory == null) {
             return CommendationResult.invalid();
         }
 
