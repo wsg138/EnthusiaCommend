@@ -6,21 +6,18 @@ package org.enthusia.rep.storage;
  */
 public final class OrderedSnapshotWriter {
     private final PluginDataStore dataStore;
-    private long latestSavedSequence = Long.MIN_VALUE;
+    private long latestAcceptedSequence = Long.MIN_VALUE;
 
     public OrderedSnapshotWriter(PluginDataStore dataStore) {
         this.dataStore = dataStore;
     }
 
     public synchronized SaveResult saveIfNewer(long sequence, PluginDataSnapshot snapshot) {
-        if (sequence <= latestSavedSequence) {
+        if (sequence <= latestAcceptedSequence) {
             return SaveResult.STALE;
         }
-        if (!dataStore.save(snapshot)) {
-            return SaveResult.FAILED;
-        }
-        latestSavedSequence = sequence;
-        return SaveResult.SAVED;
+        latestAcceptedSequence = sequence;
+        return dataStore.save(snapshot) ? SaveResult.SAVED : SaveResult.FAILED;
     }
 
     public enum SaveResult {

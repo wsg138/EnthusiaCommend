@@ -13,23 +13,23 @@ class OrderedSnapshotWriterTest {
     void olderDelayedSnapshotCannotOverwriteNewerSnapshot() {
         FakeStore store = new FakeStore();
         OrderedSnapshotWriter writer = new OrderedSnapshotWriter(store);
-        PluginDataSnapshot newer = snapshot(2);
-        PluginDataSnapshot older = snapshot(1);
 
-        assertEquals(OrderedSnapshotWriter.SaveResult.SAVED, writer.saveIfNewer(2L, newer));
-        assertEquals(OrderedSnapshotWriter.SaveResult.STALE, writer.saveIfNewer(1L, older));
+        assertEquals(OrderedSnapshotWriter.SaveResult.SAVED, writer.saveIfNewer(2L, snapshot(2)));
+        assertEquals(OrderedSnapshotWriter.SaveResult.STALE, writer.saveIfNewer(1L, snapshot(1)));
         assertEquals(2, store.lastMarker);
     }
 
     @Test
-    void failedSaveDoesNotAdvanceSequenceAndCanBeRetried() {
+    void failedNewerAttemptStillBlocksAnOlderSnapshot() {
         FakeStore store = new FakeStore();
         OrderedSnapshotWriter writer = new OrderedSnapshotWriter(store);
         store.failNext = true;
 
         assertEquals(OrderedSnapshotWriter.SaveResult.FAILED, writer.saveIfNewer(5L, snapshot(5)));
-        assertEquals(OrderedSnapshotWriter.SaveResult.SAVED, writer.saveIfNewer(5L, snapshot(5)));
-        assertEquals(5, store.lastMarker);
+        assertEquals(OrderedSnapshotWriter.SaveResult.STALE, writer.saveIfNewer(4L, snapshot(4)));
+        assertEquals(0, store.lastMarker);
+        assertEquals(OrderedSnapshotWriter.SaveResult.SAVED, writer.saveIfNewer(6L, snapshot(6)));
+        assertEquals(6, store.lastMarker);
     }
 
     private static PluginDataSnapshot snapshot(int marker) {

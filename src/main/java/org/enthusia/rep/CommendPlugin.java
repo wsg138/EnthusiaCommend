@@ -254,7 +254,8 @@ public final class CommendPlugin extends JavaPlugin {
                 repSnapshot.removedEntries(),
                 repSnapshot.stalkEntries(),
                 analyticsService != null ? analyticsService.snapshot() : java.util.List.of(),
-                repSnapshot.suspiciousCases()
+                repSnapshot.suspiciousCases(),
+                repSnapshot.removalCooldowns()
         );
     }
 
