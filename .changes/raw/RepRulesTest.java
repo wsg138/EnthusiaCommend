@@ -30,4 +30,21 @@ class RepRulesTest {
                 new Commendation(giverA, target, false, RepCategory.GRIEFED, "", now, now - 100, null, -2),
                 new Commendation(giverA, target, false, RepCategory.SCAMMED, "", now, now - 50, null, -2),
                 new Commendation(UUID.randomUUID(), target, false, RepCategory.TRAPPED, "", now, now - 20, null, -2),
-                new Commendation(UUID.randomUU% ¤°Ñ…É•Ğ°ÑÉÕ”°I•Á…Ñ•½Éä¹]M}-%9°€ˆˆ°¹½Ü°¹½Ü€´€ÄÀ°¹Õ±°°€Ä¤°(€€€€€€€€€€€€€€€¹•Ü½µµ•¹‘…Ñ¥½¸¡UU%¹É…¹‘½µUU% ¤°Ñ…É•Ğ°™…±Í”°I•Á…Ñ•½Éä¹M5}MQ10°€ˆˆ°(€€€€€€€€€€€€€€€€€€€€€€€¹½Ü°¹½Ü€´I•ÁIÕ±•Ì¹1UMQI}]%9=]}5%11%L€´€Ä°¹Õ±°°€´È¤(€€€€€€€€¤ì(€€€€€€€M•ĞñUU%ø¥Ù•ÉÌ€ôI•ÁIÕ±•Ì¹É••¹Ñ9•…Ñ¥Ù•¥Ù•ÉÌ¡•¹ÑÉ¥•Ì°¹½Ü¤ì(€€€€€€€…ÍÍ•ÉÑÅÕ…±Ì È°¥Ù•ÉÌ¹Í¥é” ¤¤ì(€€€€€€€…ÍÍ•ÉÑQÉÕ”¡¥Ù•ÉÌ¹½¹Ñ…¥¹Ì¡¥Ù•É¤¤ì(€€€ô((€€€Q•ÍĞ(€€€Ù½¥±•…å=Ñ¡•É…Ñ•½É¥•ÍÉ•9½ÑM•±•Ñ…‰±” ¤ì(€€€€€€€…ÍÍ•ÉÑ…±Í”¡I•Á…Ñ•½Éä¹=Q!I}A=M%Q%Y¹¥ÍM•±•Ñ…‰±” ¤¤ì(€€€€€€€…ÍÍ•ÉÑ…±Í”¡I•Á…Ñ•½Éä¹=Q!I}9Q%Y¹¥ÍM•±•Ñ…‰±” ¤¤ì(€€€€€€€…ÍÍ•ÉÑÅÕ…±Ì¡I•Á…Ñ•½Éä¹]M}-%9°I•Á…Ñ•½Éä¹=Q!I}A=M%Q%Y¹µ¥É…Ñ•‘…Ñ•½Éä ¤¤ì(€€€€€€€…ÍÍ•ÉÑÅÕ…±Ì¡I•Á…Ñ•½Éä¹M55°I•Á…Ñ•½Éä¹=Q!I}9Q%Y¹µ¥É…Ñ•‘…Ñ•½Éä ¤¤ì(€€€€€€€…ÍÍ•ÉÑÅÕ…±Ì ´È°I•Á…Ñ•½Éä¹I%¹‘•™…Õ±ÑM½É•Y…±Õ” ¤¤ì(€€€ô)ô(
+                new Commendation(UUID.randomUUID(), target, true, RepCategory.WAS_KIND, "", now, now - 10, null, 1),
+                new Commendation(UUID.randomUUID(), target, false, RepCategory.SCAM_STALL, "",
+                        now, now - RepRules.CLUSTER_WINDOW_MILLIS - 1, null, -2)
+        );
+        Set<UUID> givers = RepRules.recentNegativeGivers(entries, now);
+        assertEquals(2, givers.size());
+        assertTrue(givers.contains(giverA));
+    }
+
+    @Test
+    void legacyOtherCategoriesAreNotSelectable() {
+        assertFalse(RepCategory.OTHER_POSITIVE.isSelectable());
+        assertFalse(RepCategory.OTHER_NEGATIVE.isSelectable());
+        assertEquals(RepCategory.WAS_KIND, RepCategory.OTHER_POSITIVE.migratedCategory());
+        assertEquals(RepCategory.SCAMMED, RepCategory.OTHER_NEGATIVE.migratedCategory());
+        assertEquals(-2, RepCategory.GRIEFED.defaultScoreValue());
+    }
+}
