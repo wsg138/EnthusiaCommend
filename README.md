@@ -31,7 +31,7 @@ The deployable jar is created under `target/EnthusiaCommend-<version>.jar`.
 
 ## Reputation category views
 
-`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. Overall views retain the overall leaderboard population; category views include only players with an actual record in that category, including records whose values total zero. Sorting, ranks, clicks, and pagination all use that filtered population, and empty categories show an explicit empty state. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
+`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. Overall views retain the overall leaderboard population; category views include only players with an actual record in that category, including records whose values total zero. Sorting, ranks, and pagination all use that filtered population, and empty categories show an explicit empty state. Each open GUI freezes the visible player or review identities so a concurrent reputation change cannot redirect a click to a different entry. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
 
 ## Administrative rep-trading alerts
 

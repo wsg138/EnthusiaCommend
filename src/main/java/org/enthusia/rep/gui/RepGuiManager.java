@@ -151,8 +151,15 @@ public final class RepGuiManager implements Listener {
         long negatives = reviews.size() - positives;
         int maxPage = Math.max(0, (reviews.size() - 1) / REVIEW_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
+        int start = resolvedPage * REVIEW_SLOTS.size();
+        List<Commendation> visibleReviews = reviews.stream()
+                .skip(start)
+                .limit(REVIEW_SLOTS.size())
+                .map(Commendation::snapshot)
+                .toList();
 
-        Inventory inventory = Bukkit.createInventory(new ProfileHolder(targetId, selected, resolvedPage), 54,
+        Inventory inventory = Bukkit.createInventory(
+                new ProfileHolder(targetId, selected, resolvedPage, visibleReviews), 54,
                 ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY
                         + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory, viewer);
@@ -173,11 +180,9 @@ public final class RepGuiManager implements Listener {
         RepCategoryGuiSupport.renderSelectors(inventory, RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS,
                 repService, targetId, selected, "Player total");
 
-        int start = resolvedPage * REVIEW_SLOTS.size();
-        for (int i = 0; i < REVIEW_SLOTS.size(); i++) {
-            int index = start + i;
-            if (index >= reviews.size()) break;
-            inventory.setItem(REVIEW_SLOTS.get(i), reviewItem(reviews.get(index), viewer.hasPermission("enthusiacommend.rep.admin")));
+        for (int i = 0; i < visibleReviews.size(); i++) {
+            inventory.setItem(REVIEW_SLOTS.get(i),
+                    reviewItem(visibleReviews.get(i), viewer.hasPermission("enthusiacommend.rep.admin")));
         }
         if (resolvedPage > 0) inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
         if (resolvedPage < maxPage) inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
@@ -237,7 +242,13 @@ public final class RepGuiManager implements Listener {
 
         int maxPage = Math.max(0, (cases.size() - 1) / REVIEW_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
-        Inventory inventory = Bukkit.createInventory(new ActiveReportsHolder(resolvedPage), 54,
+        int start = resolvedPage * REVIEW_SLOTS.size();
+        List<RepService.SuspiciousRepCase> visibleCases = cases.stream()
+                .skip(start)
+                .limit(REVIEW_SLOTS.size())
+                .map(RepService.SuspiciousRepCase::copy)
+                .toList();
+        Inventory inventory = Bukkit.createInventory(new ActiveReportsHolder(resolvedPage, visibleCases), 54,
                 ChatColor.DARK_RED + "Active Rep Reports [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory, admin);
 
@@ -247,13 +258,8 @@ public final class RepGuiManager implements Listener {
             return;
         }
 
-        int start = resolvedPage * REVIEW_SLOTS.size();
-        for (int i = 0; i < REVIEW_SLOTS.size(); i++) {
-            int index = start + i;
-            if (index >= cases.size()) {
-                break;
-            }
-            inventory.setItem(REVIEW_SLOTS.get(i), activeReportItem(cases.get(index)));
+        for (int i = 0; i < visibleCases.size(); i++) {
+            inventory.setItem(REVIEW_SLOTS.get(i), activeReportItem(visibleCases.get(i)));
         }
 
         if (resolvedPage > 0) inventory.setItem(45, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
@@ -492,22 +498,18 @@ public final class RepGuiManager implements Listener {
         }
 
         int reviewIndex = REVIEW_SLOTS.indexOf(slot);
-        if (reviewIndex == -1) {
+        Commendation selected = GuiSnapshotTargets.at(profile.visibleReviews(), reviewIndex);
+        if (selected == null) {
             return;
         }
-        List<Commendation> reviews = RepCategoryGuiSupport.filter(
-                repService.getCommendationsAbout(profile.targetId()).stream()
-                        .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
-                        .toList(),
-                profile.category());
-        int absoluteIndex = profile.page() * REVIEW_SLOTS.size() + reviewIndex;
-        if (absoluteIndex < 0 || absoluteIndex >= reviews.size()) {
-            return;
-        }
-
-        Commendation selected = reviews.get(absoluteIndex);
         if (player.hasPermission("enthusiacommend.rep.admin") && event.isRightClick()) {
-            openRemovalConfirm(player, selected, profile.page(), false, true);
+            Commendation current = repService.getCommendation(selected.getGiver(), selected.getTarget());
+            if (!GuiSnapshotTargets.sameCommendationRevision(selected, current)) {
+                player.sendMessage(ChatColor.YELLOW + "That reputation entry changed while the GUI was open. Review it again.");
+                openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page());
+                return;
+            }
+            openRemovalConfirm(player, current, profile.page(), false, true);
             return;
         }
         returnFromBook.put(player.getUniqueId(), new ProfileContext(profile.targetId(), profile.page()));
@@ -566,17 +568,24 @@ public final class RepGuiManager implements Listener {
     }
 
     private void handleRemovalClick(Player player, ConfirmRemovalHolder removal, int slot) {
+        Commendation expected = removal.expected();
         if (slot == 11) {
-            if (removal.logRemoval()) {
-                repService.removeCommendationLogged(player.getUniqueId(), removal.giverId(), removal.targetId(), removal.applyCooldown());
-            } else if (removal.applyCooldown()) {
-                repService.removeCommendationWithCooldown(removal.giverId(), removal.targetId());
-            } else {
-                repService.removeCommendation(removal.giverId(), removal.targetId());
+            Commendation current = repService.getCommendation(expected.getGiver(), expected.getTarget());
+            if (!GuiSnapshotTargets.sameCommendationRevision(expected, current)) {
+                player.sendMessage(ChatColor.YELLOW + "That reputation entry changed before confirmation. Nothing was removed.");
+                openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
+                return;
             }
-            openProfile(player, Bukkit.getOfflinePlayer(removal.targetId()), removal.returnPage());
+            if (removal.logRemoval()) {
+                repService.removeCommendationLogged(player.getUniqueId(), expected.getGiver(), expected.getTarget(), removal.applyCooldown());
+            } else if (removal.applyCooldown()) {
+                repService.removeCommendationWithCooldown(expected.getGiver(), expected.getTarget());
+            } else {
+                repService.removeCommendation(expected.getGiver(), expected.getTarget());
+            }
+            openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
         } else if (slot == 15) {
-            openProfile(player, Bukkit.getOfflinePlayer(removal.targetId()), removal.returnPage());
+            openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
         }
     }
 
@@ -609,16 +618,9 @@ public final class RepGuiManager implements Listener {
             return;
         }
         int reviewIndex = REVIEW_SLOTS.indexOf(slot);
-        if (reviewIndex == -1) {
-            return;
-        }
-        List<RepService.SuspiciousRepCase> activeCases = repService.getSuspiciousCases().stream()
-                .filter(caseData -> !caseData.isResolved())
-                .sorted(Comparator.comparingLong(RepService.SuspiciousRepCase::getCreatedAt).reversed())
-                .toList();
-        int absoluteIndex = holder.page() * REVIEW_SLOTS.size() + reviewIndex;
-        if (absoluteIndex >= 0 && absoluteIndex < activeCases.size()) {
-            sendReportDetails(player, activeCases.get(absoluteIndex));
+        RepService.SuspiciousRepCase selected = GuiSnapshotTargets.at(holder.visibleCases(), reviewIndex);
+        if (selected != null) {
+            sendReportDetails(player, selected);
         }
     }
 
@@ -799,7 +801,8 @@ public final class RepGuiManager implements Listener {
     }
 
     private void openRemovalConfirm(Player admin, Commendation commendation, int returnPage, boolean applyCooldown, boolean logRemoval) {
-        Inventory inventory = Bukkit.createInventory(new ConfirmRemovalHolder(commendation.getTarget(), commendation.getGiver(), returnPage, applyCooldown, logRemoval),
+        Inventory inventory = Bukkit.createInventory(
+                new ConfirmRemovalHolder(commendation.snapshot(), returnPage, applyCooldown, logRemoval),
                 27, ChatColor.RED + "Confirm removal");
         fillBackground(inventory, admin);
         inventory.setItem(11, simpleButton(Material.LIME_CONCRETE, ChatColor.GREEN + "Confirm removal", List.of(ChatColor.GRAY + "Delete this rep entry")));
@@ -1266,7 +1269,13 @@ public final class RepGuiManager implements Listener {
     private sealed interface HolderMarker permits ProfileHolder, ReasonHolder, InputChoiceHolder, ConfirmReasonHolder, ConfirmRemovalHolder, RemovedLogHolder, ActiveReportsHolder, ConfirmRestoreHolder {
     }
 
-    private record ProfileHolder(UUID targetId, RepCategory category, int page) implements InventoryHolder, HolderMarker {
+    private record ProfileHolder(UUID targetId, RepCategory category, int page,
+                                 List<Commendation> visibleReviews) implements InventoryHolder, HolderMarker {
+        private ProfileHolder {
+            visibleReviews = visibleReviews == null ? List.of()
+                    : visibleReviews.stream().map(Commendation::snapshot).toList();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -1282,7 +1291,12 @@ public final class RepGuiManager implements Listener {
         @Override public Inventory getInventory() { return null; }
     }
 
-    private record ConfirmRemovalHolder(UUID targetId, UUID giverId, int returnPage, boolean applyCooldown, boolean logRemoval) implements InventoryHolder, HolderMarker {
+    private record ConfirmRemovalHolder(Commendation expected, int returnPage,
+                                        boolean applyCooldown, boolean logRemoval) implements InventoryHolder, HolderMarker {
+        private ConfirmRemovalHolder {
+            expected = expected.snapshot();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -1290,7 +1304,13 @@ public final class RepGuiManager implements Listener {
         @Override public Inventory getInventory() { return null; }
     }
 
-    private record ActiveReportsHolder(int page) implements InventoryHolder, HolderMarker {
+    private record ActiveReportsHolder(int page, List<RepService.SuspiciousRepCase> visibleCases)
+            implements InventoryHolder, HolderMarker {
+        private ActiveReportsHolder {
+            visibleCases = visibleCases == null ? List.of()
+                    : visibleCases.stream().map(RepService.SuspiciousRepCase::copy).toList();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 

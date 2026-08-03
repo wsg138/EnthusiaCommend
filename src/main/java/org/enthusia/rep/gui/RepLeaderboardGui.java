@@ -51,9 +51,16 @@ public final class RepLeaderboardGui implements Listener {
         List<Map.Entry<UUID, Integer>> entries = repService.leaderboard(category, lowest);
         int maxPage = Math.max(0, (entries.size() - 1) / ENTRY_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
+        int start = resolvedPage * ENTRY_SLOTS.size();
+        List<UUID> visiblePlayerIds = entries.stream()
+                .skip(start)
+                .limit(ENTRY_SLOTS.size())
+                .map(Map.Entry::getKey)
+                .toList();
         String direction = lowest ? "Lowest" : "Top";
         String viewName = RepCategoryGuiSupport.displayName(category);
-        Inventory inventory = Bukkit.createInventory(new LeaderboardHolder(lowest, category, resolvedPage), 54,
+        Inventory inventory = Bukkit.createInventory(
+                new LeaderboardHolder(lowest, category, resolvedPage, visiblePlayerIds), 54,
                 ChatColor.DARK_GREEN + direction + " Rep: " + ChatColor.RESET + viewName
                         + ChatColor.GRAY + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory);
@@ -63,8 +70,7 @@ public final class RepLeaderboardGui implements Listener {
             inventory.setItem(22, button(Material.BARRIER, emptyStateLabel(category)));
         }
 
-        int start = resolvedPage * ENTRY_SLOTS.size();
-        for (int index = 0; index < ENTRY_SLOTS.size() && start + index < entries.size(); index++) {
+        for (int index = 0; index < visiblePlayerIds.size(); index++) {
             Map.Entry<UUID, Integer> entry = entries.get(start + index);
             inventory.setItem(ENTRY_SLOTS.get(index), playerItem(entry.getKey(), entry.getValue(),
                     start + index + 1, category));
@@ -96,11 +102,9 @@ public final class RepLeaderboardGui implements Listener {
             return;
         }
         int relative = ENTRY_SLOTS.indexOf(slot);
-        if (relative < 0) return;
-        List<Map.Entry<UUID, Integer>> entries = repService.leaderboard(holder.category(), holder.lowest());
-        int absolute = holder.page() * ENTRY_SLOTS.size() + relative;
-        if (absolute < 0 || absolute >= entries.size()) return;
-        OfflinePlayer target = Bukkit.getOfflinePlayer(entries.get(absolute).getKey());
+        UUID targetId = GuiSnapshotTargets.at(holder.visiblePlayerIds(), relative);
+        if (targetId == null) return;
+        OfflinePlayer target = Bukkit.getOfflinePlayer(targetId);
         plugin.getRepGuiManager().openProfile(player, target, holder.category());
     }
 
@@ -145,7 +149,12 @@ public final class RepLeaderboardGui implements Listener {
         return item;
     }
 
-    private record LeaderboardHolder(boolean lowest, RepCategory category, int page) implements InventoryHolder {
+    private record LeaderboardHolder(boolean lowest, RepCategory category, int page,
+                                     List<UUID> visiblePlayerIds) implements InventoryHolder {
+        private LeaderboardHolder {
+            visiblePlayerIds = visiblePlayerIds == null ? List.of() : List.copyOf(visiblePlayerIds);
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 }

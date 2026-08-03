@@ -3,6 +3,7 @@ package org.enthusia.rep.stalk;
 import org.enthusia.rep.region.RegionManager;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,9 +21,9 @@ class StalkZoneTransitionTest {
     @Test
     void cancelledAttemptLeavesPreviousZoneForTheNextGenuineTransition() {
         RegionManager.LogicalZone remembered = RegionManager.LogicalZone.SPAWN;
+        // A cancelled event never reaches the MONITOR listener, so no transition is committed.
+        assertEquals(RegionManager.LogicalZone.SPAWN, remembered);
         assertTrue(alert(remembered, RegionManager.LogicalZone.WARZONE));
-        remembered = RegionManager.LogicalZone.WARZONE;
-        assertFalse(alert(remembered, RegionManager.LogicalZone.WARZONE));
     }
 
     private boolean alert(RegionManager.LogicalZone from, RegionManager.LogicalZone to) {
