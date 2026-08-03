@@ -2,6 +2,7 @@ name: Temporary source export
 on:
   push:
     branches: [agent/reputation-category-zones-alerts-webhook]
+  pull_request:
 permissions:
   contents: read
 jobs:
