@@ -36,6 +36,8 @@ rep:
       potionDurationPlus10PercentAt: 15
       cashback5PercentAt: 15
 rep-trading-alerts:
+  # Applies only to operators or players granted enthusiacommend.rep.alert.
+  # Authorized administrators without a saved preference inherit this value.
   enabled-by-default: true
 
 stalk:
@@ -59,12 +61,16 @@ playtime:
   fallbackFormattedPlaceholder: "%playtime_active_formatted%"
 regions:
   # Logical precedence is market, then spawn, then warzone; outside these cuboids in a managed world is wilderness.
-  market: []
+  # Existing configured lists are retained during updates; these values are fresh-install and missing-key defaults.
+  market:
+    - world: world
+      min: -72, 0, -281
+      max: 102, 256, -162
   spawn:
     - world: world
-      min: -50, 0, -50
-      max: 50, 256, 50
+      min: -48, 0, -33
+      max: 69, 256, 84
   warzone:
     - world: world
-      min: -500, 0, -500
-      max: 500, 256, 500
+      min: -218, 0, -404
+      max: 219, 256, 188
