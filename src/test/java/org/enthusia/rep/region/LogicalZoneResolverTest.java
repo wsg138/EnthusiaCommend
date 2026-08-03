@@ -12,6 +12,18 @@ class LogicalZoneResolverTest {
     }
 
     @Test
+    void overlappingSpawnAndWarzoneResolvesAsSpawn() {
+        assertEquals(RegionManager.LogicalZone.SPAWN,
+                LogicalZoneResolver.resolve(false, true, true, true));
+    }
+
+    @Test
+    void warzoneOnlySpaceResolvesAsWarzone() {
+        assertEquals(RegionManager.LogicalZone.WARZONE,
+                LogicalZoneResolver.resolve(false, false, true, true));
+    }
+
+    @Test
     void unmanagedWorldResolvesAsOther() {
         assertEquals(RegionManager.LogicalZone.OTHER,
                 LogicalZoneResolver.resolve(true, true, true, false));
