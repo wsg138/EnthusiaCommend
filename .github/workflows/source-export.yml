@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/reputation-category-zones-alerts-webhook
           fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
@@ -20,6 +21,16 @@ jobs:
         run: |
           cat .automation/patch.* | base64 -d | gzip -d > /tmp/reputation.patch
           patch -p1 < /tmp/reputation.patch
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/main/java/org/enthusia/rep/gui/RepGuiManager.java')
+          text = path.read_text(encoding='utf-8')
+          old = 'RepCategoryGuiSupport.total(repService, targetId, selected, "Player total")'
+          new = 'RepCategoryGuiSupport.total(repService, targetId, selected)'
+          if old not in text:
+              raise SystemExit('Expected profile total call was not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           rm -rf .automation .automation-trigger
           rm -f .github/workflows/source-export.yml .github/workflows/apply-reputation-improvement.yml
       - name: Verify exact final tree
