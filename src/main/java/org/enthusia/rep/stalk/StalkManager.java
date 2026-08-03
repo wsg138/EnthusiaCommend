@@ -7,33 +7,38 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
+import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class StalkManager implements Listener {
-
+    private final CommendPlugin plugin;
     private final RegionManager regionManager;
     private final RepService repService;
     private final Runnable dirtyMarker;
-
-    private RepConfig config;
+    private volatile RepConfig config;
 
     private final Map<UUID, Map<UUID, Long>> subscriptionsByTarget = new ConcurrentHashMap<>();
-    private final Map<UUID, RegionManager.ZoneType> lastKnownZones = new ConcurrentHashMap<>();
+    private final Map<UUID, RegionManager.LogicalZone> lastKnownZones = new ConcurrentHashMap<>();
 
-    public StalkManager(RegionManager regionManager, RepService repService, RepConfig config, Runnable dirtyMarker) {
+    public StalkManager(CommendPlugin plugin, RegionManager regionManager, RepService repService,
+                        RepConfig config, Runnable dirtyMarker) {
+        this.plugin = plugin;
         this.regionManager = regionManager;
         this.repService = repService;
         this.config = config;
@@ -44,17 +49,24 @@ public final class StalkManager implements Listener {
         subscriptionsByTarget.clear();
         long now = System.currentTimeMillis();
         for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {
-            if (entry.expiresAt() <= now) {
-                continue;
+            if (entry.expiresAt() > now) {
+                subscriptionsByTarget.computeIfAbsent(entry.targetId(), ignored -> new ConcurrentHashMap<>())
+                        .put(entry.stalkerId(), entry.expiresAt());
             }
-            subscriptionsByTarget
-                    .computeIfAbsent(entry.targetId(), ignored -> new ConcurrentHashMap<>())
-                    .put(entry.stalkerId(), entry.expiresAt());
         }
+        initializeOnlinePlayers();
     }
 
     public void reload(RepConfig config) {
         this.config = config;
+        initializeOnlinePlayers();
+    }
+
+    private void initializeOnlinePlayers() {
+        lastKnownZones.clear();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            initialize(player);
+        }
     }
 
     public List<PluginDataSnapshot.StalkEntry> snapshotEntries() {
@@ -71,20 +83,16 @@ public final class StalkManager implements Listener {
     }
 
     public void addSubscription(UUID stalkerId, UUID targetId, long durationMillis) {
-        long expiresAt = System.currentTimeMillis() + durationMillis;
-        subscriptionsByTarget.computeIfAbsent(targetId, ignored -> new ConcurrentHashMap<>()).put(stalkerId, expiresAt);
+        subscriptionsByTarget.computeIfAbsent(targetId, ignored -> new ConcurrentHashMap<>())
+                .put(stalkerId, System.currentTimeMillis() + durationMillis);
         dirtyMarker.run();
     }
 
     public void cancelSubscription(UUID stalkerId, UUID targetId) {
         Map<UUID, Long> entries = subscriptionsByTarget.get(targetId);
-        if (entries == null) {
-            return;
-        }
+        if (entries == null) return;
         entries.remove(stalkerId);
-        if (entries.isEmpty()) {
-            subscriptionsByTarget.remove(targetId);
-        }
+        if (entries.isEmpty()) subscriptionsByTarget.remove(targetId);
         dirtyMarker.run();
     }
 
@@ -97,9 +105,7 @@ public final class StalkManager implements Listener {
         List<StalkSubscription> result = new ArrayList<>();
         for (Map.Entry<UUID, Map<UUID, Long>> entry : subscriptionsByTarget.entrySet()) {
             Long expiresAt = entry.getValue().get(stalkerId);
-            if (expiresAt != null && expiresAt > now) {
-                result.add(new StalkSubscription(entry.getKey(), expiresAt));
-            }
+            if (expiresAt != null && expiresAt > now) result.add(new StalkSubscription(entry.getKey(), expiresAt));
         }
         return result;
     }
@@ -107,43 +113,40 @@ public final class StalkManager implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
         repService.rememberName(event.getPlayer().getUniqueId(), event.getPlayer().getName());
+        initialize(event.getPlayer());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onMove(PlayerMoveEvent event) {
+        if (event instanceof PlayerTeleportEvent) return;
+        Location to = event.getTo();
+        if (to == null || sameBlock(event.getFrom(), to)) return;
+        transition(event.getPlayer(), to);
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+        if (event.getTo() != null) transition(event.getPlayer(), event.getTo());
     }
 
     @EventHandler
-    public void onPlayerMove(PlayerMoveEvent event) {
-        Location from = event.getFrom();
-        Location to = event.getTo();
-        if (to == null) {
-            return;
-        }
-        if (from.getWorld() == to.getWorld()
-                && from.getBlockX() == to.getBlockX()
-                && from.getBlockY() == to.getBlockY()
-                && from.getBlockZ() == to.getBlockZ()) {
-            return;
-        }
+    public void onWorldChange(PlayerChangedWorldEvent event) {
+        transition(event.getPlayer(), event.getPlayer().getLocation());
+    }
 
-        Player target = event.getPlayer();
-        UUID targetId = target.getUniqueId();
-        RegionManager.ZoneType previousZone = lastKnownZones.getOrDefault(targetId, regionManager.resolveZone(from));
-        RegionManager.ZoneType newZone = regionManager.resolveZone(to);
+    @EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        lastKnownZones.remove(event.getEntity().getUniqueId());
+    }
 
-        if (previousZone == newZone) {
-            return;
-        }
-        lastKnownZones.put(targetId, newZone);
-
-        if (newZone == RegionManager.ZoneType.WARZONE && previousZone != RegionManager.ZoneType.WARZONE) {
-            notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
-                    + ChatColor.GOLD + " entered Warzone at "
-                    + ChatColor.YELLOW + to.getBlockX() + " " + to.getBlockY() + " " + to.getBlockZ());
-            return;
-        }
-
-        if (previousZone == RegionManager.ZoneType.WARZONE && newZone != RegionManager.ZoneType.WARZONE) {
-            notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
-                    + ChatColor.GOLD + " left Warzone.");
-        }
+    @EventHandler
+    public void onRespawn(PlayerRespawnEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        lastKnownZones.remove(playerId);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null) initialize(player);
+        });
     }
 
     @EventHandler
@@ -151,12 +154,28 @@ public final class StalkManager implements Listener {
         lastKnownZones.remove(event.getPlayer().getUniqueId());
     }
 
+    private void initialize(Player player) {
+        lastKnownZones.put(player.getUniqueId(), regionManager.resolveZone(player.getLocation()));
+    }
+
+    private void transition(Player target, Location destination) {
+        UUID targetId = target.getUniqueId();
+        RegionManager.LogicalZone next = regionManager.resolveZone(destination);
+        RegionManager.LogicalZone previous = lastKnownZones.put(targetId, next);
+        if (!StalkZoneTransition.shouldAlert(previous, next)) return;
+        notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
+                + ChatColor.GOLD + " entered Warzone at " + ChatColor.YELLOW
+                + destination.getBlockX() + " " + destination.getBlockY() + " " + destination.getBlockZ());
+    }
+
+    private boolean sameBlock(Location from, Location to) {
+        return from.getWorld() == to.getWorld() && from.getBlockX() == to.getBlockX()
+                && from.getBlockY() == to.getBlockY() && from.getBlockZ() == to.getBlockZ();
+    }
+
     private void notifyStalkers(UUID targetId, String message) {
         Map<UUID, Long> entries = subscriptionsByTarget.get(targetId);
-        if (entries == null || entries.isEmpty()) {
-            return;
-        }
-
+        if (entries == null || entries.isEmpty()) return;
         long now = System.currentTimeMillis();
         List<UUID> expired = new ArrayList<>();
         for (Map.Entry<UUID, Long> entry : entries.entrySet()) {
@@ -165,18 +184,11 @@ public final class StalkManager implements Listener {
                 continue;
             }
             Player stalker = Bukkit.getPlayer(entry.getKey());
-            if (stalker != null && stalker.isOnline()) {
-                stalker.sendMessage(message);
-            }
+            if (stalker != null && stalker.isOnline()) stalker.sendMessage(message);
         }
-
         if (!expired.isEmpty()) {
-            for (UUID stalkerId : expired) {
-                entries.remove(stalkerId);
-            }
-            if (entries.isEmpty()) {
-                subscriptionsByTarget.remove(targetId);
-            }
+            expired.forEach(entries::remove);
+            if (entries.isEmpty()) subscriptionsByTarget.remove(targetId);
             dirtyMarker.run();
         }
     }

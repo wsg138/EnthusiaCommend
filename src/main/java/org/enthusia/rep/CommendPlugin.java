@@ -14,8 +14,10 @@ import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.discord.DiscordWebhookService;
+import org.enthusia.rep.discord.MinecraftHeadUrl;
 import org.enthusia.rep.effects.RepEffectManager;
 import org.enthusia.rep.gui.RepGuiManager;
+import org.enthusia.rep.gui.RepLeaderboardGui;
 import org.enthusia.rep.integration.TeleportIntegration;
 import org.enthusia.rep.integration.WarzoneDuelsHook;
 import org.enthusia.rep.integration.plan.PlanIntegrationBootstrap;
@@ -46,6 +48,7 @@ public final class CommendPlugin extends JavaPlugin {
     private RepEffectManager effectManager;
     private StalkManager stalkManager;
     private RepGuiManager repGuiManager;
+    private RepLeaderboardGui repLeaderboardGui;
     private TeleportIntegration teleportIntegration;
     private WarzoneDuelsHook warzoneDuelsHook;
     private PlanIntegrationBootstrap planIntegration;
@@ -66,6 +69,7 @@ public final class CommendPlugin extends JavaPlugin {
     public RepEffectManager getEffectManager() { return effectManager; }
     public StalkManager getStalkManager() { return stalkManager; }
     public RepGuiManager getRepGuiManager() { return repGuiManager; }
+    public RepLeaderboardGui getRepLeaderboardGui() { return repLeaderboardGui; }
     public TeleportIntegration getTeleportIntegration() { return teleportIntegration; }
     public WarzoneDuelsHook getWarzoneDuelsHook() { return warzoneDuelsHook; }
     public Economy getEconomy() { return economy; }
@@ -98,16 +102,18 @@ public final class CommendPlugin extends JavaPlugin {
         for (var player : Bukkit.getOnlinePlayers()) {
             repService.rememberName(player.getUniqueId(), player.getName());
         }
-        this.stalkManager = new StalkManager(regionManager, repService, repConfig, this::markDirty);
+        this.stalkManager = new StalkManager(this, regionManager, repService, repConfig, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
         this.warzoneDuelsHook.refresh();
         this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService, warzoneDuelsHook);
         this.teleportIntegration = new TeleportIntegration(this, repService);
         this.repGuiManager = new RepGuiManager(this, repService, effectManager);
+        this.repLeaderboardGui = new RepLeaderboardGui(this, repService);
 
         getServer().getPluginManager().registerEvents(stalkManager, this);
         getServer().getPluginManager().registerEvents(repGuiManager, this);
+        getServer().getPluginManager().registerEvents(repLeaderboardGui, this);
         effectManager.register(getServer().getPluginManager());
         teleportIntegration.register();
 
@@ -258,7 +264,8 @@ public final class CommendPlugin extends JavaPlugin {
                 repSnapshot.stalkEntries(),
                 analyticsService != null ? analyticsService.snapshot() : java.util.List.of(),
                 repSnapshot.suspiciousCases(),
-                repSnapshot.removalCooldowns()
+                repSnapshot.removalCooldowns(),
+                repSnapshot.repTradingAlertPreferences()
         );
     }
 
@@ -277,33 +284,22 @@ public final class CommendPlugin extends JavaPlugin {
     }
 
     private void handleAuditRecord(RepService.AuditRecord record) {
-        if (record == null || discordWebhookService == null || !discordWebhookService.isEnabled()) {
-            return;
-        }
+        if (record == null || discordWebhookService == null || !discordWebhookService.isEnabled()) return;
+        if (record.action() != RepService.AuditAction.CREATED && record.action() != RepService.AuditAction.UPDATED) return;
         if (!Bukkit.isPrimaryThread()) {
             Bukkit.getScheduler().runTask(this, () -> handleAuditRecord(record));
             return;
         }
         var commendation = record.commendation();
-        DiscordWebhookService.Action action = switch (record.action()) {
-            case CREATED -> DiscordWebhookService.Action.CREATED;
-            case UPDATED -> DiscordWebhookService.Action.UPDATED;
-            case REMOVED -> DiscordWebhookService.Action.REMOVED;
-            case RESTORED -> DiscordWebhookService.Action.RESTORED;
-        };
-        int displayedValue = switch (record.action()) {
-            case CREATED, UPDATED -> commendation.getScoreValue();
-            case REMOVED, RESTORED -> record.scoreDelta();
-        };
+        String giverName = repService.nameOf(commendation.getGiver());
+        String targetName = repService.nameOf(commendation.getTarget());
         discordWebhookService.log(new DiscordWebhookService.LogEntry(
-                action,
-                repService.nameOf(commendation.getGiver()),
-                repService.nameOf(commendation.getTarget()),
+                giverName,
+                targetName,
                 commendation.getCategory(),
                 commendation.getReasonText(),
-                displayedValue,
-                record.newTotal(),
-                Instant.ofEpochMilli(record.timestamp())
+                Instant.ofEpochMilli(record.timestamp()),
+                MinecraftHeadUrl.resolve(commendation.getGiver(), giverName)
         ));
     }
 

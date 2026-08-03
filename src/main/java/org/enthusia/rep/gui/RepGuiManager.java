@@ -47,7 +47,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -70,7 +69,6 @@ public final class RepGuiManager implements Listener {
     private static final int POSITIVE_REP_SLOT = 48;
     private static final int EFFECTS_OR_REMOVE_SLOT = 49;
     private static final int NEGATIVE_REP_SLOT = 50;
-    private static final Map<RepCategory, String> CATEGORY_DISPLAY_NAMES = categoryDisplayNames();
 
     private final CommendPlugin plugin;
     private final RepService repService;
@@ -85,6 +83,7 @@ public final class RepGuiManager implements Listener {
     private final Map<UUID, ProfileContext> returnFromBook = new ConcurrentHashMap<>();
     private final Map<UUID, String> liveAnvilText = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> transitioningAnvil = new java.util.HashSet<>();
+    private final Map<ProfileSelectionKey, RepCategory> profileSelections = new ConcurrentHashMap<>();
 
     public RepGuiManager(CommendPlugin plugin, RepService repService, RepEffectManager effectManager) {
         this.plugin = plugin;
@@ -105,6 +104,7 @@ public final class RepGuiManager implements Listener {
         returnFromBook.clear();
         liveAnvilText.clear();
         transitioningAnvil.clear();
+        profileSelections.clear();
     }
 
     public void cancelOpenAnvilSessions(String message) {
@@ -126,64 +126,62 @@ public final class RepGuiManager implements Listener {
     }
 
     public void openProfile(Player viewer, OfflinePlayer target) {
+        profileSelections.remove(new ProfileSelectionKey(viewer.getUniqueId(), target.getUniqueId()));
+        openProfile(viewer, target, 0);
+    }
+
+    public void openProfile(Player viewer, OfflinePlayer target, RepCategory selectedCategory) {
+        ProfileSelectionKey key = new ProfileSelectionKey(viewer.getUniqueId(), target.getUniqueId());
+        if (selectedCategory == null) profileSelections.remove(key);
+        else profileSelections.put(key, selectedCategory.migratedCategory());
         openProfile(viewer, target, 0);
     }
 
     public void openProfile(Player viewer, OfflinePlayer target, int page) {
         Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationProfileViewedEvent(viewer.getUniqueId(), target.getUniqueId()));
-
         UUID targetId = target.getUniqueId();
-        int score = repService.getScore(targetId);
-        ChatColor scoreColor = plugin.getRepConfig().colorForScore(score);
-        List<Commendation> reviews = repService.getCommendationsAbout(targetId).stream()
+        RepCategory selected = profileSelections.get(new ProfileSelectionKey(viewer.getUniqueId(), targetId));
+        int overallScore = repService.getScore(targetId);
+        int viewTotal = RepCategoryGuiSupport.total(repService, targetId, selected);
+        ChatColor scoreColor = plugin.getRepConfig().colorForScore(overallScore);
+        List<Commendation> allReviews = repService.getCommendationsAbout(targetId).stream()
                 .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
                 .toList();
+        List<Commendation> reviews = RepCategoryGuiSupport.filter(allReviews, selected);
         long positives = reviews.stream().filter(Commendation::isPositive).count();
         long negatives = reviews.size() - positives;
-
         int maxPage = Math.max(0, (reviews.size() - 1) / REVIEW_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
 
-        Inventory inventory = Bukkit.createInventory(new ProfileHolder(targetId, resolvedPage), 54,
-                ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
+        Inventory inventory = Bukkit.createInventory(new ProfileHolder(targetId, selected, resolvedPage), 54,
+                ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY
+                        + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory, viewer);
 
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId, scoreColor + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
             List<String> profileLore = new ArrayList<>();
-            profileLore.add(ChatColor.GRAY + "Total Rep: " + scoreColor + score);
-            profileLore.add(ChatColor.GRAY + "Positive reviews: " + ChatColor.GREEN + positives);
-            profileLore.add(ChatColor.GRAY + "Negative reviews: " + ChatColor.RED + negatives);
-            Map<RepCategory, Integer> categoryScores = repService.getCategoryScores(targetId);
-            if (!categoryScores.isEmpty()) {
-                profileLore.add("");
-                profileLore.add(ChatColor.GOLD + "Category scores:");
-                categoryScores.entrySet().stream()
-                        .sorted(Map.Entry.comparingByKey())
-                        .forEach(entry -> profileLore.add(ChatColor.GRAY + displayName(entry.getKey()) + ": "
-                                + coloredValue(entry.getValue())));
-            }
+            profileLore.add(ChatColor.GRAY + "Overall reputation: " + plugin.getRepConfig().formatColoredScore(overallScore));
+            profileLore.add(ChatColor.GRAY + "Viewing: " + ChatColor.GOLD + RepCategoryGuiSupport.displayName(selected));
+            profileLore.add(ChatColor.GRAY + "View total: " + RepCategoryGuiSupport.coloredValue(viewTotal));
+            profileLore.add(ChatColor.GRAY + "Positive entries in view: " + ChatColor.GREEN + positives);
+            profileLore.add(ChatColor.GRAY + "Negative entries in view: " + ChatColor.RED + negatives);
             headMeta.setLore(profileLore);
             head.setItemMeta(headMeta);
         }
         inventory.setItem(4, head);
+        RepCategoryGuiSupport.renderSelectors(inventory, RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS,
+                repService, targetId, selected, "Player total");
 
         int start = resolvedPage * REVIEW_SLOTS.size();
         for (int i = 0; i < REVIEW_SLOTS.size(); i++) {
             int index = start + i;
-            if (index >= reviews.size()) {
-                break;
-            }
+            if (index >= reviews.size()) break;
             inventory.setItem(REVIEW_SLOTS.get(i), reviewItem(reviews.get(index), viewer.hasPermission("enthusiacommend.rep.admin")));
         }
-
-        if (resolvedPage > 0) {
-            inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
-        }
-        if (resolvedPage < maxPage) {
-            inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
-        }
+        if (resolvedPage > 0) inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
+        if (resolvedPage < maxPage) inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
 
         if (viewer.getUniqueId().equals(targetId)) {
             RepAppliedEffects effects = effectManager.getCurrentEffects(targetId);
@@ -205,7 +203,6 @@ public final class RepGuiManager implements Listener {
                         List.of(ChatColor.GRAY + "Click to remove your commendation", ChatColor.GRAY + "(applies cooldown)")));
             }
         }
-
         viewer.openInventory(inventory);
     }
 
@@ -419,6 +416,7 @@ public final class RepGuiManager implements Listener {
         returnFromBook.remove(playerId);
         liveAnvilText.remove(playerId);
         transitioningAnvil.remove(playerId);
+        profileSelections.keySet().removeIf(key -> key.viewerId().equals(playerId));
     }
 
     @EventHandler
@@ -472,6 +470,11 @@ public final class RepGuiManager implements Listener {
 
     private void handleProfileClick(Player player, ProfileHolder profile, InventoryClickEvent event) {
         int slot = event.getRawSlot();
+        if (RepCategoryGuiSupport.isSelectorSlot(RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS, slot)) {
+            RepCategory selected = RepCategoryGuiSupport.categoryAt(RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS, slot);
+            openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), selected);
+            return;
+        }
         if (slot == PREVIOUS_PAGE_SLOT) {
             openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page() - 1);
             return;
@@ -493,9 +496,11 @@ public final class RepGuiManager implements Listener {
         if (reviewIndex == -1) {
             return;
         }
-        List<Commendation> reviews = repService.getCommendationsAbout(profile.targetId()).stream()
-                .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
-                .toList();
+        List<Commendation> reviews = RepCategoryGuiSupport.filter(
+                repService.getCommendationsAbout(profile.targetId()).stream()
+                        .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
+                        .toList(),
+                profile.category());
         int absoluteIndex = profile.page() * REVIEW_SLOTS.size() + reviewIndex;
         if (absoluteIndex < 0 || absoluteIndex >= reviews.size()) {
             return;
@@ -837,8 +842,9 @@ public final class RepGuiManager implements Listener {
         if (!result.success()) {
             if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
                 player.sendMessage(plugin.getMessages().get("rep.category-invalid", Map.of(
-                        "list", "Was Kind, Helped Me, Gave Items/Money, Trustworthy, Good Stall, "
-                                + "Scammed, Spawn Killed, Griefed, Trapped, Scam Stall")));
+                        "list", RepCategory.selectableValues().stream()
+                                .map(RepCategory::displayName)
+                                .collect(Collectors.joining(", ")))));
             } else {
                 long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
                 player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(
@@ -1144,32 +1150,15 @@ public final class RepGuiManager implements Listener {
     }
 
     private List<RepCategory> positiveCategories() {
-        return List.of(RepCategory.WAS_KIND, RepCategory.HELPED_ME, RepCategory.GAVE_ITEMS, RepCategory.TRUSTWORTHY, RepCategory.GOOD_STALL);
+        return RepCategory.selectableValues().stream().filter(RepCategory::isPositive).toList();
     }
 
     private List<RepCategory> negativeCategories() {
-        return List.of(RepCategory.SCAMMED, RepCategory.SPAWN_KILLED, RepCategory.GRIEFED, RepCategory.TRAPPED, RepCategory.SCAM_STALL);
+        return RepCategory.selectableValues().stream().filter(category -> !category.isPositive()).toList();
     }
 
     private String displayName(RepCategory category) {
-        return CATEGORY_DISPLAY_NAMES.get(category);
-    }
-
-    private static Map<RepCategory, String> categoryDisplayNames() {
-        Map<RepCategory, String> names = new EnumMap<>(RepCategory.class);
-        names.put(RepCategory.WAS_KIND, "Was Kind");
-        names.put(RepCategory.HELPED_ME, "Helped Me");
-        names.put(RepCategory.GAVE_ITEMS, "Gave Items/Money");
-        names.put(RepCategory.TRUSTWORTHY, "Trustworthy");
-        names.put(RepCategory.GOOD_STALL, "Good Stall");
-        names.put(RepCategory.OTHER_POSITIVE, "Other");
-        names.put(RepCategory.SCAMMED, "Scammed");
-        names.put(RepCategory.SPAWN_KILLED, "Spawn Killed");
-        names.put(RepCategory.GRIEFED, "Griefed");
-        names.put(RepCategory.TRAPPED, "Trapped");
-        names.put(RepCategory.SCAM_STALL, "Scam Stall");
-        names.put(RepCategory.OTHER_NEGATIVE, "Other");
-        return names;
+        return category == null ? "Reputation" : category.migratedCategory().displayName();
     }
 
     private List<String> wrapLore(String text, int width, ChatColor color) {
@@ -1278,7 +1267,7 @@ public final class RepGuiManager implements Listener {
     private sealed interface HolderMarker permits ProfileHolder, ReasonHolder, InputChoiceHolder, ConfirmReasonHolder, ConfirmRemovalHolder, RemovedLogHolder, ActiveReportsHolder, ConfirmRestoreHolder {
     }
 
-    private record ProfileHolder(UUID targetId, int page) implements InventoryHolder, HolderMarker {
+    private record ProfileHolder(UUID targetId, RepCategory category, int page) implements InventoryHolder, HolderMarker {
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -1309,6 +1298,8 @@ public final class RepGuiManager implements Listener {
     private record ConfirmRestoreHolder(String removalId, int returnPage) implements InventoryHolder, HolderMarker {
         @Override public Inventory getInventory() { return null; }
     }
+
+    private record ProfileSelectionKey(UUID viewerId, UUID targetId) { }
 
     private record PendingTextInput(UUID targetId, RepCategory category, int returnPage) {
     }

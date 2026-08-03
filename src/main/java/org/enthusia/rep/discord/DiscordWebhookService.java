@@ -9,27 +9,27 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/**
- * Bounded, single-threaded Discord webhook sender. All Bukkit-dependent values
- * must be resolved before {@link #log(LogEntry)} is called.
- */
+/** Bounded asynchronous Discord webhook sender with no Bukkit or skin-network work. */
 public final class DiscordWebhookService implements AutoCloseable {
     private static final int QUEUE_CAPACITY = 256;
+    private static final long FAILURE_LOG_INTERVAL_MILLIS = 60_000L;
+    private static final int DESCRIPTION_LIMIT = 4096;
 
     private final URI webhookUri;
     private final Logger logger;
     private final ThreadPoolExecutor executor;
     private final HttpClient client;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicLong lastFailureLogAt = new AtomicLong(0L);
 
     public DiscordWebhookService(String webhookUrl, Logger logger) {
         this.logger = logger;
@@ -39,28 +39,16 @@ public final class DiscordWebhookService implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         };
-        this.executor = new ThreadPoolExecutor(
-                1,
-                1,
-                0L,
-                TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(QUEUE_CAPACITY),
-                factory,
-                (runnable, ignored) -> logger.warning("Discord commendation log queue is full; dropping one log entry.")
-        );
-        this.client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        this.executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(QUEUE_CAPACITY), factory,
+                (runnable, ignored) -> warnRateLimited("Discord reputation log queue is full; dropping one log entry.", null));
+        this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
-    public boolean isEnabled() {
-        return webhookUri != null && !closed.get();
-    }
+    public boolean isEnabled() { return webhookUri != null && !closed.get(); }
 
     public void log(LogEntry entry) {
-        if (!isEnabled() || entry == null) {
-            return;
-        }
+        if (!isEnabled() || entry == null) return;
         executor.execute(() -> send(entry));
     }
 
@@ -72,65 +60,55 @@ public final class DiscordWebhookService implements AutoCloseable {
                     .POST(HttpRequest.BodyPublishers.ofString(toJson(entry), StandardCharsets.UTF_8))
                     .build();
             HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
-            int status = response.statusCode();
-            if (status < 200 || status >= 300) {
-                logger.warning("Discord commendation webhook returned HTTP " + status + ".");
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                warnRateLimited("Discord reputation webhook returned HTTP " + response.statusCode() + ".", null);
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
         } catch (Exception exception) {
-            logger.log(Level.WARNING, "Failed to send Discord commendation webhook: " + exception.getMessage());
+            warnRateLimited("Failed to send Discord reputation webhook: " + exception.getMessage(), exception);
         }
     }
 
-    private String toJson(LogEntry entry) {
-        int color = entry.scoreValue() > 0 ? 0x57F287 : 0xED4245;
-        String title = entry.action().displayName + " Reputation";
-        return "{\"embeds\":[{"
-                + "\"title\":\"" + escape(title) + "\","
+    private void warnRateLimited(String message, Exception exception) {
+        long now = System.currentTimeMillis();
+        long previous = lastFailureLogAt.get();
+        if (now - previous < FAILURE_LOG_INTERVAL_MILLIS || !lastFailureLogAt.compareAndSet(previous, now)) return;
+        if (exception == null) logger.warning(message); else logger.log(Level.WARNING, message, exception);
+    }
+
+    static String toJson(LogEntry entry) {
+        String giver = singleLine(entry.giverName(), 64, "Unknown player");
+        String target = singleLine(entry.targetName(), 64, "Unknown player");
+        String category = singleLine(entry.category() == null ? "Reputation" : entry.category().displayName(), 128, "Reputation");
+        String reason = singleLine(entry.reason(), 3500, "");
+        String firstLine = giver + " repped " + target;
+        String secondLine = reason.isBlank() ? category : category + " • " + reason;
+        String description = truncate(firstLine + "\n" + secondLine, DESCRIPTION_LIMIT);
+        int color = entry.category() != null && !entry.category().isPositive() ? 0xED4245 : 0x57F287;
+        String thumbnail = entry.thumbnailUrl() == null || entry.thumbnailUrl().isBlank()
+                ? "" : ",\"thumbnail\":{\"url\":\"" + escape(entry.thumbnailUrl()) + "\"}";
+        return "{\"allowed_mentions\":{\"parse\":[]},\"embeds\":[{"
+                + "\"description\":\"" + escape(description) + "\","
                 + "\"color\":" + color + ","
-                + "\"fields\":["
-                + field("Action", entry.action().displayName, true) + ","
-                + field("From", entry.giverName(), true) + ","
-                + field("To", entry.targetName(), true) + ","
-                + field("Value", signed(entry.scoreValue()), true) + ","
-                + field("New Total", Integer.toString(entry.newTotal()), true) + ","
-                + field("Category", formatCategory(entry.category()), true) + ","
-                + field("Reason", displayReason(entry.reason(), 1024), false)
-                + "],"
-                + "\"timestamp\":\"" + entry.timestamp().toString() + "\""
-                + "}]}";
+                + "\"timestamp\":\"" + (entry.timestamp() == null ? Instant.now() : entry.timestamp()) + "\""
+                + thumbnail + "}]}";
     }
 
-    private static String field(String name, String value, boolean inline) {
-        return "{\"name\":\"" + escape(name) + "\",\"value\":\"" + escape(value) + "\",\"inline\":" + inline + "}";
+    private static String singleLine(String value, int maxLength, String fallback) {
+        if (value == null) return fallback;
+        String cleaned = value.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').trim();
+        if (cleaned.isBlank()) return fallback;
+        return truncate(cleaned, maxLength);
     }
 
-    private static String signed(int value) {
-        return value > 0 ? "+" + value : Integer.toString(value);
-    }
-
-    private static String formatCategory(RepCategory category) {
-        String[] words = category.migratedCategory().name().toLowerCase(Locale.ROOT).split("_");
-        StringBuilder output = new StringBuilder();
-        for (String word : words) {
-            if (output.length() > 0) {
-                output.append(' ');
-            }
-            output.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
-        }
-        return output.toString();
-    }
-
-    static String displayReason(String value, int maxLength) {
-        String safe = value == null || value.isBlank() ? "(none)" : value;
-        return safe.length() <= maxLength ? safe : safe.substring(0, maxLength - 3) + "...";
+    private static String truncate(String value, int maxLength) {
+        if (value.length() <= maxLength) return value;
+        return value.substring(0, Math.max(0, maxLength - 3)) + "...";
     }
 
     static String escape(String value) {
-        if (value == null) {
-            return "";
-        }
+        if (value == null) return "";
         StringBuilder escaped = new StringBuilder(value.length() + 16);
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);
@@ -143,11 +121,8 @@ public final class DiscordWebhookService implements AutoCloseable {
                 case '\n' -> escaped.append("\\n");
                 case '\t' -> escaped.append("\\t");
                 default -> {
-                    if (character < 0x20) {
-                        escaped.append(String.format("\\u%04x", (int) character));
-                    } else {
-                        escaped.append(character);
-                    }
+                    if (character < 0x20) escaped.append(String.format("\\u%04x", (int) character));
+                    else escaped.append(character);
                 }
             }
         }
@@ -155,15 +130,10 @@ public final class DiscordWebhookService implements AutoCloseable {
     }
 
     private static URI validate(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
+        if (raw == null || raw.isBlank()) return null;
         try {
             URI uri = URI.create(raw.trim());
-            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
-                return null;
-            }
-            return uri;
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null ? uri : null;
         } catch (IllegalArgumentException ignored) {
             return null;
         }
@@ -171,42 +141,16 @@ public final class DiscordWebhookService implements AutoCloseable {
 
     @Override
     public void close() {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
+        if (!closed.compareAndSet(false, true)) return;
         executor.shutdown();
         try {
-            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) executor.shutdownNow();
         } catch (InterruptedException interrupted) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
         }
     }
 
-    public record LogEntry(
-            Action action,
-            String giverName,
-            String targetName,
-            RepCategory category,
-            String reason,
-            int scoreValue,
-            int newTotal,
-            Instant timestamp
-    ) {
-    }
-
-    public enum Action {
-        CREATED("Created"),
-        UPDATED("Updated"),
-        REMOVED("Removed"),
-        RESTORED("Restored");
-
-        private final String displayName;
-
-        Action(String displayName) {
-            this.displayName = displayName;
-        }
-    }
+    public record LogEntry(String giverName, String targetName, RepCategory category,
+                           String reason, Instant timestamp, String thumbnailUrl) { }
 }

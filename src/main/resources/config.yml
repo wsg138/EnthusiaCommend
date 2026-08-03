@@ -35,6 +35,9 @@ rep:
       moveSpeedPlus5PercentAt: 15
       potionDurationPlus10PercentAt: 15
       cashback5PercentAt: 15
+rep-trading-alerts:
+  enabled-by-default: true
+
 stalk:
   costPerDay: 100.0
   maxDays: 7
@@ -55,6 +58,8 @@ playtime:
   primaryPlaceholder: "%playtime_active%"
   fallbackFormattedPlaceholder: "%playtime_active_formatted%"
 regions:
+  # Logical precedence is market, then spawn, then warzone; outside these cuboids in a managed world is wilderness.
+  market: []
   spawn:
     - world: world
       min: -50, 0, -50

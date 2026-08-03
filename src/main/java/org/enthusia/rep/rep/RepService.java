@@ -40,6 +40,7 @@ public final class RepService {
     private final Consumer<UUID> scoreChangeListener;
     private final ReputationAnalyticsService analyticsService;
     private final Consumer<AuditRecord> auditConsumer;
+    private final RepAlertPreferences alertPreferences;
 
     private volatile org.enthusia.rep.config.RepConfig repConfig;
 
@@ -78,11 +79,16 @@ public final class RepService {
         this.scoreChangeListener = scoreChangeListener;
         this.analyticsService = analyticsService;
         this.auditConsumer = auditConsumer == null ? ignored -> { } : auditConsumer;
-        loadSnapshot(dataSnapshot == null ? PluginDataSnapshot.EMPTY : dataSnapshot);
+        PluginDataSnapshot resolvedSnapshot = dataSnapshot == null ? PluginDataSnapshot.EMPTY : dataSnapshot;
+        this.alertPreferences = new RepAlertPreferences(
+                repConfig.areRepTradingAlertsEnabledByDefault(),
+                resolvedSnapshot.repTradingAlertPreferences());
+        loadSnapshot(resolvedSnapshot);
     }
 
     public void reload(org.enthusia.rep.config.RepConfig repConfig) {
         this.repConfig = repConfig;
+        this.alertPreferences.reloadDefault(repConfig.areRepTradingAlertsEnabledByDefault());
     }
 
     private void loadSnapshot(PluginDataSnapshot snapshot) {
@@ -168,7 +174,8 @@ public final class RepService {
                 base.stalkEntries(),
                 base.reputationChanges(),
                 cases,
-                cooldowns
+                cooldowns,
+                alertPreferences.snapshot()
         );
     }
 
@@ -315,14 +322,27 @@ public final class RepService {
     }
 
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
-        Comparator<Map.Entry<UUID, Integer>> comparator = Map.Entry.comparingByValue();
-        if (!lowest) {
-            comparator = comparator.reversed();
+        return leaderboard(null, lowest).stream().limit(Math.max(1, limit)).toList();
+    }
+
+    public List<Map.Entry<UUID, Integer>> leaderboard(RepCategory category, boolean lowest) {
+        Set<UUID> players = new LinkedHashSet<>(scoreByPlayer.keySet());
+        players.addAll(commendationsByTarget.keySet());
+        Map<UUID, Integer> values = new LinkedHashMap<>();
+        for (UUID playerId : players) {
+            values.put(playerId, category == null ? getScore(playerId) : getCategoryScore(playerId, category));
         }
-        return scoreByPlayer.entrySet().stream()
-                .sorted(comparator)
-                .limit(Math.max(1, limit))
-                .toList();
+        return RepLeaderboardSorter.sort(values, lowest);
+    }
+
+    public boolean areTradingAlertsEnabled(UUID playerId) {
+        return alertPreferences.isEnabled(playerId);
+    }
+
+    public boolean toggleTradingAlerts(UUID playerId) {
+        boolean enabled = alertPreferences.toggle(playerId);
+        dirtyMarker.run();
+        return enabled;
     }
 
     public String nameOf(UUID playerId) {
@@ -707,7 +727,8 @@ public final class RepService {
                         .clickEvent(ClickEvent.runCommand(inspectCommand))
                         .hoverEvent(HoverEvent.showText(Component.text(caseData.detail, NamedTextColor.GRAY))));
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (player.hasPermission("enthusiacommend.rep.alert")) {
+            if (player.hasPermission("enthusiacommend.rep.alert")
+                    && alertPreferences.isEnabled(player.getUniqueId())) {
                 player.sendMessage(message);
             }
         }

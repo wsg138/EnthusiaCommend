@@ -20,6 +20,10 @@ public class CuboidRegion {
         this.maxZ = maxZ;
     }
 
+    public String worldName() {
+        return worldName;
+    }
+
     public boolean contains(Location loc) {
         if (loc == null || loc.getWorld() == null) return false;
         if (!loc.getWorld().getName().equals(worldName)) return false;
