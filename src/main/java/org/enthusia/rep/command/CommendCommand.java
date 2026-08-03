@@ -14,6 +14,7 @@ import org.enthusia.rep.analytics.ReputationChangeRecord;
 import org.enthusia.rep.rep.Commendation;
 import org.enthusia.rep.rep.RepCategory;
 import org.enthusia.rep.rep.RepService;
+import org.enthusia.rep.rep.RepTradingAlertAccess;
 import org.enthusia.rep.stalk.StalkSubscription;
 import org.enthusia.rep.util.RepDateFormats;
 
@@ -22,7 +23,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,14 +35,12 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     private static final int PAGE_SIZE = 10;
     private static final long MILLIS_PER_DAY = 24L * 60L * 60L * 1000L;
     private static final long MILLIS_PER_HOUR = 60L * 60L * 1000L;
-    private static final Map<RepCategory, String> CATEGORY_DISPLAY_NAMES = categoryDisplayNames();
     private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "reviews", "stalk", "give");
     private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "reviews", "stalk", "give");
     private static final List<String> ADMIN_SUBCOMMANDS = List.of(
             "reload", "help", "get", "set", "add", "revoke", "remove", "reset", "history",
             "inspect", "resolve", "reports", "removed", "restore", "undo");
-    private static final List<String> SELECTABLE_CATEGORIES = java.util.Arrays.stream(RepCategory.values())
-            .filter(RepCategory::isSelectable)
+    private static final List<String> SELECTABLE_CATEGORIES = RepCategory.selectableValues().stream()
             .map(Enum::name)
             .toList();
 
@@ -53,6 +51,18 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     public CommendCommand(CommendPlugin plugin, RepService repService) {
         this.plugin = plugin;
         this.repService = repService;
+    }
+
+    static boolean canUseTradingAlerts(CommandSender sender) {
+        return RepTradingAlertAccess.isAuthorized(sender);
+    }
+
+    static List<String> rootSubcommands(CommandSender sender) {
+        List<String> roots = new ArrayList<>(sender.hasPermission(PERMISSION_ADMIN) ? ADMIN_ROOTS : PLAYER_ROOTS);
+        if (canUseTradingAlerts(sender)) {
+            roots.add("alerts");
+        }
+        return List.copyOf(roots);
     }
 
     @Override
@@ -66,6 +76,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             case "reviews" -> handleReviews(sender, args.length >= 2 ? args[1] : sender.getName());
             case "stalk" -> handleStalk(sender, args);
             case "give" -> handleGiveCommand(sender, args);
+            case "alerts" -> handleAlerts(sender);
             default -> handleProfileLookup(sender, args[0]);
         };
     }
@@ -209,7 +220,8 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleLeaderboard(CommandSender sender, int limit, boolean lowest) {
         if (sender instanceof Player player) {
-            Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationLeaderboardViewedEvent(player.getUniqueId()));
+            plugin.getRepLeaderboardGui().open(player, lowest);
+            return true;
         }
         sender.sendMessage(ChatColor.GOLD + (lowest ? "--- Lowest Rep ---" : "--- Top Rep ---"));
         int rank = 1;
@@ -217,6 +229,21 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.YELLOW + "#" + rank++ + " " + ChatColor.GOLD + repService.nameOf(entry.getKey())
                     + ChatColor.GRAY + " - " + plugin.getRepConfig().formatColoredScore(entry.getValue()));
         }
+        return true;
+    }
+
+    private boolean handleAlerts(CommandSender sender) {
+        if (!canUseTradingAlerts(sender)) {
+            sender.sendMessage(plugin.getMessages().get("rep.no-permission"));
+            return true;
+        }
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(ChatColor.RED + "Players only.");
+            return true;
+        }
+        boolean enabled = repService.toggleTradingAlerts(player.getUniqueId());
+        player.sendMessage((enabled ? ChatColor.GREEN : ChatColor.YELLOW)
+                + "Rep-trading alerts are now " + (enabled ? "enabled" : "disabled") + ".");
         return true;
     }
 
@@ -506,6 +533,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
 
     private void sendAdminHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== Rep Admin Commands ===");
+        sender.sendMessage(ChatColor.YELLOW + "/rep alerts (toggle your suspicious rep-trading alerts)");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin reload");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin get <player>");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin set <player> <score>");
@@ -570,29 +598,12 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     }
 
     private String displayName(RepCategory category) {
-        return CATEGORY_DISPLAY_NAMES.getOrDefault(category.migratedCategory(), category.name());
+        return category == null ? "Reputation" : category.migratedCategory().displayName();
     }
 
     private String coloredValue(int value) {
         return (value > 0 ? ChatColor.GREEN : value < 0 ? ChatColor.RED : ChatColor.YELLOW)
                 + (value > 0 ? "+" + value : String.valueOf(value));
-    }
-
-    private static Map<RepCategory, String> categoryDisplayNames() {
-        Map<RepCategory, String> names = new EnumMap<>(RepCategory.class);
-        names.put(RepCategory.WAS_KIND, "Was Kind");
-        names.put(RepCategory.HELPED_ME, "Helped Me");
-        names.put(RepCategory.GAVE_ITEMS, "Gave Items/Money");
-        names.put(RepCategory.TRUSTWORTHY, "Trustworthy");
-        names.put(RepCategory.GOOD_STALL, "Good Stall");
-        names.put(RepCategory.OTHER_POSITIVE, "Was Kind (migrated)");
-        names.put(RepCategory.SCAMMED, "Scammed");
-        names.put(RepCategory.SPAWN_KILLED, "Spawn Killed");
-        names.put(RepCategory.GRIEFED, "Griefed");
-        names.put(RepCategory.TRAPPED, "Trapped");
-        names.put(RepCategory.SCAM_STALL, "Scam Stall");
-        names.put(RepCategory.OTHER_NEGATIVE, "Scammed (migrated)");
-        return names;
     }
 
     private String formatNames(Collection<UUID> ids) {
@@ -604,7 +615,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         List<String> result = new ArrayList<>();
         if (!command.getName().equalsIgnoreCase("rep")) return result;
         if (args.length == 1) {
-            addMatches(result, args[0], sender.hasPermission(PERMISSION_ADMIN) ? ADMIN_ROOTS : PLAYER_ROOTS);
+            addMatches(result, args[0], rootSubcommands(sender));
             addOnlinePlayers(result, args[0]);
         } else if (args.length == 2 && args[0].equalsIgnoreCase("admin") && sender.hasPermission(PERMISSION_ADMIN)) {
             addMatches(result, args[1], ADMIN_SUBCOMMANDS);

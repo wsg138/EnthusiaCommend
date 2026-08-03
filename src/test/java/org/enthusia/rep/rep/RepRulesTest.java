@@ -3,6 +3,7 @@ package org.enthusia.rep.rep;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -65,5 +66,29 @@ class RepRulesTest {
         assertTrue(RepRules.isCooldownActive(removedAt, 14_999L, duration));
         assertFalse(RepRules.isCooldownActive(removedAt, 15_000L, duration));
         assertFalse(RepRules.isCooldownActive(removedAt, 9_999L, duration));
+    }
+
+    @Test
+    void categoryScoresUseTheActualCategoryValuesAndMigrateLegacyEntries() {
+        UUID target = UUID.randomUUID();
+        List<Commendation> entries = List.of(
+                new Commendation(UUID.randomUUID(), target, true, RepCategory.HELPED_ME, "", 1L, 1L, null, 1),
+                new Commendation(UUID.randomUUID(), target, true, RepCategory.HELPED_ME, "", 2L, 2L, null, 1),
+                new Commendation(UUID.randomUUID(), target, false, RepCategory.SCAMMED, "", 3L, 3L, null, -2),
+                new Commendation(UUID.randomUUID(), target, true, RepCategory.OTHER_POSITIVE, "", 4L, 4L, null, 1)
+        );
+        Map<RepCategory, Integer> scores = RepRules.categoryScores(entries);
+        assertEquals(2, scores.get(RepCategory.HELPED_ME));
+        assertEquals(-2, scores.get(RepCategory.SCAMMED));
+        assertEquals(1, scores.get(RepCategory.WAS_KIND));
+    }
+
+    @Test
+    void selectableRegistryProvidesDisplayMetadataWithoutLegacyDuplicates() {
+        assertEquals(10, RepCategory.selectableValues().size());
+        assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_POSITIVE));
+        assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_NEGATIVE));
+        assertTrue(RepCategory.selectableValues().stream().allMatch(category -> !category.displayName().isBlank()));
+        assertTrue(RepCategory.selectableValues().stream().allMatch(category -> !category.description().isBlank()));
     }
 }

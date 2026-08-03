@@ -35,11 +35,11 @@ import java.util.function.Consumer;
 public final class RepService {
     private static final long ALT_WINDOW_MILLIS = 48L * 60L * 60L * 1000L;
 
-    private final CommendPlugin plugin;
     private final Runnable dirtyMarker;
     private final Consumer<UUID> scoreChangeListener;
     private final ReputationAnalyticsService analyticsService;
     private final Consumer<AuditRecord> auditConsumer;
+    private final RepAlertPreferences alertPreferences;
 
     private volatile org.enthusia.rep.config.RepConfig repConfig;
 
@@ -72,17 +72,22 @@ public final class RepService {
             ReputationAnalyticsService analyticsService,
             Consumer<AuditRecord> auditConsumer
     ) {
-        this.plugin = plugin;
+        Objects.requireNonNull(plugin, "plugin");
         this.repConfig = repConfig;
         this.dirtyMarker = dirtyMarker;
         this.scoreChangeListener = scoreChangeListener;
         this.analyticsService = analyticsService;
         this.auditConsumer = auditConsumer == null ? ignored -> { } : auditConsumer;
-        loadSnapshot(dataSnapshot == null ? PluginDataSnapshot.EMPTY : dataSnapshot);
+        PluginDataSnapshot resolvedSnapshot = dataSnapshot == null ? PluginDataSnapshot.EMPTY : dataSnapshot;
+        this.alertPreferences = new RepAlertPreferences(
+                repConfig.areRepTradingAlertsEnabledByDefault(),
+                resolvedSnapshot.repTradingAlertPreferences());
+        loadSnapshot(resolvedSnapshot);
     }
 
     public void reload(org.enthusia.rep.config.RepConfig repConfig) {
         this.repConfig = repConfig;
+        this.alertPreferences.reloadDefault(repConfig.areRepTradingAlertsEnabledByDefault());
     }
 
     private void loadSnapshot(PluginDataSnapshot snapshot) {
@@ -168,7 +173,8 @@ public final class RepService {
                 base.stalkEntries(),
                 base.reputationChanges(),
                 cases,
-                cooldowns
+                cooldowns,
+                alertPreferences.snapshot()
         );
     }
 
@@ -315,14 +321,32 @@ public final class RepService {
     }
 
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
-        Comparator<Map.Entry<UUID, Integer>> comparator = Map.Entry.comparingByValue();
-        if (!lowest) {
-            comparator = comparator.reversed();
+        return leaderboard(null, lowest).stream().limit(Math.max(1, limit)).toList();
+    }
+
+    public List<Map.Entry<UUID, Integer>> leaderboard(RepCategory category, boolean lowest) {
+        Map<UUID, Integer> values = new LinkedHashMap<>();
+        if (category == null) {
+            Set<UUID> players = new LinkedHashSet<>(scoreByPlayer.keySet());
+            players.addAll(commendationsByTarget.keySet());
+            for (UUID playerId : players) {
+                values.put(playerId, getScore(playerId));
+            }
+        } else {
+            values.putAll(RepLeaderboardPopulation.categoryTotals(
+                    recentCommendations(Integer.MAX_VALUE), category));
         }
-        return scoreByPlayer.entrySet().stream()
-                .sorted(comparator)
-                .limit(Math.max(1, limit))
-                .toList();
+        return RepLeaderboardSorter.sort(values, lowest);
+    }
+
+    public boolean areTradingAlertsEnabled(UUID playerId) {
+        return alertPreferences.isEnabled(playerId);
+    }
+
+    public boolean toggleTradingAlerts(UUID playerId) {
+        boolean enabled = alertPreferences.toggle(playerId);
+        dirtyMarker.run();
+        return enabled;
     }
 
     public String nameOf(UUID playerId) {
@@ -468,7 +492,9 @@ public final class RepService {
                 existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
         rebuildAntiAbuseIndex();
         dirtyMarker.run();
-        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta, getScore(targetId), System.currentTimeMillis()));
+        String actorName = actorId == null ? (logRemoval ? "Console" : "System") : nameOf(actorId);
+        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta,
+                getScore(targetId), System.currentTimeMillis(), actorId, actorName));
         return removedRep;
     }
 
@@ -612,7 +638,10 @@ public final class RepService {
         }
         rebuildAntiAbuseIndex();
         dirtyMarker.run();
-        auditConsumer.accept(new AuditRecord(AuditAction.RESTORED, cloneCommendation(restored), delta, getScore(restored.getTarget()), System.currentTimeMillis()));
+        UUID auditActorId = actor instanceof Player player ? player.getUniqueId() : null;
+        String auditActorName = actor == null ? "System" : actor.getName();
+        auditConsumer.accept(new AuditRecord(AuditAction.RESTORED, cloneCommendation(restored), delta,
+                getScore(restored.getTarget()), System.currentTimeMillis(), auditActorId, auditActorName));
         return true;
     }
 
@@ -707,7 +736,8 @@ public final class RepService {
                         .clickEvent(ClickEvent.runCommand(inspectCommand))
                         .hoverEvent(HoverEvent.showText(Component.text(caseData.detail, NamedTextColor.GRAY))));
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (player.hasPermission("enthusiacommend.rep.alert")) {
+            if (player.hasPermission("enthusiacommend.rep.alert")
+                    && alertPreferences.isEnabled(player.getUniqueId())) {
                 player.sendMessage(message);
             }
         }
@@ -783,7 +813,12 @@ public final class RepService {
     private record AltRepRecord(UUID giverId, UUID targetId, boolean positive, long timestamp, String ipHash) {
     }
 
-    public record AuditRecord(AuditAction action, Commendation commendation, int scoreDelta, int newTotal, long timestamp) {
+    public record AuditRecord(AuditAction action, Commendation commendation, int scoreDelta,
+                              int newTotal, long timestamp, UUID actorId, String actorName) {
+        public AuditRecord(AuditAction action, Commendation commendation, int scoreDelta,
+                           int newTotal, long timestamp) {
+            this(action, commendation, scoreDelta, newTotal, timestamp, null, null);
+        }
     }
 
     public enum AuditAction {
@@ -936,7 +971,7 @@ public final class RepService {
                 long lastEditedAt = raw.get("lastEditedAt") instanceof Number value ? value.longValue() : createdAt;
                 String ipHash = raw.get("ipHash") != null ? raw.get("ipHash").toString() : null;
                 int scoreValue = raw.get("scoreValue") instanceof Number value
-                        ? value.intValue() : (positive ? 1 : -1);
+                        ? value.intValue() : positive ? 1 : -1;
                 long removedAt = raw.get("removedAt") instanceof Number value ? value.longValue() : Instant.now().toEpochMilli();
                 UUID removedBy = raw.get("removedBy") == null ? null : UUID.fromString(String.valueOf(raw.get("removedBy")));
                 Commendation commendation = new Commendation(

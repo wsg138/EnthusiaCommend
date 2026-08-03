@@ -22,6 +22,7 @@ public final class RepConfig {
     private final int analyticsRetentionDays;
     private final int analyticsMaxRecords;
     private final String discordWebhookUrl;
+    private final boolean repTradingAlertsEnabledByDefault;
     private final EffectThresholds effectThresholds;
 
     public RepConfig(FileConfiguration config) {
@@ -40,6 +41,7 @@ public final class RepConfig {
         this.analyticsRetentionDays = Math.max(1, config.getInt("analytics.retentionDays", 90));
         this.analyticsMaxRecords = Math.max(100, config.getInt("analytics.maxRecords", 5000));
         this.discordWebhookUrl = config.getString("discord.webhookUrl", "").trim();
+        this.repTradingAlertsEnabledByDefault = config.getBoolean("rep-trading-alerts.enabled-by-default", true);
         this.effectThresholds = new EffectThresholds(config);
     }
 
@@ -59,6 +61,7 @@ public final class RepConfig {
     public long getAnalyticsRetentionMillis() { return analyticsRetentionDays * 24L * 60L * 60L * 1000L; }
     public int getAnalyticsMaxRecords() { return analyticsMaxRecords; }
     public String getDiscordWebhookUrl() { return discordWebhookUrl; }
+    public boolean areRepTradingAlertsEnabledByDefault() { return repTradingAlertsEnabledByDefault; }
     public EffectThresholds getEffectThresholds() { return effectThresholds; }
 
     public ChatColor colorForScore(int score) {

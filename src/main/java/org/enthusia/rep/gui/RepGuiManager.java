@@ -47,8 +47,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,7 +68,6 @@ public final class RepGuiManager implements Listener {
     private static final int POSITIVE_REP_SLOT = 48;
     private static final int EFFECTS_OR_REMOVE_SLOT = 49;
     private static final int NEGATIVE_REP_SLOT = 50;
-    private static final Map<RepCategory, String> CATEGORY_DISPLAY_NAMES = categoryDisplayNames();
 
     private final CommendPlugin plugin;
     private final RepService repService;
@@ -85,6 +82,7 @@ public final class RepGuiManager implements Listener {
     private final Map<UUID, ProfileContext> returnFromBook = new ConcurrentHashMap<>();
     private final Map<UUID, String> liveAnvilText = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> transitioningAnvil = new java.util.HashSet<>();
+    private final Map<ProfileSelectionKey, RepCategory> profileSelections = new ConcurrentHashMap<>();
 
     public RepGuiManager(CommendPlugin plugin, RepService repService, RepEffectManager effectManager) {
         this.plugin = plugin;
@@ -105,6 +103,7 @@ public final class RepGuiManager implements Listener {
         returnFromBook.clear();
         liveAnvilText.clear();
         transitioningAnvil.clear();
+        profileSelections.clear();
     }
 
     public void cancelOpenAnvilSessions(String message) {
@@ -126,64 +125,67 @@ public final class RepGuiManager implements Listener {
     }
 
     public void openProfile(Player viewer, OfflinePlayer target) {
+        profileSelections.remove(new ProfileSelectionKey(viewer.getUniqueId(), target.getUniqueId()));
+        openProfile(viewer, target, 0);
+    }
+
+    public void openProfile(Player viewer, OfflinePlayer target, RepCategory selectedCategory) {
+        ProfileSelectionKey key = new ProfileSelectionKey(viewer.getUniqueId(), target.getUniqueId());
+        if (selectedCategory == null) profileSelections.remove(key);
+        else profileSelections.put(key, selectedCategory.migratedCategory());
         openProfile(viewer, target, 0);
     }
 
     public void openProfile(Player viewer, OfflinePlayer target, int page) {
         Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationProfileViewedEvent(viewer.getUniqueId(), target.getUniqueId()));
-
         UUID targetId = target.getUniqueId();
-        int score = repService.getScore(targetId);
-        ChatColor scoreColor = plugin.getRepConfig().colorForScore(score);
-        List<Commendation> reviews = repService.getCommendationsAbout(targetId).stream()
+        RepCategory selected = profileSelections.get(new ProfileSelectionKey(viewer.getUniqueId(), targetId));
+        int overallScore = repService.getScore(targetId);
+        int viewTotal = RepCategoryGuiSupport.total(repService, targetId, selected);
+        ChatColor scoreColor = plugin.getRepConfig().colorForScore(overallScore);
+        List<Commendation> allReviews = repService.getCommendationsAbout(targetId).stream()
                 .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
                 .toList();
+        List<Commendation> reviews = RepCategoryGuiSupport.filter(allReviews, selected);
         long positives = reviews.stream().filter(Commendation::isPositive).count();
         long negatives = reviews.size() - positives;
-
         int maxPage = Math.max(0, (reviews.size() - 1) / REVIEW_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
+        int start = resolvedPage * REVIEW_SLOTS.size();
+        List<Commendation> visibleReviews = reviews.stream()
+                .skip(start)
+                .limit(REVIEW_SLOTS.size())
+                .map(Commendation::snapshot)
+                .toList();
 
-        Inventory inventory = Bukkit.createInventory(new ProfileHolder(targetId, resolvedPage), 54,
-                ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
+        Inventory inventory = Bukkit.createInventory(
+                new ProfileHolder(targetId, selected, resolvedPage, visibleReviews), 54,
+                ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY
+                        + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory, viewer);
 
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId, scoreColor + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
             List<String> profileLore = new ArrayList<>();
-            profileLore.add(ChatColor.GRAY + "Total Rep: " + scoreColor + score);
-            profileLore.add(ChatColor.GRAY + "Positive reviews: " + ChatColor.GREEN + positives);
-            profileLore.add(ChatColor.GRAY + "Negative reviews: " + ChatColor.RED + negatives);
-            Map<RepCategory, Integer> categoryScores = repService.getCategoryScores(targetId);
-            if (!categoryScores.isEmpty()) {
-                profileLore.add("");
-                profileLore.add(ChatColor.GOLD + "Category scores:");
-                categoryScores.entrySet().stream()
-                        .sorted(Map.Entry.comparingByKey())
-                        .forEach(entry -> profileLore.add(ChatColor.GRAY + displayName(entry.getKey()) + ": "
-                                + coloredValue(entry.getValue())));
-            }
+            profileLore.add(ChatColor.GRAY + "Overall reputation: " + plugin.getRepConfig().formatColoredScore(overallScore));
+            profileLore.add(ChatColor.GRAY + "Viewing: " + ChatColor.GOLD + RepCategoryGuiSupport.displayName(selected));
+            profileLore.add(ChatColor.GRAY + "View total: " + RepCategoryGuiSupport.coloredValue(viewTotal));
+            profileLore.add(ChatColor.GRAY + "Positive entries in view: " + ChatColor.GREEN + positives);
+            profileLore.add(ChatColor.GRAY + "Negative entries in view: " + ChatColor.RED + negatives);
             headMeta.setLore(profileLore);
             head.setItemMeta(headMeta);
         }
         inventory.setItem(4, head);
+        RepCategoryGuiSupport.renderSelectors(inventory, RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS,
+                repService, targetId, selected, "Player total");
 
-        int start = resolvedPage * REVIEW_SLOTS.size();
-        for (int i = 0; i < REVIEW_SLOTS.size(); i++) {
-            int index = start + i;
-            if (index >= reviews.size()) {
-                break;
-            }
-            inventory.setItem(REVIEW_SLOTS.get(i), reviewItem(reviews.get(index), viewer.hasPermission("enthusiacommend.rep.admin")));
+        for (int i = 0; i < visibleReviews.size(); i++) {
+            inventory.setItem(REVIEW_SLOTS.get(i),
+                    reviewItem(visibleReviews.get(i), viewer.hasPermission("enthusiacommend.rep.admin")));
         }
-
-        if (resolvedPage > 0) {
-            inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
-        }
-        if (resolvedPage < maxPage) {
-            inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
-        }
+        if (resolvedPage > 0) inventory.setItem(PREVIOUS_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
+        if (resolvedPage < maxPage) inventory.setItem(NEXT_PAGE_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Next", List.of()));
 
         if (viewer.getUniqueId().equals(targetId)) {
             RepAppliedEffects effects = effectManager.getCurrentEffects(targetId);
@@ -205,7 +207,6 @@ public final class RepGuiManager implements Listener {
                         List.of(ChatColor.GRAY + "Click to remove your commendation", ChatColor.GRAY + "(applies cooldown)")));
             }
         }
-
         viewer.openInventory(inventory);
     }
 
@@ -241,7 +242,13 @@ public final class RepGuiManager implements Listener {
 
         int maxPage = Math.max(0, (cases.size() - 1) / REVIEW_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
-        Inventory inventory = Bukkit.createInventory(new ActiveReportsHolder(resolvedPage), 54,
+        int start = resolvedPage * REVIEW_SLOTS.size();
+        List<RepService.SuspiciousRepCase> visibleCases = cases.stream()
+                .skip(start)
+                .limit(REVIEW_SLOTS.size())
+                .map(RepService.SuspiciousRepCase::copy)
+                .toList();
+        Inventory inventory = Bukkit.createInventory(new ActiveReportsHolder(resolvedPage, visibleCases), 54,
                 ChatColor.DARK_RED + "Active Rep Reports [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
         fillBackground(inventory, admin);
 
@@ -251,13 +258,8 @@ public final class RepGuiManager implements Listener {
             return;
         }
 
-        int start = resolvedPage * REVIEW_SLOTS.size();
-        for (int i = 0; i < REVIEW_SLOTS.size(); i++) {
-            int index = start + i;
-            if (index >= cases.size()) {
-                break;
-            }
-            inventory.setItem(REVIEW_SLOTS.get(i), activeReportItem(cases.get(index)));
+        for (int i = 0; i < visibleCases.size(); i++) {
+            inventory.setItem(REVIEW_SLOTS.get(i), activeReportItem(visibleCases.get(i)));
         }
 
         if (resolvedPage > 0) inventory.setItem(45, simpleButton(Material.ARROW, ChatColor.YELLOW + "Prev", List.of()));
@@ -419,6 +421,7 @@ public final class RepGuiManager implements Listener {
         returnFromBook.remove(playerId);
         liveAnvilText.remove(playerId);
         transitioningAnvil.remove(playerId);
+        profileSelections.keySet().removeIf(key -> key.viewerId().equals(playerId));
     }
 
     @EventHandler
@@ -472,6 +475,11 @@ public final class RepGuiManager implements Listener {
 
     private void handleProfileClick(Player player, ProfileHolder profile, InventoryClickEvent event) {
         int slot = event.getRawSlot();
+        if (RepCategoryGuiSupport.isSelectorSlot(RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS, slot)) {
+            RepCategory selected = RepCategoryGuiSupport.categoryAt(RepCategoryGuiSupport.PROFILE_SELECTOR_SLOTS, slot);
+            openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), selected);
+            return;
+        }
         if (slot == PREVIOUS_PAGE_SLOT) {
             openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page() - 1);
             return;
@@ -490,20 +498,18 @@ public final class RepGuiManager implements Listener {
         }
 
         int reviewIndex = REVIEW_SLOTS.indexOf(slot);
-        if (reviewIndex == -1) {
+        Commendation selected = GuiSnapshotTargets.at(profile.visibleReviews(), reviewIndex);
+        if (selected == null) {
             return;
         }
-        List<Commendation> reviews = repService.getCommendationsAbout(profile.targetId()).stream()
-                .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
-                .toList();
-        int absoluteIndex = profile.page() * REVIEW_SLOTS.size() + reviewIndex;
-        if (absoluteIndex < 0 || absoluteIndex >= reviews.size()) {
-            return;
-        }
-
-        Commendation selected = reviews.get(absoluteIndex);
         if (player.hasPermission("enthusiacommend.rep.admin") && event.isRightClick()) {
-            openRemovalConfirm(player, selected, profile.page(), false, true);
+            Commendation current = repService.getCommendation(selected.getGiver(), selected.getTarget());
+            if (!GuiSnapshotTargets.sameCommendationRevision(selected, current)) {
+                player.sendMessage(ChatColor.YELLOW + "That reputation entry changed while the GUI was open. Review it again.");
+                openProfile(player, Bukkit.getOfflinePlayer(profile.targetId()), profile.page());
+                return;
+            }
+            openRemovalConfirm(player, current, profile.page(), false, true);
             return;
         }
         returnFromBook.put(player.getUniqueId(), new ProfileContext(profile.targetId(), profile.page()));
@@ -562,17 +568,24 @@ public final class RepGuiManager implements Listener {
     }
 
     private void handleRemovalClick(Player player, ConfirmRemovalHolder removal, int slot) {
+        Commendation expected = removal.expected();
         if (slot == 11) {
-            if (removal.logRemoval()) {
-                repService.removeCommendationLogged(player.getUniqueId(), removal.giverId(), removal.targetId(), removal.applyCooldown());
-            } else if (removal.applyCooldown()) {
-                repService.removeCommendationWithCooldown(removal.giverId(), removal.targetId());
-            } else {
-                repService.removeCommendation(removal.giverId(), removal.targetId());
+            Commendation current = repService.getCommendation(expected.getGiver(), expected.getTarget());
+            if (!GuiSnapshotTargets.sameCommendationRevision(expected, current)) {
+                player.sendMessage(ChatColor.YELLOW + "That reputation entry changed before confirmation. Nothing was removed.");
+                openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
+                return;
             }
-            openProfile(player, Bukkit.getOfflinePlayer(removal.targetId()), removal.returnPage());
+            if (removal.logRemoval()) {
+                repService.removeCommendationLogged(player.getUniqueId(), expected.getGiver(), expected.getTarget(), removal.applyCooldown());
+            } else if (removal.applyCooldown()) {
+                repService.removeCommendationWithCooldown(expected.getGiver(), expected.getTarget());
+            } else {
+                repService.removeCommendation(expected.getGiver(), expected.getTarget());
+            }
+            openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
         } else if (slot == 15) {
-            openProfile(player, Bukkit.getOfflinePlayer(removal.targetId()), removal.returnPage());
+            openProfile(player, Bukkit.getOfflinePlayer(expected.getTarget()), removal.returnPage());
         }
     }
 
@@ -589,7 +602,7 @@ public final class RepGuiManager implements Listener {
             return;
         }
         String removalId = clicked.getItemMeta().getPersistentDataContainer()
-                .get(new org.bukkit.NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING);
+                .get(new NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING);
         if (removalId != null) {
             openRestoreConfirm(player, removalId, holder.page());
         }
@@ -605,16 +618,9 @@ public final class RepGuiManager implements Listener {
             return;
         }
         int reviewIndex = REVIEW_SLOTS.indexOf(slot);
-        if (reviewIndex == -1) {
-            return;
-        }
-        List<RepService.SuspiciousRepCase> activeCases = repService.getSuspiciousCases().stream()
-                .filter(caseData -> !caseData.isResolved())
-                .sorted(Comparator.comparingLong(RepService.SuspiciousRepCase::getCreatedAt).reversed())
-                .toList();
-        int absoluteIndex = holder.page() * REVIEW_SLOTS.size() + reviewIndex;
-        if (absoluteIndex >= 0 && absoluteIndex < activeCases.size()) {
-            sendReportDetails(player, activeCases.get(absoluteIndex));
+        RepService.SuspiciousRepCase selected = GuiSnapshotTargets.at(holder.visibleCases(), reviewIndex);
+        if (selected != null) {
+            sendReportDetails(player, selected);
         }
     }
 
@@ -795,7 +801,8 @@ public final class RepGuiManager implements Listener {
     }
 
     private void openRemovalConfirm(Player admin, Commendation commendation, int returnPage, boolean applyCooldown, boolean logRemoval) {
-        Inventory inventory = Bukkit.createInventory(new ConfirmRemovalHolder(commendation.getTarget(), commendation.getGiver(), returnPage, applyCooldown, logRemoval),
+        Inventory inventory = Bukkit.createInventory(
+                new ConfirmRemovalHolder(commendation.snapshot(), returnPage, applyCooldown, logRemoval),
                 27, ChatColor.RED + "Confirm removal");
         fillBackground(inventory, admin);
         inventory.setItem(11, simpleButton(Material.LIME_CONCRETE, ChatColor.GREEN + "Confirm removal", List.of(ChatColor.GRAY + "Delete this rep entry")));
@@ -803,7 +810,7 @@ public final class RepGuiManager implements Listener {
                 List.of(
                         ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
                         ChatColor.GRAY + CATEGORY_LABEL + ChatColor.WHITE + displayName(commendation.getCategory()),
-                        ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue()))
+                        ChatColor.GRAY + "Value: " + coloredValue(commendation.getScoreValue())
                 )));
         inventory.setItem(15, simpleButton(Material.RED_CONCRETE, ChatColor.RED + "Cancel", List.of()));
         admin.openInventory(inventory);
@@ -837,8 +844,9 @@ public final class RepGuiManager implements Listener {
         if (!result.success()) {
             if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
                 player.sendMessage(plugin.getMessages().get("rep.category-invalid", Map.of(
-                        "list", "Was Kind, Helped Me, Gave Items/Money, Trustworthy, Good Stall, "
-                                + "Scammed, Spawn Killed, Griefed, Trapped, Scam Stall")));
+                        "list", RepCategory.selectableValues().stream()
+                                .map(RepCategory::displayName)
+                                .collect(Collectors.joining(", ")))));
             } else {
                 long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
                 player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(
@@ -943,13 +951,13 @@ public final class RepGuiManager implements Listener {
             meta.setDisplayName(ChatColor.YELLOW + removed.id() + ChatColor.GRAY + " - " + repService.nameOf(commendation.getGiver()));
             meta.setLore(List.of(
                     ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
-                    ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue())),
+                    ChatColor.GRAY + "Value: " + coloredValue(commendation.getScoreValue()),
                     ChatColor.GRAY + "Category: " + ChatColor.WHITE + displayName(commendation.getCategory()),
                     ChatColor.GRAY + "Removed: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(removed.removedAt())),
                     ChatColor.GRAY + "By: " + ChatColor.WHITE + (removed.removedBy() != null ? repService.nameOf(removed.removedBy()) : "unknown"),
                     ChatColor.YELLOW + "Click to restore this rep."
             ));
-            meta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING, removed.id());
+            meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING, removed.id());
             item.setItemMeta(meta);
         }
         return item;
@@ -1091,7 +1099,7 @@ public final class RepGuiManager implements Listener {
         if (existing == null) {
             lore.add(ChatColor.GRAY + "Leave a " + (positiveButton ? "positive" : "negative") + " commendation.");
         } else {
-            lore.add(ChatColor.GRAY + "You already left " + (coloredValue(existing.getScoreValue())) + ChatColor.GRAY + ".");
+            lore.add(ChatColor.GRAY + "You already left " + coloredValue(existing.getScoreValue()) + ChatColor.GRAY + ".");
             lore.add(ChatColor.GRAY + CATEGORY_LABEL + ChatColor.YELLOW + displayName(existing.getCategory()));
         }
         if (cooldownMillis > 0L) {
@@ -1144,32 +1152,15 @@ public final class RepGuiManager implements Listener {
     }
 
     private List<RepCategory> positiveCategories() {
-        return List.of(RepCategory.WAS_KIND, RepCategory.HELPED_ME, RepCategory.GAVE_ITEMS, RepCategory.TRUSTWORTHY, RepCategory.GOOD_STALL);
+        return RepCategory.selectableValues().stream().filter(RepCategory::isPositive).toList();
     }
 
     private List<RepCategory> negativeCategories() {
-        return List.of(RepCategory.SCAMMED, RepCategory.SPAWN_KILLED, RepCategory.GRIEFED, RepCategory.TRAPPED, RepCategory.SCAM_STALL);
+        return RepCategory.selectableValues().stream().filter(category -> !category.isPositive()).toList();
     }
 
     private String displayName(RepCategory category) {
-        return CATEGORY_DISPLAY_NAMES.get(category);
-    }
-
-    private static Map<RepCategory, String> categoryDisplayNames() {
-        Map<RepCategory, String> names = new EnumMap<>(RepCategory.class);
-        names.put(RepCategory.WAS_KIND, "Was Kind");
-        names.put(RepCategory.HELPED_ME, "Helped Me");
-        names.put(RepCategory.GAVE_ITEMS, "Gave Items/Money");
-        names.put(RepCategory.TRUSTWORTHY, "Trustworthy");
-        names.put(RepCategory.GOOD_STALL, "Good Stall");
-        names.put(RepCategory.OTHER_POSITIVE, "Other");
-        names.put(RepCategory.SCAMMED, "Scammed");
-        names.put(RepCategory.SPAWN_KILLED, "Spawn Killed");
-        names.put(RepCategory.GRIEFED, "Griefed");
-        names.put(RepCategory.TRAPPED, "Trapped");
-        names.put(RepCategory.SCAM_STALL, "Scam Stall");
-        names.put(RepCategory.OTHER_NEGATIVE, "Other");
-        return names;
+        return category == null ? "Reputation" : category.migratedCategory().displayName();
     }
 
     private List<String> wrapLore(String text, int width, ChatColor color) {
@@ -1278,7 +1269,13 @@ public final class RepGuiManager implements Listener {
     private sealed interface HolderMarker permits ProfileHolder, ReasonHolder, InputChoiceHolder, ConfirmReasonHolder, ConfirmRemovalHolder, RemovedLogHolder, ActiveReportsHolder, ConfirmRestoreHolder {
     }
 
-    private record ProfileHolder(UUID targetId, int page) implements InventoryHolder, HolderMarker {
+    private record ProfileHolder(UUID targetId, RepCategory category, int page,
+                                 List<Commendation> visibleReviews) implements InventoryHolder, HolderMarker {
+        private ProfileHolder {
+            visibleReviews = visibleReviews == null ? List.of()
+                    : visibleReviews.stream().map(Commendation::snapshot).toList();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -1294,7 +1291,12 @@ public final class RepGuiManager implements Listener {
         @Override public Inventory getInventory() { return null; }
     }
 
-    private record ConfirmRemovalHolder(UUID targetId, UUID giverId, int returnPage, boolean applyCooldown, boolean logRemoval) implements InventoryHolder, HolderMarker {
+    private record ConfirmRemovalHolder(Commendation expected, int returnPage,
+                                        boolean applyCooldown, boolean logRemoval) implements InventoryHolder, HolderMarker {
+        private ConfirmRemovalHolder {
+            expected = expected.snapshot();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -1302,13 +1304,21 @@ public final class RepGuiManager implements Listener {
         @Override public Inventory getInventory() { return null; }
     }
 
-    private record ActiveReportsHolder(int page) implements InventoryHolder, HolderMarker {
+    private record ActiveReportsHolder(int page, List<RepService.SuspiciousRepCase> visibleCases)
+            implements InventoryHolder, HolderMarker {
+        private ActiveReportsHolder {
+            visibleCases = visibleCases == null ? List.of()
+                    : visibleCases.stream().map(RepService.SuspiciousRepCase::copy).toList();
+        }
+
         @Override public Inventory getInventory() { return null; }
     }
 
     private record ConfirmRestoreHolder(String removalId, int returnPage) implements InventoryHolder, HolderMarker {
         @Override public Inventory getInventory() { return null; }
     }
+
+    private record ProfileSelectionKey(UUID viewerId, UUID targetId) { }
 
     private record PendingTextInput(UUID targetId, RepCategory category, int returnPage) {
     }

@@ -227,7 +227,7 @@ public final class RepEffectManager implements Listener {
         if (item == null) return;
 
         RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
-        boolean inWarzone = regionManager.resolveZone(player.getLocation()) == RegionManager.ZoneType.WARZONE;
+        boolean inWarzone = regionManager.resolveZone(player.getLocation()) == RegionManager.LogicalZone.WARZONE;
         if (!warzoneDuelsHook.isDuelExempt(player) && inWarzone) {
             if (item.getType() == Material.ENDER_PEARL) {
                 handleCooldownItem(event, player, Material.ENDER_PEARL, effects.pearlCooldownSeconds(),

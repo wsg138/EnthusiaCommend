@@ -35,6 +35,11 @@ rep:
       moveSpeedPlus5PercentAt: 15
       potionDurationPlus10PercentAt: 15
       cashback5PercentAt: 15
+rep-trading-alerts:
+  # Applies only to operators or players granted enthusiacommend.rep.alert.
+  # Authorized administrators without a saved preference inherit this value.
+  enabled-by-default: true
+
 stalk:
   costPerDay: 100.0
   maxDays: 7
@@ -55,11 +60,19 @@ playtime:
   primaryPlaceholder: "%playtime_active%"
   fallbackFormattedPlaceholder: "%playtime_active_formatted%"
 regions:
+  # Stalking-zone precedence is market, then spawn, then warzone; classification uses world and X/Z only.
+  # The Y values remain in the shared cuboid syntax but are ignored by stalking transitions.
+  # Exact untouched legacy spawn/warzone defaults migrate once; custom lists are preserved.
+  # Missing keys, including market, are still added by the normal defaults merger.
+  market:
+    - world: world
+      min: -72, 0, -281
+      max: 102, 256, -162
   spawn:
     - world: world
-      min: -50, 0, -50
-      max: 50, 256, 50
+      min: -48, 0, -33
+      max: 69, 256, 84
   warzone:
     - world: world
-      min: -500, 0, -500
-      max: 500, 256, 500
+      min: -218, 0, -404
+      max: 219, 256, 188

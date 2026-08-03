@@ -1,6 +1,6 @@
 name: EnthusiaCommend
 main: org.enthusia.rep.CommendPlugin
-version: 2.12.0
+version: 2.13.0
 api-version: '1.21'
 author: Enthusia
 depend: [Vault]
@@ -40,7 +40,7 @@ permissions:
     description: Use /rep stalk.
     default: true
   enthusiacommend.rep.alert:
-    description: Receive alerts for suspicious rep activity.
+    description: Use /rep alerts and receive suspicious rep-trading alerts.
     default: op
   enthusiacommend.rep.testpay:
     description: Reserved for economy test hooks.

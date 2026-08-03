@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class YamlPluginDataStore implements PluginDataStore {
-    private static final int DATA_VERSION = 5;
+    private static final int DATA_VERSION = 6;
 
     private final CommendPlugin plugin;
     private final File file;
@@ -43,6 +43,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
         List<ReputationChangeRecord> reputationChanges = new ArrayList<>();
         List<RepService.SuspiciousRepCase> suspiciousCases = new ArrayList<>();
         List<PluginDataSnapshot.RemovalCooldownEntry> removalCooldowns = new ArrayList<>();
+        Map<UUID, Boolean> alertPreferences = new LinkedHashMap<>();
 
         ConfigurationSection players = config.getConfigurationSection("players");
         if (players != null) {
@@ -97,6 +98,20 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
+        ConfigurationSection preferenceSection = config.getConfigurationSection("playerSettings");
+        if (preferenceSection != null) {
+            for (String key : preferenceSection.getKeys(false)) {
+                try {
+                    UUID uuid = UUID.fromString(key);
+                    String path = key + ".repTradingAlertsEnabled";
+                    if (preferenceSection.isSet(path)) {
+                        alertPreferences.put(uuid, preferenceSection.getBoolean(path));
+                    }
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
+
         ConfigurationSection stalkSection = config.getConfigurationSection("stalks");
         if (stalkSection != null) {
             for (String key : stalkSection.getKeys(false)) {
@@ -110,7 +125,8 @@ public final class YamlPluginDataStore implements PluginDataStore {
             }
         }
 
-        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges, suspiciousCases, removalCooldowns);
+        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges,
+                suspiciousCases, removalCooldowns, alertPreferences);
     }
 
     @Override
@@ -154,6 +170,10 @@ public final class YamlPluginDataStore implements PluginDataStore {
             removalCooldowns.add(serialized);
         }
         config.set("removalCooldowns", removalCooldowns);
+
+        for (Map.Entry<UUID, Boolean> entry : snapshot.repTradingAlertPreferences().entrySet()) {
+            config.set("playerSettings." + entry.getKey() + ".repTradingAlertsEnabled", entry.getValue());
+        }
 
         int stalkIndex = 0;
         for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {
