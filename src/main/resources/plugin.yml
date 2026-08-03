@@ -40,7 +40,7 @@ permissions:
     description: Use /rep stalk.
     default: true
   enthusiacommend.rep.alert:
-    description: Receive alerts for suspicious rep activity.
+    description: Use /rep alerts and receive suspicious rep-trading alerts.
     default: op
   enthusiacommend.rep.testpay:
     description: Reserved for economy test hooks.
