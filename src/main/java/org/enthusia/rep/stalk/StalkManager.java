@@ -118,20 +118,26 @@ public final class StalkManager implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
-        if (event instanceof PlayerTeleportEvent) return;
         Location to = event.getTo();
-        if (to == null || sameBlock(event.getFrom(), to)) return;
-        transition(event.getPlayer(), to);
+        StalkMovementRouting.Mode mode = StalkMovementRouting.forMove(
+                event instanceof PlayerTeleportEvent,
+                to == null || sameBlock(event.getFrom(), to));
+        if (mode != StalkMovementRouting.Mode.IGNORE) {
+            observe(event.getPlayer(), to, mode);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
-        if (event.getTo() != null) transition(event.getPlayer(), event.getTo());
+        Location to = event.getTo();
+        if (to == null) return;
+        boolean sameWorld = event.getFrom().getWorld() == to.getWorld();
+        observe(event.getPlayer(), to, StalkMovementRouting.forTeleport(sameWorld));
     }
 
     @EventHandler
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        transition(event.getPlayer(), event.getPlayer().getLocation());
+        observe(event.getPlayer(), event.getPlayer().getLocation(), StalkMovementRouting.forWorldChange());
     }
 
     @EventHandler
@@ -155,14 +161,16 @@ public final class StalkManager implements Listener {
     }
 
     private void initialize(Player player) {
-        lastKnownZones.put(player.getUniqueId(), regionManager.resolveStalkingZone(player.getLocation()));
+        observe(player, player.getLocation(), StalkMovementRouting.Mode.BASELINE);
     }
 
-    private void transition(Player target, Location destination) {
+    private void observe(Player target, Location destination, StalkMovementRouting.Mode mode) {
         UUID targetId = target.getUniqueId();
         RegionManager.LogicalZone next = regionManager.resolveStalkingZone(destination);
-        RegionManager.LogicalZone previous = lastKnownZones.put(targetId, next);
-        if (!StalkZoneTransition.shouldAlert(previous, next)) return;
+        RegionManager.LogicalZone previous = lastKnownZones.get(targetId);
+        StalkMovementRouting.Observation observation = StalkMovementRouting.observe(mode, previous, next);
+        lastKnownZones.put(targetId, observation.rememberedZone());
+        if (!observation.alert()) return;
         notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()
                 + ChatColor.GOLD + " entered Warzone at " + ChatColor.YELLOW
                 + destination.getBlockX() + " " + destination.getBlockY() + " " + destination.getBlockZ());
