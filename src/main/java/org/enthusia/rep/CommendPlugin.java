@@ -95,9 +95,9 @@ public final class CommendPlugin extends JavaPlugin {
                 repConfig,
                 snapshot,
                 this::markDirty,
-                this::handleScoreChanged,
+                playerId -> handleScoreChanged(playerId),
                 analyticsService,
-                this::handleAuditRecord
+                record -> handleAuditRecord(record)
         );
         for (var player : Bukkit.getOnlinePlayers()) {
             repService.rememberName(player.getUniqueId(), player.getName());

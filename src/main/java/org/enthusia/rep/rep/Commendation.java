@@ -125,7 +125,7 @@ public class Commendation {
             String ipHash = section.getString("ipHash", null);
             int scoreValue = section.isSet("scoreValue")
                     ? section.getInt("scoreValue")
-                    : (positive ? 1 : -1);
+                    : positive ? 1 : -1;
             return new Commendation(giver, target, positive, category, reason, createdAt, lastEditedAt, ipHash, scoreValue);
         } catch (Exception ignored) {
             return null;

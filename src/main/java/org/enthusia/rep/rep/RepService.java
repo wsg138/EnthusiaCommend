@@ -35,7 +35,6 @@ import java.util.function.Consumer;
 public final class RepService {
     private static final long ALT_WINDOW_MILLIS = 48L * 60L * 60L * 1000L;
 
-    private final CommendPlugin plugin;
     private final Runnable dirtyMarker;
     private final Consumer<UUID> scoreChangeListener;
     private final ReputationAnalyticsService analyticsService;
@@ -73,7 +72,7 @@ public final class RepService {
             ReputationAnalyticsService analyticsService,
             Consumer<AuditRecord> auditConsumer
     ) {
-        this.plugin = plugin;
+        Objects.requireNonNull(plugin, "plugin");
         this.repConfig = repConfig;
         this.dirtyMarker = dirtyMarker;
         this.scoreChangeListener = scoreChangeListener;
@@ -957,7 +956,7 @@ public final class RepService {
                 long lastEditedAt = raw.get("lastEditedAt") instanceof Number value ? value.longValue() : createdAt;
                 String ipHash = raw.get("ipHash") != null ? raw.get("ipHash").toString() : null;
                 int scoreValue = raw.get("scoreValue") instanceof Number value
-                        ? value.intValue() : (positive ? 1 : -1);
+                        ? value.intValue() : positive ? 1 : -1;
                 long removedAt = raw.get("removedAt") instanceof Number value ? value.longValue() : Instant.now().toEpochMilli();
                 UUID removedBy = raw.get("removedBy") == null ? null : UUID.fromString(String.valueOf(raw.get("removedBy")));
                 Commendation commendation = new Commendation(

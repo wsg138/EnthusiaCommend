@@ -14,7 +14,6 @@ import org.enthusia.rep.util.RepDateFormats;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -78,7 +77,7 @@ public final class PlanReputationResolver implements Resolver {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("generatedAt", System.currentTimeMillis());
         payload.put("summary", summary());
-        payload.put("recentChanges", analytics.recentChanges(40).stream().map(this::changeMap).toList());
+        payload.put("recentChanges", analytics.recentChanges(40).stream().map(change -> changeMap(change)).toList());
         payload.put("players", analytics.recentPlayerActivity(plugin.getRepService().getScoresSnapshot(), ReputationAnalyticsService.sinceDays(30), 20)
                 .stream().map(player -> {
                     Map<String, Object> map = new LinkedHashMap<>();
@@ -98,7 +97,7 @@ public final class PlanReputationResolver implements Resolver {
             map.put("net", signed(reason.net()));
             return map;
         }).toList());
-        payload.put("staffActions", analytics.staffActions(20).stream().map(this::changeMap).toList());
+        payload.put("staffActions", analytics.staffActions(20).stream().map(change -> changeMap(change)).toList());
         return payload;
     }
 

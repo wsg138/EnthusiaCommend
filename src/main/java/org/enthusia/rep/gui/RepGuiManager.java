@@ -47,7 +47,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -594,7 +593,7 @@ public final class RepGuiManager implements Listener {
             return;
         }
         String removalId = clicked.getItemMeta().getPersistentDataContainer()
-                .get(new org.bukkit.NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING);
+                .get(new NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING);
         if (removalId != null) {
             openRestoreConfirm(player, removalId, holder.page());
         }
@@ -808,7 +807,7 @@ public final class RepGuiManager implements Listener {
                 List.of(
                         ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
                         ChatColor.GRAY + CATEGORY_LABEL + ChatColor.WHITE + displayName(commendation.getCategory()),
-                        ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue()))
+                        ChatColor.GRAY + "Value: " + coloredValue(commendation.getScoreValue())
                 )));
         inventory.setItem(15, simpleButton(Material.RED_CONCRETE, ChatColor.RED + "Cancel", List.of()));
         admin.openInventory(inventory);
@@ -949,13 +948,13 @@ public final class RepGuiManager implements Listener {
             meta.setDisplayName(ChatColor.YELLOW + removed.id() + ChatColor.GRAY + " - " + repService.nameOf(commendation.getGiver()));
             meta.setLore(List.of(
                     ChatColor.GRAY + "Target: " + ChatColor.WHITE + repService.nameOf(commendation.getTarget()),
-                    ChatColor.GRAY + "Value: " + (coloredValue(commendation.getScoreValue())),
+                    ChatColor.GRAY + "Value: " + coloredValue(commendation.getScoreValue()),
                     ChatColor.GRAY + "Category: " + ChatColor.WHITE + displayName(commendation.getCategory()),
                     ChatColor.GRAY + "Removed: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(removed.removedAt())),
                     ChatColor.GRAY + "By: " + ChatColor.WHITE + (removed.removedBy() != null ? repService.nameOf(removed.removedBy()) : "unknown"),
                     ChatColor.YELLOW + "Click to restore this rep."
             ));
-            meta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING, removed.id());
+            meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "rep-removed-id"), PersistentDataType.STRING, removed.id());
             item.setItemMeta(meta);
         }
         return item;
@@ -1097,7 +1096,7 @@ public final class RepGuiManager implements Listener {
         if (existing == null) {
             lore.add(ChatColor.GRAY + "Leave a " + (positiveButton ? "positive" : "negative") + " commendation.");
         } else {
-            lore.add(ChatColor.GRAY + "You already left " + (coloredValue(existing.getScoreValue())) + ChatColor.GRAY + ".");
+            lore.add(ChatColor.GRAY + "You already left " + coloredValue(existing.getScoreValue()) + ChatColor.GRAY + ".");
             lore.add(ChatColor.GRAY + CATEGORY_LABEL + ChatColor.YELLOW + displayName(existing.getCategory()));
         }
         if (cooldownMillis > 0L) {

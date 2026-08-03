@@ -8,7 +8,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Objects;
-import java.util.logging.Level;
 
 /**
  * Wrapper around GlowingEntities to avoid scoreboard/team conflicts (e.g., TAB).
