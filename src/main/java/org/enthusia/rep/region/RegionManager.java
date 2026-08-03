@@ -52,18 +52,28 @@ public final class RegionManager {
             if (world == null) {
                 continue;
             }
-            int[] min = parseCoord(String.valueOf(map.get("min")));
-            int[] max = parseCoord(String.valueOf(map.get("max")));
-            if (min == null || max == null) {
-                continue;
+            CuboidRegion region = parseRegion(worldName, map.get("min"), map.get("max"));
+            if (region != null) {
+                out.add(region);
             }
-            out.add(new CuboidRegion(worldName,
-                    Math.min(min[0], max[0]), Math.min(min[1], max[1]), Math.min(min[2], max[2]),
-                    Math.max(min[0], max[0]), Math.max(min[1], max[1]), Math.max(min[2], max[2])));
         }
     }
 
-    private int[] parseCoord(String value) {
+    static CuboidRegion parseRegion(String worldName, Object minimum, Object maximum) {
+        if (worldName == null || worldName.isBlank() || minimum == null || maximum == null) {
+            return null;
+        }
+        int[] min = parseCoord(String.valueOf(minimum));
+        int[] max = parseCoord(String.valueOf(maximum));
+        if (min == null || max == null) {
+            return null;
+        }
+        return new CuboidRegion(worldName,
+                Math.min(min[0], max[0]), Math.min(min[1], max[1]), Math.min(min[2], max[2]),
+                Math.max(min[0], max[0]), Math.max(min[1], max[1]), Math.max(min[2], max[2]));
+    }
+
+    private static int[] parseCoord(String value) {
         String[] parts = value.split(",");
         if (parts.length != 3) return null;
         try {
