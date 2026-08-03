@@ -26,12 +26,20 @@ class RegionDefaultsTest {
     }
 
     @Test
-    void horizontalDefaultsResolveOverlapsWithRequiredPrecedenceAtAnyHeight() {
+    void defaultsResolveGeneralAndStalkingOverlapsAtAnyHeight() {
         Regions regions = loadRegions();
-        assertEquals(RegionManager.LogicalZone.MARKET, resolve(regions, 0, -200));
-        assertEquals(RegionManager.LogicalZone.SPAWN, resolve(regions, 0, 0));
-        assertEquals(RegionManager.LogicalZone.WARZONE, resolve(regions, 200, 100));
-        assertEquals(RegionManager.LogicalZone.WILDERNESS, resolve(regions, 300, 300));
+
+        assertEquals(RegionManager.LogicalZone.WARZONE, resolveGeneral(regions, 0, -200));
+        assertEquals(RegionManager.LogicalZone.MARKET, resolveStalking(regions, 0, -200));
+
+        assertEquals(RegionManager.LogicalZone.SPAWN, resolveGeneral(regions, 0, 0));
+        assertEquals(RegionManager.LogicalZone.SPAWN, resolveStalking(regions, 0, 0));
+
+        assertEquals(RegionManager.LogicalZone.WARZONE, resolveGeneral(regions, 200, 100));
+        assertEquals(RegionManager.LogicalZone.WARZONE, resolveStalking(regions, 200, 100));
+
+        assertEquals(RegionManager.LogicalZone.WILDERNESS, resolveGeneral(regions, 300, 300));
+        assertEquals(RegionManager.LogicalZone.WILDERNESS, resolveStalking(regions, 300, 300));
     }
 
     @Test
@@ -72,8 +80,15 @@ class RegionDefaultsTest {
         assertFalse(region.containsHorizontally("different-world", minX, minZ));
     }
 
-    private RegionManager.LogicalZone resolve(Regions regions, int x, int z) {
-        return LogicalZoneResolver.resolve(
+    private RegionManager.LogicalZone resolveGeneral(Regions regions, int x, int z) {
+        return LogicalZoneResolver.resolveGeneral(
+                regions.spawn().containsHorizontally(WORLD, x, z),
+                regions.warzone().containsHorizontally(WORLD, x, z),
+                true);
+    }
+
+    private RegionManager.LogicalZone resolveStalking(Regions regions, int x, int z) {
+        return LogicalZoneResolver.resolveStalking(
                 regions.market().containsHorizontally(WORLD, x, z),
                 regions.spawn().containsHorizontally(WORLD, x, z),
                 regions.warzone().containsHorizontally(WORLD, x, z),
