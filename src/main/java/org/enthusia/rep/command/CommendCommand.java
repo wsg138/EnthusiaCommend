@@ -14,6 +14,7 @@ import org.enthusia.rep.analytics.ReputationChangeRecord;
 import org.enthusia.rep.rep.Commendation;
 import org.enthusia.rep.rep.RepCategory;
 import org.enthusia.rep.rep.RepService;
+import org.enthusia.rep.rep.RepTradingAlertAccess;
 import org.enthusia.rep.stalk.StalkSubscription;
 import org.enthusia.rep.util.RepDateFormats;
 
@@ -34,8 +35,8 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     private static final int PAGE_SIZE = 10;
     private static final long MILLIS_PER_DAY = 24L * 60L * 60L * 1000L;
     private static final long MILLIS_PER_HOUR = 60L * 60L * 1000L;
-    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "reviews", "stalk", "give", "alerts");
-    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "reviews", "stalk", "give", "alerts");
+    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "reviews", "stalk", "give");
+    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "reviews", "stalk", "give");
     private static final List<String> ADMIN_SUBCOMMANDS = List.of(
             "reload", "help", "get", "set", "add", "revoke", "remove", "reset", "history",
             "inspect", "resolve", "reports", "removed", "restore", "undo");
@@ -50,6 +51,18 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     public CommendCommand(CommendPlugin plugin, RepService repService) {
         this.plugin = plugin;
         this.repService = repService;
+    }
+
+    static boolean canUseTradingAlerts(CommandSender sender) {
+        return RepTradingAlertAccess.isAuthorized(sender);
+    }
+
+    static List<String> rootSubcommands(CommandSender sender) {
+        List<String> roots = new ArrayList<>(sender.hasPermission(PERMISSION_ADMIN) ? ADMIN_ROOTS : PLAYER_ROOTS);
+        if (canUseTradingAlerts(sender)) {
+            roots.add("alerts");
+        }
+        return List.copyOf(roots);
     }
 
     @Override
@@ -220,6 +233,10 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleAlerts(CommandSender sender) {
+        if (!canUseTradingAlerts(sender)) {
+            sender.sendMessage(plugin.getMessages().get("rep.no-permission"));
+            return true;
+        }
         if (!(sender instanceof Player player)) {
             sender.sendMessage(ChatColor.RED + "Players only.");
             return true;
@@ -516,6 +533,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
 
     private void sendAdminHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== Rep Admin Commands ===");
+        sender.sendMessage(ChatColor.YELLOW + "/rep alerts (toggle your suspicious rep-trading alerts)");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin reload");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin get <player>");
         sender.sendMessage(ChatColor.YELLOW + "/rep admin set <player> <score>");
@@ -597,7 +615,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         List<String> result = new ArrayList<>();
         if (!command.getName().equalsIgnoreCase("rep")) return result;
         if (args.length == 1) {
-            addMatches(result, args[0], sender.hasPermission(PERMISSION_ADMIN) ? ADMIN_ROOTS : PLAYER_ROOTS);
+            addMatches(result, args[0], rootSubcommands(sender));
             addOnlinePlayers(result, args[0]);
         } else if (args.length == 2 && args[0].equalsIgnoreCase("admin") && sender.hasPermission(PERMISSION_ADMIN)) {
             addMatches(result, args[1], ADMIN_SUBCOMMANDS);
