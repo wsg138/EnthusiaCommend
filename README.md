@@ -33,9 +33,11 @@ The deployable jar is created under `target/EnthusiaCommend-<version>.jar`.
 
 `/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
 
-## Personal rep-trading alerts
+## Administrative rep-trading alerts
 
-`/rep alerts` toggles whether the executing player receives suspicious rep-trading alerts. The default is controlled by `rep-trading-alerts.enabled-by-default` (default `true`). Explicit UUID choices are stored under `playerSettings.<uuid>.repTradingAlertsEnabled` in `data.yml` and are not overwritten by config reloads.
+`/rep alerts` is an administrative moderation toggle. It is available only to operators or players granted `enthusiacommend.rep.alert`; the same permission is required when an alert is delivered. The permission defaults to `op`.
+
+`rep-trading-alerts.enabled-by-default` remains `true`, but it applies only to authorized administrators. An authorized administrator with no explicit choice receives alerts, `/rep alerts` toggles that administrator's personal preference, and the UUID-keyed choice persists under `playerSettings.<uuid>.repTradingAlertsEnabled` in `data.yml`. Losing the permission immediately prevents command access and delivery without erasing the saved preference; regaining it restores the existing saved choice. One administrator's preference does not affect another administrator.
 
 ## Stalking logical zones
 
@@ -45,7 +47,27 @@ The stalking transition resolver does not use WorldGuard region IDs. It uses the
 - `regions.spawn`
 - `regions.warzone`
 
-Each cuboid entry uses `world`, `min`, and `max`, with coordinates written as comma-separated `x, y, z` values. Configure the market cuboid even when it is physically nested inside the broad warzone cuboid. Resolution precedence is **MARKET → SPAWN → WARZONE → WILDERNESS**; locations in worlds without any configured cuboid resolve to `OTHER`. A stalking alert is sent only when the resolved destination becomes `WARZONE` and the prior resolved zone was `MARKET`, `SPAWN`, or `WILDERNESS`. Login, respawn, and reload establish a baseline without alerting.
+Each cuboid entry uses `world`, `min`, and `max`, with coordinates written as comma-separated `x, y, z` values. Fresh configurations include these production X/Z defaults while preserving the existing Y contract:
+
+```yaml
+regions:
+  market:
+    - world: world
+      min: -72, 0, -281
+      max: 102, 256, -162
+  spawn:
+    - world: world
+      min: -48, 0, -33
+      max: 69, 256, 84
+  warzone:
+    - world: world
+      min: -218, 0, -404
+      max: 219, 256, 188
+```
+
+Existing configured region lists are not overwritten during updates; the plugin's default merger adds only missing keys. Configuration reload reparses the current region lists.
+
+Resolution precedence is **MARKET → SPAWN → WARZONE → WILDERNESS**; locations in worlds without any configured cuboid resolve to `OTHER`. The market and spawn defaults overlap the broader warzone, but still resolve as `MARKET` and `SPAWN`. A stalking alert is sent only when the resolved destination becomes `WARZONE` and the prior resolved zone was `MARKET`, `SPAWN`, or `WILDERNESS`. Login, respawn, and reload establish a baseline without alerting.
 
 ## Discord reputation webhook
 
