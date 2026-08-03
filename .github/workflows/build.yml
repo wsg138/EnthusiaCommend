@@ -17,6 +17,8 @@ jobs:
           cache: maven
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
+      - name: PMD
+        run: mvn --batch-mode --no-transfer-progress org.apache.maven.plugins:maven-pmd-plugin:3.26.0:pmd
       - name: Upload plugin jar
         uses: actions/upload-artifact@v4
         with:
