@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/upload-artifact@v4
+      - name: Upload repository source for local verification
+        uses: actions/upload-artifact@v4
         with:
           name: source-export
           path: |
