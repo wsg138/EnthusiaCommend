@@ -67,7 +67,9 @@ regions:
 
 The normal defaults merger still adds missing keys such as `regions.market`. On startup or reload, a spawn or warzone list is migrated only when it exactly matches the old shipped single-cuboid default (`-50..50` spawn or `-500..500` warzone in `world`). Custom worlds, coordinates, extra keys, and multi-cuboid lists are preserved. The migration is idempotent and the saved configuration is reparsed immediately.
 
-Resolution precedence is **MARKET → SPAWN → WARZONE → WILDERNESS**; locations in worlds without any configured cuboid resolve to `OTHER`. The market and spawn defaults overlap the broader warzone, but still resolve as `MARKET` and `SPAWN` at any height. Completed move and teleport transitions are observed at Bukkit `MONITOR` priority with cancelled events ignored. A stalking alert is sent only when the final destination becomes `WARZONE` and the prior resolved zone was `MARKET`, `SPAWN`, or `WILDERNESS`. Login, respawn, world change, and reload establish or reconcile state without alerting.
+General gameplay classification uses **SPAWN → WARZONE → WILDERNESS** in managed worlds. `MARKET` is not returned by the general resolver, so market coordinates inside the broad warzone remain `WARZONE` for pearl, wind-charge, and other existing gameplay effects. Stalking classification separately uses **MARKET → SPAWN → WARZONE → WILDERNESS**; unmanaged worlds resolve to `OTHER` in both classifications.
+
+Completed same-world move and teleport transitions are observed at Bukkit `MONITOR` priority with cancelled events ignored. The regular move listener excludes teleport events so a teleport is processed only once. Cross-world teleports, `PlayerChangedWorldEvent`, login, respawn, reload, and initialization establish a new stalking baseline without alerting. A later genuine same-world transition from `MARKET`, `SPAWN`, or `WILDERNESS` into `WARZONE` alerts once.
 
 ## Discord reputation webhook
 
