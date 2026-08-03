@@ -26,10 +26,11 @@ public class CuboidRegion {
 
     public boolean contains(Location loc) {
         if (loc == null || loc.getWorld() == null) return false;
-        if (!loc.getWorld().getName().equals(worldName)) return false;
-        int x = loc.getBlockX();
-        int y = loc.getBlockY();
-        int z = loc.getBlockZ();
+        return contains(loc.getWorld().getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
+    }
+
+    public boolean contains(String locationWorld, int x, int y, int z) {
+        if (locationWorld == null || !locationWorld.equals(worldName)) return false;
         return x >= minX && x <= maxX
                 && y >= minY && y <= maxY
                 && z >= minZ && z <= maxZ;
