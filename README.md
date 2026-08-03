@@ -21,6 +21,12 @@ Reputation and commendation plugin for Enthusia SMP, targeting Java 21 and Paper
 mvn --batch-mode --no-transfer-progress clean verify
 ```
 
+To reproduce the Java static-analysis report used for pull-request review:
+
+```bash
+mvn --batch-mode --no-transfer-progress org.apache.maven.plugins:maven-pmd-plugin:3.26.0:pmd
+```
+
 The deployable jar is created under `target/EnthusiaCommend-<version>.jar`.
 
 ## Reputation category views
