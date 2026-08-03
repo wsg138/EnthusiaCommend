@@ -107,7 +107,6 @@ public final class RepLeaderboardGui implements Listener {
     }
 
     private ItemStack playerItem(UUID playerId, int value, int rank, RepCategory category) {
-        OfflinePlayer player = Bukkit.getOfflinePlayer(playerId);
         ItemStack item = HeadUtil.createPlayerHead(plugin, playerId, ChatColor.GOLD + repService.nameOf(playerId));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
