@@ -85,13 +85,13 @@ public final class RegionManager {
 
     public LogicalZone resolveZone(Location location) {
         boolean managed = isManaged(location);
-        return LogicalZoneResolver.resolve(isInMarket(location), isInSpawn(location), isInWarzone(location), managed);
+        return LogicalZoneResolver.resolveGeneral(isInSpawn(location), isInWarzone(location), managed);
     }
 
     /** Stalking zones are intentionally horizontal and ignore the configured Y coordinates. */
     public LogicalZone resolveStalkingZone(Location location) {
         boolean managed = isManaged(location);
-        return LogicalZoneResolver.resolve(
+        return LogicalZoneResolver.resolveStalking(
                 containsHorizontally(marketRegions, location),
                 containsHorizontally(spawnRegions, location),
                 containsHorizontally(warzoneRegions, location),
@@ -104,7 +104,7 @@ public final class RegionManager {
 
     public boolean isInSpawnOrWarzone(Location location) {
         LogicalZone zone = resolveZone(location);
-        return zone == LogicalZone.SPAWN || zone == LogicalZone.MARKET || zone == LogicalZone.WARZONE;
+        return zone == LogicalZone.SPAWN || zone == LogicalZone.WARZONE;
     }
 
     private boolean isManaged(Location location) {
