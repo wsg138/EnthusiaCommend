@@ -1,7 +1,6 @@
 name: Apply and verify reputation improvement
 on:
-  push:
-    branches: [agent/reputation-category-zones-alerts-webhook]
+  pull_request:
 permissions:
   contents: write
 jobs:
