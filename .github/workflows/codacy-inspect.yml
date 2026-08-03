@@ -6,9 +6,24 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Fetch public Codacy findings
+      - name: Wait for and print public Codacy findings
         run: |
-          curl --fail --silent --show-error \
-            'https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaCommend/pull-requests/8/issues' \
-            | python -m json.tool
+          endpoint='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaCommend/pull-requests/8/issues'
+          for attempt in $(seq 1 60); do
+            curl --fail --silent --show-error "$endpoint" > /tmp/codacy.json
+            if python - <<'PY'
+          import json
+          with open('/tmp/codacy.json', encoding='utf-8') as handle:
+              raise SystemExit(0 if json.load(handle).get('analyzed') else 1)
+          PY
+            then
+              python -m json.tool /tmp/codacy.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Codacy did not finish analysis before the polling window closed.' >&2
+          python -m json.tool /tmp/codacy.json
+          exit 1
