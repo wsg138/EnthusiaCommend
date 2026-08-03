@@ -116,7 +116,7 @@ public final class StalkManager implements Listener {
         initialize(event.getPlayer());
     }
 
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
         if (event instanceof PlayerTeleportEvent) return;
         Location to = event.getTo();
@@ -124,7 +124,7 @@ public final class StalkManager implements Listener {
         transition(event.getPlayer(), to);
     }
 
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
         if (event.getTo() != null) transition(event.getPlayer(), event.getTo());
     }
@@ -155,12 +155,12 @@ public final class StalkManager implements Listener {
     }
 
     private void initialize(Player player) {
-        lastKnownZones.put(player.getUniqueId(), regionManager.resolveZone(player.getLocation()));
+        lastKnownZones.put(player.getUniqueId(), regionManager.resolveStalkingZone(player.getLocation()));
     }
 
     private void transition(Player target, Location destination) {
         UUID targetId = target.getUniqueId();
-        RegionManager.LogicalZone next = regionManager.resolveZone(destination);
+        RegionManager.LogicalZone next = regionManager.resolveStalkingZone(destination);
         RegionManager.LogicalZone previous = lastKnownZones.put(targetId, next);
         if (!StalkZoneTransition.shouldAlert(previous, next)) return;
         notifyStalkers(targetId, ChatColor.GOLD + "[Stalk] " + ChatColor.YELLOW + target.getName()

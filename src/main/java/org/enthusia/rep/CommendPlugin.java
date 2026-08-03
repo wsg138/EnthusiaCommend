@@ -285,7 +285,6 @@ public final class CommendPlugin extends JavaPlugin {
 
     private void handleAuditRecord(RepService.AuditRecord record) {
         if (record == null || discordWebhookService == null || !discordWebhookService.isEnabled()) return;
-        if (record.action() != RepService.AuditAction.CREATED && record.action() != RepService.AuditAction.UPDATED) return;
         if (!Bukkit.isPrimaryThread()) {
             Bukkit.getScheduler().runTask(this, () -> handleAuditRecord(record));
             return;
@@ -293,13 +292,30 @@ public final class CommendPlugin extends JavaPlugin {
         var commendation = record.commendation();
         String giverName = repService.nameOf(commendation.getGiver());
         String targetName = repService.nameOf(commendation.getTarget());
+        DiscordWebhookService.Action action = switch (record.action()) {
+            case CREATED -> DiscordWebhookService.Action.CREATED;
+            case UPDATED -> DiscordWebhookService.Action.UPDATED;
+            case REMOVED -> DiscordWebhookService.Action.REMOVED;
+            case RESTORED -> DiscordWebhookService.Action.RESTORED;
+        };
+        String actorName = record.actorName();
+        if (actorName == null || actorName.isBlank()) {
+            actorName = action == DiscordWebhookService.Action.CREATED
+                    || action == DiscordWebhookService.Action.UPDATED ? giverName : "Administrator";
+        }
+        java.util.UUID thumbnailId = action == DiscordWebhookService.Action.CREATED
+                || action == DiscordWebhookService.Action.UPDATED
+                ? commendation.getGiver() : record.actorId();
+        String thumbnailUrl = thumbnailId == null ? null : MinecraftHeadUrl.resolve(thumbnailId, actorName);
         discordWebhookService.log(new DiscordWebhookService.LogEntry(
+                action,
+                actorName,
                 giverName,
                 targetName,
                 commendation.getCategory(),
                 commendation.getReasonText(),
                 Instant.ofEpochMilli(record.timestamp()),
-                MinecraftHeadUrl.resolve(commendation.getGiver(), giverName)
+                thumbnailUrl
         ));
     }
 

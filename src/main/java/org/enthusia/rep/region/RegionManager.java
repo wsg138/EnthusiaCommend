@@ -1,10 +1,9 @@
 package org.enthusia.rep.region;
 
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.config.LegacyRegionConfigMigration;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -23,6 +22,11 @@ public final class RegionManager {
     }
 
     public void reload(FileConfiguration config, CommendPlugin plugin) {
+        if (LegacyRegionConfigMigration.migrate(config)) {
+            plugin.saveConfig();
+            plugin.getLogger().info("Migrated untouched legacy spawn/warzone region defaults.");
+        }
+
         List<CuboidRegion> market = new ArrayList<>();
         List<CuboidRegion> spawn = new ArrayList<>();
         List<CuboidRegion> warzone = new ArrayList<>();
@@ -48,10 +52,6 @@ public final class RegionManager {
                 continue;
             }
             String worldName = String.valueOf(map.get("world"));
-            World world = Bukkit.getWorld(worldName);
-            if (world == null) {
-                continue;
-            }
             CuboidRegion region = parseRegion(worldName, map.get("min"), map.get("max"));
             if (region != null) {
                 out.add(region);
@@ -84,9 +84,18 @@ public final class RegionManager {
     }
 
     public LogicalZone resolveZone(Location location) {
-        boolean managed = location != null && location.getWorld() != null
-                && managedWorlds.contains(location.getWorld().getName());
+        boolean managed = isManaged(location);
         return LogicalZoneResolver.resolve(isInMarket(location), isInSpawn(location), isInWarzone(location), managed);
+    }
+
+    /** Stalking zones are intentionally horizontal and ignore the configured Y coordinates. */
+    public LogicalZone resolveStalkingZone(Location location) {
+        boolean managed = isManaged(location);
+        return LogicalZoneResolver.resolve(
+                containsHorizontally(marketRegions, location),
+                containsHorizontally(spawnRegions, location),
+                containsHorizontally(warzoneRegions, location),
+                managed);
     }
 
     public boolean isInMarket(Location location) { return contains(marketRegions, location); }
@@ -98,10 +107,23 @@ public final class RegionManager {
         return zone == LogicalZone.SPAWN || zone == LogicalZone.MARKET || zone == LogicalZone.WARZONE;
     }
 
+    private boolean isManaged(Location location) {
+        return location != null && location.getWorld() != null
+                && managedWorlds.contains(location.getWorld().getName());
+    }
+
     private boolean contains(List<CuboidRegion> regions, Location location) {
         if (location == null) return false;
         for (CuboidRegion region : regions) {
             if (region.contains(location)) return true;
+        }
+        return false;
+    }
+
+    private boolean containsHorizontally(List<CuboidRegion> regions, Location location) {
+        if (location == null) return false;
+        for (CuboidRegion region : regions) {
+            if (region.containsHorizontally(location)) return true;
         }
         return false;
     }

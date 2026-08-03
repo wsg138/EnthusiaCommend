@@ -60,8 +60,10 @@ playtime:
   primaryPlaceholder: "%playtime_active%"
   fallbackFormattedPlaceholder: "%playtime_active_formatted%"
 regions:
-  # Logical precedence is market, then spawn, then warzone; outside these cuboids in a managed world is wilderness.
-  # Existing configured lists are retained during updates; these values are fresh-install and missing-key defaults.
+  # Stalking-zone precedence is market, then spawn, then warzone; classification uses world and X/Z only.
+  # The Y values remain in the shared cuboid syntax but are ignored by stalking transitions.
+  # Exact untouched legacy spawn/warzone defaults migrate once; custom lists are preserved.
+  # Missing keys, including market, are still added by the normal defaults merger.
   market:
     - world: world
       min: -72, 0, -281

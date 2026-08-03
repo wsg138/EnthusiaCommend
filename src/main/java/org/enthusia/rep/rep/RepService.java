@@ -325,11 +325,16 @@ public final class RepService {
     }
 
     public List<Map.Entry<UUID, Integer>> leaderboard(RepCategory category, boolean lowest) {
-        Set<UUID> players = new LinkedHashSet<>(scoreByPlayer.keySet());
-        players.addAll(commendationsByTarget.keySet());
         Map<UUID, Integer> values = new LinkedHashMap<>();
-        for (UUID playerId : players) {
-            values.put(playerId, category == null ? getScore(playerId) : getCategoryScore(playerId, category));
+        if (category == null) {
+            Set<UUID> players = new LinkedHashSet<>(scoreByPlayer.keySet());
+            players.addAll(commendationsByTarget.keySet());
+            for (UUID playerId : players) {
+                values.put(playerId, getScore(playerId));
+            }
+        } else {
+            values.putAll(RepLeaderboardPopulation.categoryTotals(
+                    recentCommendations(Integer.MAX_VALUE), category));
         }
         return RepLeaderboardSorter.sort(values, lowest);
     }
@@ -487,7 +492,9 @@ public final class RepService {
                 existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
         rebuildAntiAbuseIndex();
         dirtyMarker.run();
-        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta, getScore(targetId), System.currentTimeMillis()));
+        String actorName = actorId == null ? (logRemoval ? "Console" : "System") : nameOf(actorId);
+        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta,
+                getScore(targetId), System.currentTimeMillis(), actorId, actorName));
         return removedRep;
     }
 
@@ -631,7 +638,10 @@ public final class RepService {
         }
         rebuildAntiAbuseIndex();
         dirtyMarker.run();
-        auditConsumer.accept(new AuditRecord(AuditAction.RESTORED, cloneCommendation(restored), delta, getScore(restored.getTarget()), System.currentTimeMillis()));
+        UUID auditActorId = actor instanceof Player player ? player.getUniqueId() : null;
+        String auditActorName = actor == null ? "System" : actor.getName();
+        auditConsumer.accept(new AuditRecord(AuditAction.RESTORED, cloneCommendation(restored), delta,
+                getScore(restored.getTarget()), System.currentTimeMillis(), auditActorId, auditActorName));
         return true;
     }
 
@@ -803,7 +813,12 @@ public final class RepService {
     private record AltRepRecord(UUID giverId, UUID targetId, boolean positive, long timestamp, String ipHash) {
     }
 
-    public record AuditRecord(AuditAction action, Commendation commendation, int scoreDelta, int newTotal, long timestamp) {
+    public record AuditRecord(AuditAction action, Commendation commendation, int scoreDelta,
+                              int newTotal, long timestamp, UUID actorId, String actorName) {
+        public AuditRecord(AuditAction action, Commendation commendation, int scoreDelta,
+                           int newTotal, long timestamp) {
+            this(action, commendation, scoreDelta, newTotal, timestamp, null, null);
+        }
     }
 
     public enum AuditAction {

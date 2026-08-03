@@ -78,11 +78,17 @@ public final class DiscordWebhookService implements AutoCloseable {
     }
 
     static String toJson(LogEntry entry) {
+        Action action = entry.action() == null ? Action.CREATED : entry.action();
+        String actor = singleLine(entry.actorName(), 64, "Administrator");
         String giver = singleLine(entry.giverName(), 64, "Unknown player");
         String target = singleLine(entry.targetName(), 64, "Unknown player");
         String category = singleLine(entry.category() == null ? "Reputation" : entry.category().displayName(), 128, "Reputation");
         String reason = singleLine(entry.reason(), 3500, "");
-        String firstLine = giver + " repped " + target;
+        String firstLine = switch (action) {
+            case CREATED, UPDATED -> giver + " repped " + target;
+            case REMOVED -> actor + " removed reputation from " + target;
+            case RESTORED -> actor + " restored reputation for " + target;
+        };
         String secondLine = reason.isBlank() ? category : category + " • " + reason;
         String description = truncate(firstLine + "\n" + secondLine, DESCRIPTION_LIMIT);
         int color = entry.category() != null && !entry.category().isPositive() ? 0xED4245 : 0x57F287;
@@ -151,6 +157,18 @@ public final class DiscordWebhookService implements AutoCloseable {
         }
     }
 
-    public record LogEntry(String giverName, String targetName, RepCategory category,
-                           String reason, Instant timestamp, String thumbnailUrl) { }
+    public record LogEntry(Action action, String actorName, String giverName, String targetName,
+                           RepCategory category, String reason, Instant timestamp, String thumbnailUrl) {
+        public LogEntry(String giverName, String targetName, RepCategory category,
+                        String reason, Instant timestamp, String thumbnailUrl) {
+            this(Action.CREATED, giverName, giverName, targetName, category, reason, timestamp, thumbnailUrl);
+        }
+    }
+
+    public enum Action {
+        CREATED,
+        UPDATED,
+        REMOVED,
+        RESTORED
+    }
 }

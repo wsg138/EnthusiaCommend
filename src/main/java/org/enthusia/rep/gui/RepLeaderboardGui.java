@@ -59,6 +59,9 @@ public final class RepLeaderboardGui implements Listener {
         fillBackground(inventory);
         RepCategoryGuiSupport.renderSelectors(inventory, RepCategoryGuiSupport.LEADERBOARD_SELECTOR_SLOTS,
                 repService, viewer.getUniqueId(), category, "Your total");
+        if (entries.isEmpty()) {
+            inventory.setItem(22, button(Material.BARRIER, emptyStateLabel(category)));
+        }
 
         int start = resolvedPage * ENTRY_SLOTS.size();
         for (int index = 0; index < ENTRY_SLOTS.size() && start + index < entries.size(); index++) {
@@ -119,6 +122,12 @@ public final class RepLeaderboardGui implements Listener {
             item.setItemMeta(meta);
         }
         return item;
+    }
+
+    static String emptyStateLabel(RepCategory category) {
+        return category == null
+                ? ChatColor.YELLOW + "No reputation entries yet."
+                : ChatColor.YELLOW + "No entries in this category.";
     }
 
     private void fillBackground(Inventory inventory) {

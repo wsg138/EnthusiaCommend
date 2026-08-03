@@ -6,13 +6,17 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.logging.Logger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DiscordWebhookServiceTest {
     @Test
-    void compactEmbedContainsReasonTimestampAndHeadWithoutRemovedFields() {
+    void compactNormalEmbedContainsReasonTimestampAndHeadWithoutRemovedFields() {
         String json = DiscordWebhookService.toJson(new DiscordWebhookService.LogEntry(
-                "P2wn", "ExamplePlayer", RepCategory.HELPED_ME, "Helped recover lost items",
+                DiscordWebhookService.Action.CREATED, "P2wn", "P2wn", "ExamplePlayer",
+                RepCategory.HELPED_ME, "Helped recover lost items",
                 Instant.parse("2026-08-03T01:00:00Z"), "https://mc-heads.net/avatar/test/64"));
         assertTrue(json.contains("P2wn repped ExamplePlayer\\nHelped Me • Helped recover lost items"));
         assertTrue(json.contains("2026-08-03T01:00:00Z"));
@@ -20,6 +24,22 @@ class DiscordWebhookServiceTest {
         assertFalse(json.contains("Action"));
         assertFalse(json.contains("New Total"));
         assertFalse(json.contains("Value"));
+    }
+
+    @Test
+    void compactRemovalAndRestorationNameTheActorAndAffectedPlayer() {
+        String removed = DiscordWebhookService.toJson(new DiscordWebhookService.LogEntry(
+                DiscordWebhookService.Action.REMOVED, "Admin", "Giver", "ExamplePlayer",
+                RepCategory.SCAMMED, "Invalid or abusive reputation entry", Instant.EPOCH, null));
+        assertTrue(removed.contains("Admin removed reputation from ExamplePlayer\\n"
+                + "Scammed • Invalid or abusive reputation entry"));
+        assertFalse(removed.contains("REMOVED"));
+
+        String restored = DiscordWebhookService.toJson(new DiscordWebhookService.LogEntry(
+                DiscordWebhookService.Action.RESTORED, "Admin", "Giver", "ExamplePlayer",
+                RepCategory.HELPED_ME, "", Instant.EPOCH, null));
+        assertTrue(restored.contains("Admin restored reputation for ExamplePlayer\\nHelped Me"));
+        assertFalse(restored.contains(" • "));
     }
 
     @Test

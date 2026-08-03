@@ -31,7 +31,7 @@ The deployable jar is created under `target/EnthusiaCommend-<version>.jar`.
 
 ## Reputation category views
 
-`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
+`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. Overall views retain the overall leaderboard population; category views include only players with an actual record in that category, including records whose values total zero. Sorting, ranks, clicks, and pagination all use that filtered population, and empty categories show an explicit empty state. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
 
 ## Administrative rep-trading alerts
 
@@ -47,7 +47,7 @@ The stalking transition resolver does not use WorldGuard region IDs. It uses the
 - `regions.spawn`
 - `regions.warzone`
 
-Each cuboid entry uses `world`, `min`, and `max`, with coordinates written as comma-separated `x, y, z` values. Fresh configurations include these production X/Z defaults while preserving the existing Y contract:
+Each cuboid entry uses `world`, `min`, and `max`, with coordinates written as comma-separated `x, y, z` values. Stalking classification uses the configured world plus X/Z only; Y remains in the shared cuboid syntax for compatibility with other 3D region consumers. Fresh configurations include these production X/Z defaults:
 
 ```yaml
 regions:
@@ -65,9 +65,9 @@ regions:
       max: 219, 256, 188
 ```
 
-Existing configured region lists are not overwritten during updates; the plugin's default merger adds only missing keys. Configuration reload reparses the current region lists.
+The normal defaults merger still adds missing keys such as `regions.market`. On startup or reload, a spawn or warzone list is migrated only when it exactly matches the old shipped single-cuboid default (`-50..50` spawn or `-500..500` warzone in `world`). Custom worlds, coordinates, extra keys, and multi-cuboid lists are preserved. The migration is idempotent and the saved configuration is reparsed immediately.
 
-Resolution precedence is **MARKET → SPAWN → WARZONE → WILDERNESS**; locations in worlds without any configured cuboid resolve to `OTHER`. The market and spawn defaults overlap the broader warzone, but still resolve as `MARKET` and `SPAWN`. A stalking alert is sent only when the resolved destination becomes `WARZONE` and the prior resolved zone was `MARKET`, `SPAWN`, or `WILDERNESS`. Login, respawn, and reload establish a baseline without alerting.
+Resolution precedence is **MARKET → SPAWN → WARZONE → WILDERNESS**; locations in worlds without any configured cuboid resolve to `OTHER`. The market and spawn defaults overlap the broader warzone, but still resolve as `MARKET` and `SPAWN` at any height. Completed move and teleport transitions are observed at Bukkit `MONITOR` priority with cancelled events ignored. A stalking alert is sent only when the final destination becomes `WARZONE` and the prior resolved zone was `MARKET`, `SPAWN`, or `WILDERNESS`. Login, respawn, world change, and reload establish or reconcile state without alerting.
 
 ## Discord reputation webhook
 
@@ -78,4 +78,4 @@ Giver repped Recipient
 Category • Reason
 ```
 
-The reason line omits the separator when no reason exists. The embed includes the event timestamp and a 64px square Minecraft head thumbnail for the reputation giver, resolved as a URL from the giver UUID through `mc-heads.net`; no skin download or blocking lookup occurs on the server thread. Removed/restored moderation audit records remain persisted and are not presented as a misleading “repped” webhook event.
+The reason line omits the separator when no reason exists. The embed includes the event timestamp and a 64px square Minecraft head thumbnail for the reputation giver, resolved as a URL from the giver UUID through `mc-heads.net`; no skin download or blocking lookup occurs on the server thread. Removal and restoration audit events are also sent through the same ordered asynchronous queue, using compact action-specific wording that identifies the actor and affected player without exposing UUIDs, database IDs, internal enum names, totals, or reputation amounts. Missing thumbnail data simply omits the thumbnail.

@@ -18,49 +18,65 @@ class RegionDefaultsTest {
     private static final String WORLD = "world";
 
     @Test
-    void packagedProductionDefaultsResolveOverlapsWithRequiredPrecedence() {
+    void freshPackagedConfigurationContainsAllProductionDefaults() {
         Regions regions = loadRegions();
-
-        assertEquals(RegionManager.LogicalZone.MARKET, resolve(regions, 0, 64, -200));
-        assertEquals(RegionManager.LogicalZone.SPAWN, resolve(regions, 0, 64, 0));
-        assertEquals(RegionManager.LogicalZone.WARZONE, resolve(regions, 200, 64, 100));
-        assertEquals(RegionManager.LogicalZone.WILDERNESS, resolve(regions, 300, 64, 300));
+        assertNotNull(regions.market());
+        assertNotNull(regions.spawn());
+        assertNotNull(regions.warzone());
     }
 
     @Test
-    void packagedCuboidBoundariesAreInclusiveAndNormalized() {
+    void horizontalDefaultsResolveOverlapsWithRequiredPrecedenceAtAnyHeight() {
         Regions regions = loadRegions();
+        assertEquals(RegionManager.LogicalZone.MARKET, resolve(regions, 0, -200));
+        assertEquals(RegionManager.LogicalZone.SPAWN, resolve(regions, 0, 0));
+        assertEquals(RegionManager.LogicalZone.WARZONE, resolve(regions, 200, 100));
+        assertEquals(RegionManager.LogicalZone.WILDERNESS, resolve(regions, 300, 300));
+    }
 
-        assertInclusive(regions.market(), -72, 102, -281, -162);
-        assertInclusive(regions.spawn(), -48, 69, -33, 84);
-        assertInclusive(regions.warzone(), -218, 219, -404, 188);
+    @Test
+    void horizontalBoundariesCornersAndWorldChecksAreInclusive() {
+        Regions regions = loadRegions();
+        assertHorizontalInclusive(regions.market(), -72, 102, -281, -162);
+        assertHorizontalInclusive(regions.spawn(), -48, 69, -33, 84);
+        assertHorizontalInclusive(regions.warzone(), -218, 219, -404, 188);
+    }
+
+    @Test
+    void generalPurposeCuboidStillHonorsY() {
+        CuboidRegion region = RegionManager.parseRegion(WORLD, "-10, 5, -20", "10, 90, 20");
+        assertNotNull(region);
+        assertTrue(region.contains(WORLD, -10, 5, -20));
+        assertTrue(region.contains(WORLD, 10, 90, 20));
+        assertFalse(region.contains(WORLD, 0, 4, 0));
+        assertFalse(region.contains(WORLD, 0, 91, 0));
+        assertTrue(region.containsHorizontally(WORLD, 0, 0));
     }
 
     @Test
     void editedCoordinatesCanBeReparsedForRuntimeReload() {
         CuboidRegion edited = RegionManager.parseRegion(WORLD, "10, 5, 20", "-10, 90, -20");
-
         assertNotNull(edited);
-        assertTrue(edited.contains(WORLD, -10, 5, -20));
-        assertTrue(edited.contains(WORLD, 10, 90, 20));
-        assertFalse(edited.contains(WORLD, 11, 90, 20));
+        assertTrue(edited.containsHorizontally(WORLD, -10, -20));
+        assertTrue(edited.containsHorizontally(WORLD, 10, 20));
+        assertFalse(edited.containsHorizontally(WORLD, 11, 20));
     }
 
-    private void assertInclusive(CuboidRegion region, int minX, int maxX, int minZ, int maxZ) {
-        assertTrue(region.contains(WORLD, minX, 0, minZ));
-        assertTrue(region.contains(WORLD, maxX, 256, maxZ));
-        assertFalse(region.contains(WORLD, minX - 1, 0, minZ));
-        assertFalse(region.contains(WORLD, maxX + 1, 256, maxZ));
-        assertFalse(region.contains(WORLD, minX, -1, minZ));
-        assertFalse(region.contains(WORLD, maxX, 257, maxZ));
-        assertFalse(region.contains("different-world", minX, 0, minZ));
+    private void assertHorizontalInclusive(CuboidRegion region, int minX, int maxX, int minZ, int maxZ) {
+        assertTrue(region.containsHorizontally(WORLD, minX, minZ));
+        assertTrue(region.containsHorizontally(WORLD, maxX, maxZ));
+        assertTrue(region.containsHorizontally(WORLD, minX, maxZ));
+        assertTrue(region.containsHorizontally(WORLD, maxX, minZ));
+        assertFalse(region.containsHorizontally(WORLD, minX - 1, minZ));
+        assertFalse(region.containsHorizontally(WORLD, maxX + 1, maxZ));
+        assertFalse(region.containsHorizontally("different-world", minX, minZ));
     }
 
-    private RegionManager.LogicalZone resolve(Regions regions, int x, int y, int z) {
+    private RegionManager.LogicalZone resolve(Regions regions, int x, int z) {
         return LogicalZoneResolver.resolve(
-                regions.market().contains(WORLD, x, y, z),
-                regions.spawn().contains(WORLD, x, y, z),
-                regions.warzone().contains(WORLD, x, y, z),
+                regions.market().containsHorizontally(WORLD, x, z),
+                regions.spawn().containsHorizontally(WORLD, x, z),
+                regions.warzone().containsHorizontally(WORLD, x, z),
                 true);
     }
 
