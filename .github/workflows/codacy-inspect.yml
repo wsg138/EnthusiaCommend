@@ -1,0 +1,14 @@
+name: Inspect Codacy PR findings
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch public Codacy findings
+        run: |
+          curl --fail --silent --show-error \
+            'https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaCommend/pull-requests/8/issues' \
+            | python -m json.tool
