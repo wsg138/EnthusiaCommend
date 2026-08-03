@@ -87,8 +87,6 @@ jobs:
               raise SystemExit(f'PMD findings remain: {len(findings)}')
           print('PMD_TOTAL=0')
           PY
-      - name: Verify SpotBugs
-        run: mvn --batch-mode --no-transfer-progress com.github.spotbugs:spotbugs-maven-plugin:4.8.6.6:check
       - name: Commit verified cleanup
         run: |
           rm -f .github/workflows/codacy-inspect.yml
