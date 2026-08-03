@@ -1,7 +1,6 @@
 package org.enthusia.rep.command;
 
 import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.rep.RepTradingAlertAccess;
 import org.junit.jupiter.api.Test;
@@ -49,23 +48,13 @@ class CommendCommandPermissionsTest {
             assertNotNull(stream);
             YamlConfiguration descriptor = YamlConfiguration.loadConfiguration(
                     new InputStreamReader(stream, StandardCharsets.UTF_8));
-            ConfigurationSection permissions = descriptor.getConfigurationSection("permissions");
-            assertNotNull(permissions);
-            ConfigurationSection alert = sectionValue(permissions, RepTradingAlertAccess.PERMISSION);
-            ConfigurationSection admin = sectionValue(permissions, "enthusiacommend.rep.admin");
-            ConfigurationSection children = admin.getConfigurationSection("children");
-            assertNotNull(children);
+            String permissionPath = "permissions." + RepTradingAlertAccess.PERMISSION;
 
-            assertEquals("op", alert.getString("default"));
-            assertTrue(alert.getString("description", "").contains("/rep alerts"));
-            assertEquals(Boolean.TRUE, children.getValues(false).get(RepTradingAlertAccess.PERMISSION));
+            assertEquals("op", descriptor.getString(permissionPath + ".default"));
+            assertTrue(descriptor.getString(permissionPath + ".description", "").contains("/rep alerts"));
+            assertTrue(descriptor.getBoolean("permissions.enthusiacommend.rep.admin.children."
+                    + RepTradingAlertAccess.PERMISSION));
         }
-    }
-
-    private ConfigurationSection sectionValue(ConfigurationSection parent, String key) {
-        Object value = parent.getValues(false).get(key);
-        assertTrue(value instanceof ConfigurationSection, "Expected configuration section for " + key);
-        return (ConfigurationSection) value;
     }
 
     private CommandSender sender(boolean operator, Set<String> explicitPermissions) {
