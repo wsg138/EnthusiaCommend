@@ -150,6 +150,10 @@ public final class RepLeaderboardGui implements Listener {
             open(player, holder.lowest(), holder.returnCategory(), holder.returnPage());
             return;
         }
+        if (slot == CURRENT_VIEW_SLOT && holder.returnCategory() != null) {
+            open(player, holder.lowest(), null, 0);
+            return;
+        }
         if (!isFilterOptionSlot(slot)) {
             return;
         }
