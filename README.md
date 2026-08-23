@@ -4,6 +4,8 @@
 
 Reputation and commendation plugin for Enthusia SMP, targeting Java 21 and Paper-compatible 1.21.x servers.
 
+For the current **player-facing SMP behavior**—categories, scoring, commands, exact live benefit/penalty thresholds, region scoping, and stalking—see **[`PLAYER_GUIDE.md`](PLAYER_GUIDE.md)**. This README remains the technical/admin reference.
+
 ## Features
 
 - Player reputation profiles, reviews, leaderboards, and configurable score effects
