@@ -149,6 +149,9 @@ public final class ReputationModerationService implements ReputationModerationAp
                 playerId, now, expirationAt, normalizedCase, normalizedCase,
                 ReputationBlacklist.Status.ACTIVE, revision, now);
         ReputationStateSnapshot after = snapshot(playerId);
+        if (!after.checksum().equals(expectedChecksum)) {
+            return driftResult(before, after);
+        }
         return commit(operationId, fingerprint, ReputationMutationResult.Status.APPLIED,
                 Optional.of(blacklist), before, after, "Reputation giving is blacklisted", blacklist);
     }
@@ -201,6 +204,9 @@ public final class ReputationModerationService implements ReputationModerationAp
                 now
         );
         ReputationStateSnapshot after = snapshot(playerId);
+        if (!after.checksum().equals(expectedChecksum)) {
+            return driftResult(before, after);
+        }
         return commit(operationId, fingerprint, ReputationMutationResult.Status.REMOVED,
                 Optional.of(removed), before, after, "Reputation blacklist removed", removed);
     }
@@ -239,6 +245,19 @@ public final class ReputationModerationService implements ReputationModerationAp
             String detail
     ) {
         return new ReputationMutationResult(status, Optional.empty(), snapshot, snapshot, detail);
+    }
+
+    private ReputationMutationResult driftResult(
+            ReputationStateSnapshot before,
+            ReputationStateSnapshot after
+    ) {
+        return new ReputationMutationResult(
+                ReputationMutationResult.Status.STALE_REPUTATION,
+                Optional.empty(),
+                before,
+                after,
+                "Reputation changed during blacklist reconciliation; retry from fresh state"
+        );
     }
 
     private ReputationMutationResult commit(
