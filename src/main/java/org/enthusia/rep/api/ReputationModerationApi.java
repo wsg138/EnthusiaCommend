@@ -9,8 +9,8 @@ import java.util.UUID;
  *
  * <p>Blacklist operations are idempotent by operation ID and preserve reputation entries and
  * score. Callers must snapshot immediately before a mutation and pass that checksum back as a
- * compare-and-set guard. A successful removal additionally requires the exact blacklist revision
- * observed by the caller.</p>
+ * compare-and-set guard. Every mutation also requires the exact blacklist revision observed by
+ * the caller, using revision {@code 0} when no blacklist record exists.</p>
  */
 public interface ReputationModerationApi {
     int API_VERSION = 2;
@@ -36,6 +36,7 @@ public interface ReputationModerationApi {
             UUID playerId,
             Optional<Instant> expirationAt,
             String caseId,
+            long expectedBlacklistRevision,
             String expectedReputationChecksum
     );
 
