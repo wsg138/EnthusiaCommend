@@ -138,6 +138,7 @@ final class ReputationModerationStore {
                 channel.force(true);
             }
             moveIntoPlace(temporary);
+            forceDirectory(parent);
         } catch (IOException exception) {
             try {
                 Files.deleteIfExists(temporary);
@@ -153,6 +154,15 @@ final class ReputationModerationStore {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (AtomicMoveNotSupportedException exception) {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void forceDirectory(Path parent) throws IOException {
+        if (parent == null) {
+            return;
+        }
+        try (FileChannel channel = FileChannel.open(parent, StandardOpenOption.READ)) {
+            channel.force(true);
         }
     }
 
