@@ -15,6 +15,8 @@ public record ReputationBlacklist(
         long revision,
         Instant updatedAt
 ) {
+    private static final long FIRST_REVISION = 1L;
+
     public ReputationBlacklist {
         Objects.requireNonNull(playerId, "playerId");
         Objects.requireNonNull(startsAt, "startsAt");
@@ -22,7 +24,7 @@ public record ReputationBlacklist(
         caseId = requireCaseId(caseId);
         lastActionCaseId = requireCaseId(lastActionCaseId);
         Objects.requireNonNull(status, "status");
-        if (revision < 1L) {
+        if (revision < FIRST_REVISION) {
             throw new IllegalArgumentException("revision must be positive");
         }
         Objects.requireNonNull(updatedAt, "updatedAt");
