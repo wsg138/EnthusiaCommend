@@ -49,7 +49,6 @@ public final class CommendPlugin extends JavaPlugin {
     private RegionManager regionManager;
     private PlaytimeService playtimeService;
     private RepService repService;
-    private ReputationModerationService moderationService;
     private ReputationAnalyticsService analyticsService;
     private RepEffectManager effectManager;
     private StalkManager stalkManager;
@@ -105,7 +104,7 @@ public final class CommendPlugin extends JavaPlugin {
                 analyticsService,
                 record -> handleAuditRecord(record)
         );
-        this.moderationService = new ReputationModerationService(
+        ReputationModerationService moderationService = new ReputationModerationService(
                 Clock.systemUTC(),
                 playerId -> ReputationSnapshotFactory.snapshot(repService, playerId),
                 getDataFolder().toPath().resolve("moderation-state.yml")
