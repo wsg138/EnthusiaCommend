@@ -83,6 +83,28 @@ class ReputationModerationServiceTest {
     }
 
     @Test
+    void pendingAuthoritativeReconciliationFailsClosedWithoutChangingReputation() {
+        AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        ReputationModerationService service = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
+
+        service.markReconciliationPending(PLAYER);
+        assertFalse(service.canGiveReputation(PLAYER));
+        assertTrue(service.getBlacklist(PLAYER).isEmpty());
+        assertEquals(state.get(), service.snapshot(PLAYER));
+
+        service.clearReconciliationPending(PLAYER);
+        assertTrue(service.canGiveReputation(PLAYER));
+
+        ReputationMutationResult applied = service.applyBlacklist(
+                UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
+        assertEquals(ReputationMutationResult.Status.APPLIED, applied.status());
+        service.markReconciliationPending(PLAYER);
+        service.clearReconciliationPending(PLAYER);
+        assertFalse(service.canGiveReputation(PLAYER));
+    }
+
+    @Test
     void staleReputationAndBlacklistRevisionFailClosedWithoutMutation() {
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
@@ -116,7 +138,6 @@ class ReputationModerationServiceTest {
     @SuppressWarnings("PMD.DoNotUseThreads")
     @Test
     void concurrentApplyWithSameRevisionAllowsOnlyOneCommit() throws Exception {
-        // X04 explicitly requires real concurrent callers to prove optimistic revision fencing.
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
