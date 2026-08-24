@@ -1,7 +1,6 @@
 name: Build and test
 on:
   push:
-    branches: [main, feature/rep-system-v2-mainline]
   pull_request:
 permissions:
   contents: read
