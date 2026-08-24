@@ -45,8 +45,9 @@ public final class ReputationModerationService implements ReputationModerationAp
     @Override
     public synchronized ReputationBlacklist blacklist(UUID playerId, Instant expirationAt, String caseId) {
         ReputationStateSnapshot before = snapshot(playerId);
+        long revision = currentRevision(playerId);
         ReputationMutationResult result = applyBlacklist(
-                UUID.randomUUID(), playerId, Optional.ofNullable(expirationAt), caseId, before.checksum());
+                UUID.randomUUID(), playerId, Optional.ofNullable(expirationAt), caseId, revision, before.checksum());
         if (!result.success() || result.blacklist().isEmpty()) {
             throw new IllegalStateException("Reputation blacklist failed: " + result.detail());
         }
@@ -56,8 +57,9 @@ public final class ReputationModerationService implements ReputationModerationAp
     @Override
     public synchronized ReputationBlacklist blacklistPermanently(UUID playerId, String caseId) {
         ReputationStateSnapshot before = snapshot(playerId);
+        long revision = currentRevision(playerId);
         ReputationMutationResult result = applyBlacklist(
-                UUID.randomUUID(), playerId, Optional.empty(), caseId, before.checksum());
+                UUID.randomUUID(), playerId, Optional.empty(), caseId, revision, before.checksum());
         if (!result.success() || result.blacklist().isEmpty()) {
             throw new IllegalStateException("Permanent reputation blacklist failed: " + result.detail());
         }
@@ -105,15 +107,19 @@ public final class ReputationModerationService implements ReputationModerationAp
             UUID playerId,
             Optional<Instant> expirationAt,
             String caseId,
+            long expectedBlacklistRevision,
             String expectedReputationChecksum
     ) {
         Objects.requireNonNull(operationId, "operationId");
         Objects.requireNonNull(playerId, "playerId");
         expirationAt = Objects.requireNonNull(expirationAt, "expirationAt");
+        if (expectedBlacklistRevision < 0L) {
+            throw new IllegalArgumentException("expectedBlacklistRevision cannot be negative");
+        }
         String normalizedCase = requireCaseId(caseId);
         String expectedChecksum = requireChecksum(expectedReputationChecksum);
         String fingerprint = "APPLY|" + playerId + '|' + expirationAt.map(Instant::toString).orElse("PERMANENT")
-                + '|' + normalizedCase + '|' + expectedChecksum;
+                + '|' + normalizedCase + '|' + expectedBlacklistRevision + '|' + expectedChecksum;
         ReputationMutationResult replay = replay(operationId, fingerprint);
         if (replay != null) {
             return replay;
@@ -122,6 +128,12 @@ public final class ReputationModerationService implements ReputationModerationAp
         if (!before.checksum().equals(expectedChecksum)) {
             return transientResult(ReputationMutationResult.Status.STALE_REPUTATION, before,
                     "Reputation changed after the moderation snapshot; retry from fresh state");
+        }
+        ReputationBlacklist previous = state.blacklists().get(playerId);
+        long actualRevision = previous == null ? 0L : previous.revision();
+        if (actualRevision != expectedBlacklistRevision) {
+            return transientResult(ReputationMutationResult.Status.STALE_BLACKLIST, before,
+                    "Blacklist state changed after it was read; retry from fresh state");
         }
         Instant now = clock.instant();
         if (expirationAt.isPresent() && !expirationAt.orElseThrow().isAfter(now)) {
@@ -132,8 +144,7 @@ public final class ReputationModerationService implements ReputationModerationAp
             return transientResult(ReputationMutationResult.Status.REJECTED, before,
                     "Reputation moderation journal reached its safety limit");
         }
-        ReputationBlacklist previous = state.blacklists().get(playerId);
-        long revision = previous == null ? 1L : Math.addExact(previous.revision(), 1L);
+        long revision = Math.addExact(actualRevision, 1L);
         ReputationBlacklist blacklist = new ReputationBlacklist(
                 playerId, now, expirationAt, normalizedCase, normalizedCase,
                 ReputationBlacklist.Status.ACTIVE, revision, now);
@@ -152,6 +163,9 @@ public final class ReputationModerationService implements ReputationModerationAp
     ) {
         Objects.requireNonNull(operationId, "operationId");
         Objects.requireNonNull(playerId, "playerId");
+        if (expectedBlacklistRevision < 1L) {
+            throw new IllegalArgumentException("expectedBlacklistRevision must be positive for removal");
+        }
         String normalizedCase = requireCaseId(caseId);
         String expectedChecksum = requireChecksum(expectedReputationChecksum);
         String fingerprint = "REMOVE|" + playerId + '|' + normalizedCase + '|'
@@ -189,6 +203,11 @@ public final class ReputationModerationService implements ReputationModerationAp
         ReputationStateSnapshot after = snapshot(playerId);
         return commit(operationId, fingerprint, ReputationMutationResult.Status.REMOVED,
                 Optional.of(removed), before, after, "Reputation blacklist removed", removed);
+    }
+
+    private long currentRevision(UUID playerId) {
+        ReputationBlacklist value = state.blacklists().get(playerId);
+        return value == null ? 0L : value.revision();
     }
 
     private ReputationMutationResult replay(UUID operationId, String fingerprint) {
