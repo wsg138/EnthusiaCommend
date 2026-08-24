@@ -6,14 +6,13 @@ import org.bukkit.plugin.Plugin;
 import org.enthusia.rep.CommendPlugin;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
 import java.util.UUID;
 
 public final class WarzoneDuelsHook {
     private final CommendPlugin plugin;
 
-    private Plugin duelPlugin;
-    private Method duelServiceMethod;
-    private Method isParticipantRestrictedMethod;
+    private Optional<DuelLookup> lookup = Optional.empty();
     private boolean lookupAttempted;
     private boolean warnedLookupFailure;
 
@@ -25,12 +24,12 @@ public final class WarzoneDuelsHook {
         if (player == null) {
             return false;
         }
-        Object duelService = duelService();
-        if (duelService == null || isParticipantRestrictedMethod == null) {
+        DuelAccess access = duelAccess();
+        if (access == null) {
             return false;
         }
         try {
-            Object result = isParticipantRestrictedMethod.invoke(duelService, player.getUniqueId());
+            Object result = access.isParticipantRestrictedMethod().invoke(access.duelService(), player.getUniqueId());
             return result instanceof Boolean value && value;
         } catch (ReflectiveOperationException ex) {
             warnLookupFailure("Failed to query WarzoneDuels duel state", ex);
@@ -41,18 +40,18 @@ public final class WarzoneDuelsHook {
 
     public void refresh() {
         clearCachedLookup();
-        duelService();
+        resolveLookupIfNeeded();
     }
 
-    private Object duelService() {
-        if (!lookupAttempted) {
-            resolveLookup();
-        }
-        if (duelPlugin == null || duelServiceMethod == null) {
+    private DuelAccess duelAccess() {
+        resolveLookupIfNeeded();
+        if (lookup.isEmpty()) {
             return null;
         }
+        DuelLookup current = lookup.get();
         try {
-            return duelServiceMethod.invoke(duelPlugin);
+            Object duelService = current.duelServiceMethod().invoke(current.duelPlugin());
+            return new DuelAccess(duelService, current.isParticipantRestrictedMethod());
         } catch (ReflectiveOperationException ex) {
             warnLookupFailure("Failed to access WarzoneDuels duel service", ex);
             clearCachedLookup();
@@ -60,16 +59,27 @@ public final class WarzoneDuelsHook {
         }
     }
 
+    private void resolveLookupIfNeeded() {
+        if (!lookupAttempted) {
+            resolveLookup();
+        }
+    }
+
     private void resolveLookup() {
         lookupAttempted = true;
-        duelPlugin = Bukkit.getPluginManager().getPlugin("WarzoneDuels");
+        Plugin duelPlugin = Bukkit.getPluginManager().getPlugin("WarzoneDuels");
         if (duelPlugin == null || !duelPlugin.isEnabled()) {
             return;
         }
         try {
-            duelServiceMethod = duelPlugin.getClass().getMethod("duelService");
+            Method duelServiceMethod = duelPlugin.getClass().getMethod("duelService");
             Class<?> duelServiceClass = duelServiceMethod.getReturnType();
-            isParticipantRestrictedMethod = duelServiceClass.getMethod("isParticipantRestricted", UUID.class);
+            Method isParticipantRestrictedMethod =
+                    duelServiceClass.getMethod("isParticipantRestricted", UUID.class);
+            lookup = Optional.of(new DuelLookup(
+                    duelPlugin,
+                    duelServiceMethod,
+                    isParticipantRestrictedMethod));
         } catch (ReflectiveOperationException ex) {
             warnLookupFailure("Failed to wire WarzoneDuels hook", ex);
             clearCachedLookup();
@@ -78,9 +88,7 @@ public final class WarzoneDuelsHook {
     }
 
     private void clearCachedLookup() {
-        duelPlugin = null;
-        duelServiceMethod = null;
-        isParticipantRestrictedMethod = null;
+        lookup = Optional.empty();
         lookupAttempted = false;
     }
 
@@ -91,4 +99,12 @@ public final class WarzoneDuelsHook {
         warnedLookupFailure = true;
         plugin.getLogger().warning(message + ": " + ex.getMessage());
     }
+
+    private record DuelLookup(
+            Plugin duelPlugin,
+            Method duelServiceMethod,
+            Method isParticipantRestrictedMethod
+    ) { }
+
+    private record DuelAccess(Object duelService, Method isParticipantRestrictedMethod) { }
 }
