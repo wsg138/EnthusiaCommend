@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.api.ReputationBlacklist;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
@@ -30,15 +31,21 @@ final class ReputationModerationStore {
         if (!Files.exists(file)) {
             return State.empty();
         }
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file.toFile());
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.load(file.toFile());
+        } catch (IOException | InvalidConfigurationException exception) {
+            throw new IllegalStateException("Reputation moderation state is unreadable", exception);
+        }
         Map<UUID, ReputationBlacklist> blacklists = new LinkedHashMap<>();
         ConfigurationSection blacklistSection = yaml.getConfigurationSection("blacklists");
         if (blacklistSection != null) {
             for (String key : blacklistSection.getKeys(false)) {
                 ReputationBlacklist value = readBlacklist(blacklistSection.getConfigurationSection(key));
-                if (value != null) {
-                    blacklists.put(value.playerId(), value);
+                if (value == null) {
+                    throw new IllegalStateException("Invalid reputation blacklist record: " + key);
                 }
+                blacklists.put(value.playerId(), value);
             }
         }
         LinkedHashMap<UUID, Operation> operations = new LinkedHashMap<>();
@@ -46,9 +53,10 @@ final class ReputationModerationStore {
         if (operationSection != null) {
             for (String key : operationSection.getKeys(false)) {
                 Operation value = readOperation(operationSection.getConfigurationSection(key));
-                if (value != null) {
-                    operations.put(value.operationId(), value);
+                if (value == null) {
+                    throw new IllegalStateException("Invalid reputation moderation operation: " + key);
                 }
+                operations.put(value.operationId(), value);
             }
         }
         return new State(blacklists, operations);
@@ -141,6 +149,9 @@ final class ReputationModerationStore {
     }
 
     private static ReputationStateSnapshot readSnapshot(ConfigurationSection section) {
+        if (section == null) {
+            throw new IllegalArgumentException("snapshot section is missing");
+        }
         UUID playerId = UUID.fromString(section.getString("player-id"));
         List<ReputationEntrySnapshot> entries = new ArrayList<>();
         for (Map<?, ?> raw : section.getMapList("entries")) {
@@ -154,12 +165,18 @@ final class ReputationModerationStore {
                     Long.parseLong(String.valueOf(raw.get("last-edited-at")))
             ));
         }
-        return new ReputationStateSnapshot(
+        int totalScore = section.getInt("total-score");
+        ReputationStateSnapshot snapshot = new ReputationStateSnapshot(
                 playerId,
-                section.getInt("total-score"),
+                totalScore,
                 entries,
                 section.getString("checksum")
         );
+        String computed = ReputationSnapshotFactory.checksum(playerId, totalScore, entries);
+        if (!computed.equals(snapshot.checksum())) {
+            throw new IllegalArgumentException("snapshot checksum does not match persisted content");
+        }
+        return snapshot;
     }
 
     private static Operation readOperation(ConfigurationSection section) {
