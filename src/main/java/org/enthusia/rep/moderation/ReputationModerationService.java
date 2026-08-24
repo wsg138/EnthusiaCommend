@@ -140,10 +140,6 @@ public final class ReputationModerationService implements ReputationModerationAp
             return transientResult(ReputationMutationResult.Status.REJECTED, before,
                     "Reputation blacklist expiration must be in the future");
         }
-        if (state.operations().size() >= MAX_OPERATIONS) {
-            return transientResult(ReputationMutationResult.Status.REJECTED, before,
-                    "Reputation moderation journal reached its safety limit");
-        }
         long revision = Math.addExact(actualRevision, 1L);
         ReputationBlacklist blacklist = new ReputationBlacklist(
                 playerId, now, expirationAt, normalizedCase, normalizedCase,
@@ -187,10 +183,6 @@ public final class ReputationModerationService implements ReputationModerationAp
                 || current.status() == ReputationBlacklist.Status.REMOVED) {
             return transientResult(ReputationMutationResult.Status.STALE_BLACKLIST, before,
                     "Blacklist state changed after it was read; retry from fresh state");
-        }
-        if (state.operations().size() >= MAX_OPERATIONS) {
-            return transientResult(ReputationMutationResult.Status.REJECTED, before,
-                    "Reputation moderation journal reached its safety limit");
         }
         Instant now = clock.instant();
         ReputationBlacklist removed = new ReputationBlacklist(
@@ -273,6 +265,10 @@ public final class ReputationModerationService implements ReputationModerationAp
         Map<UUID, ReputationBlacklist> blacklists = new LinkedHashMap<>(state.blacklists());
         blacklists.put(persistedBlacklist.playerId(), persistedBlacklist);
         LinkedHashMap<UUID, ReputationModerationStore.Operation> operations = new LinkedHashMap<>(state.operations());
+        while (operations.size() >= MAX_OPERATIONS) {
+            UUID oldestOperation = operations.keySet().iterator().next();
+            operations.remove(oldestOperation);
+        }
         operations.put(operationId, new ReputationModerationStore.Operation(
                 operationId, fingerprint, status, resultBlacklist, before, after, detail));
         ReputationModerationStore.State candidate = new ReputationModerationStore.State(blacklists, operations);
