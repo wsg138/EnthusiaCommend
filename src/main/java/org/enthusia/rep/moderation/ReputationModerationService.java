@@ -15,10 +15,14 @@ import org.enthusia.rep.api.ReputationStateSnapshot;
 
 public final class ReputationModerationService implements ReputationModerationApi {
     private static final int MAX_OPERATIONS = 4096;
+    private static final long NO_BLACKLIST_REVISION = 0L;
+    private static final long FIRST_BLACKLIST_REVISION = 1L;
+    private static final String PLAYER_ID_ARGUMENT = "playerId";
 
     private final Clock clock;
     private final Function<UUID, ReputationStateSnapshot> snapshotProvider;
     private final ReputationModerationStore store;
+    private final Object stateLock = new Object();
     private ReputationModerationStore.State state;
 
     public ReputationModerationService(
@@ -38,71 +42,95 @@ public final class ReputationModerationService implements ReputationModerationAp
     }
 
     @Override
-    public synchronized boolean isReputationBlacklisted(UUID playerId) {
-        return getBlacklist(playerId).map(value -> value.activeAt(clock.instant())).orElse(false);
-    }
-
-    @Override
-    public synchronized ReputationBlacklist blacklist(UUID playerId, Instant expirationAt, String caseId) {
-        ReputationStateSnapshot before = snapshot(playerId);
-        long revision = currentRevision(playerId);
-        ReputationMutationResult result = applyBlacklist(
-                UUID.randomUUID(), playerId, Optional.ofNullable(expirationAt), caseId, revision, before.checksum());
-        if (!result.success() || result.blacklist().isEmpty()) {
-            throw new IllegalStateException("Reputation blacklist failed: " + result.detail());
+    public boolean isReputationBlacklisted(UUID playerId) {
+        synchronized (stateLock) {
+            return getBlacklistLocked(playerId).map(value -> value.activeAt(clock.instant())).orElse(false);
         }
-        return result.blacklist().orElseThrow();
     }
 
     @Override
-    public synchronized ReputationBlacklist blacklistPermanently(UUID playerId, String caseId) {
-        ReputationStateSnapshot before = snapshot(playerId);
-        long revision = currentRevision(playerId);
-        ReputationMutationResult result = applyBlacklist(
-                UUID.randomUUID(), playerId, Optional.empty(), caseId, revision, before.checksum());
-        if (!result.success() || result.blacklist().isEmpty()) {
-            throw new IllegalStateException("Permanent reputation blacklist failed: " + result.detail());
+    public ReputationBlacklist blacklist(UUID playerId, Instant expirationAt, String caseId) {
+        synchronized (stateLock) {
+            ReputationStateSnapshot before = snapshotLocked(playerId);
+            long revision = currentRevision(playerId);
+            ReputationMutationResult result = applyBlacklistLocked(
+                    UUID.randomUUID(), playerId, Optional.ofNullable(expirationAt), caseId, revision, before.checksum());
+            if (!result.success() || result.blacklist().isEmpty()) {
+                throw new IllegalStateException("Reputation blacklist failed: " + result.detail());
+            }
+            return result.blacklist().orElseThrow();
         }
-        return result.blacklist().orElseThrow();
     }
 
     @Override
-    public synchronized boolean removeBlacklist(UUID playerId, String caseId) {
-        ReputationBlacklist current = state.blacklists().get(Objects.requireNonNull(playerId, "playerId"));
-        if (current == null || current.status() == ReputationBlacklist.Status.REMOVED) {
-            return false;
+    public ReputationBlacklist blacklistPermanently(UUID playerId, String caseId) {
+        synchronized (stateLock) {
+            ReputationStateSnapshot before = snapshotLocked(playerId);
+            long revision = currentRevision(playerId);
+            ReputationMutationResult result = applyBlacklistLocked(
+                    UUID.randomUUID(), playerId, Optional.empty(), caseId, revision, before.checksum());
+            if (!result.success() || result.blacklist().isEmpty()) {
+                throw new IllegalStateException("Permanent reputation blacklist failed: " + result.detail());
+            }
+            return result.blacklist().orElseThrow();
         }
-        ReputationStateSnapshot before = snapshot(playerId);
-        return removeBlacklist(
-                UUID.randomUUID(), playerId, caseId, current.revision(), before.checksum()).success();
     }
 
     @Override
-    public synchronized boolean canGiveReputation(UUID playerId) {
+    public boolean removeBlacklist(UUID playerId, String caseId) {
+        synchronized (stateLock) {
+            UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+            ReputationBlacklist current = state.blacklists().get(requiredPlayerId);
+            if (current == null || current.status() == ReputationBlacklist.Status.REMOVED) {
+                return false;
+            }
+            ReputationStateSnapshot before = snapshotLocked(requiredPlayerId);
+            return removeBlacklistLocked(
+                    UUID.randomUUID(), requiredPlayerId, caseId, current.revision(), before.checksum()).success();
+        }
+    }
+
+    @Override
+    public boolean canGiveReputation(UUID playerId) {
         return !isReputationBlacklisted(playerId);
     }
 
     @Override
-    public synchronized Optional<ReputationBlacklist> getBlacklist(UUID playerId) {
-        Objects.requireNonNull(playerId, "playerId");
-        ReputationBlacklist value = state.blacklists().get(playerId);
-        return value == null ? Optional.empty() : Optional.of(value.effectiveAt(clock.instant()));
-    }
-
-    @Override
-    public synchronized ReputationStateSnapshot snapshot(UUID playerId) {
-        ReputationStateSnapshot snapshot = Objects.requireNonNull(
-                snapshotProvider.apply(Objects.requireNonNull(playerId, "playerId")),
-                "snapshotProvider result"
-        );
-        if (!snapshot.playerId().equals(playerId)) {
-            throw new IllegalStateException("snapshot provider returned a different player");
+    public Optional<ReputationBlacklist> getBlacklist(UUID playerId) {
+        synchronized (stateLock) {
+            return getBlacklistLocked(playerId);
         }
-        return snapshot;
     }
 
     @Override
-    public synchronized ReputationMutationResult applyBlacklist(
+    public ReputationStateSnapshot snapshot(UUID playerId) {
+        synchronized (stateLock) {
+            return snapshotLocked(playerId);
+        }
+    }
+
+    @Override
+    public ReputationMutationResult applyBlacklist(
+            UUID operationId,
+            UUID playerId,
+            Optional<Instant> expirationAt,
+            String caseId,
+            long expectedBlacklistRevision,
+            String expectedReputationChecksum
+    ) {
+        synchronized (stateLock) {
+            return applyBlacklistLocked(
+                    operationId,
+                    playerId,
+                    expirationAt,
+                    caseId,
+                    expectedBlacklistRevision,
+                    expectedReputationChecksum
+            );
+        }
+    }
+
+    private ReputationMutationResult applyBlacklistLocked(
             UUID operationId,
             UUID playerId,
             Optional<Instant> expirationAt,
@@ -111,40 +139,38 @@ public final class ReputationModerationService implements ReputationModerationAp
             String expectedReputationChecksum
     ) {
         Objects.requireNonNull(operationId, "operationId");
-        Objects.requireNonNull(playerId, "playerId");
-        expirationAt = Objects.requireNonNull(expirationAt, "expirationAt");
-        if (expectedBlacklistRevision < 0L) {
-            throw new IllegalArgumentException("expectedBlacklistRevision cannot be negative");
-        }
+        UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+        Optional<Instant> normalizedExpiration = Objects.requireNonNull(expirationAt, "expirationAt");
+        requireApplyRevision(expectedBlacklistRevision);
         String normalizedCase = requireCaseId(caseId);
         String expectedChecksum = requireChecksum(expectedReputationChecksum);
-        String fingerprint = "APPLY|" + playerId + '|' + expirationAt.map(Instant::toString).orElse("PERMANENT")
+        String fingerprint = "APPLY|" + requiredPlayerId + '|' + normalizedExpiration.map(Instant::toString).orElse("PERMANENT")
                 + '|' + normalizedCase + '|' + expectedBlacklistRevision + '|' + expectedChecksum;
         ReputationMutationResult replay = replay(operationId, fingerprint);
         if (replay != null) {
             return replay;
         }
-        ReputationStateSnapshot before = snapshot(playerId);
+        ReputationStateSnapshot before = snapshotLocked(requiredPlayerId);
         if (!before.checksum().equals(expectedChecksum)) {
             return transientResult(ReputationMutationResult.Status.STALE_REPUTATION, before,
                     "Reputation changed after the moderation snapshot; retry from fresh state");
         }
-        ReputationBlacklist previous = state.blacklists().get(playerId);
-        long actualRevision = previous == null ? 0L : previous.revision();
+        ReputationBlacklist previous = state.blacklists().get(requiredPlayerId);
+        long actualRevision = previous == null ? NO_BLACKLIST_REVISION : previous.revision();
         if (actualRevision != expectedBlacklistRevision) {
             return transientResult(ReputationMutationResult.Status.STALE_BLACKLIST, before,
                     "Blacklist state changed after it was read; retry from fresh state");
         }
         Instant now = clock.instant();
-        if (expirationAt.isPresent() && !expirationAt.orElseThrow().isAfter(now)) {
+        if (isExpiredAtCreation(normalizedExpiration, now)) {
             return transientResult(ReputationMutationResult.Status.REJECTED, before,
                     "Reputation blacklist expiration must be in the future");
         }
-        long revision = Math.addExact(actualRevision, 1L);
+        long revision = Math.addExact(actualRevision, FIRST_BLACKLIST_REVISION);
         ReputationBlacklist blacklist = new ReputationBlacklist(
-                playerId, now, expirationAt, normalizedCase, normalizedCase,
+                requiredPlayerId, now, normalizedExpiration, normalizedCase, normalizedCase,
                 ReputationBlacklist.Status.ACTIVE, revision, now);
-        ReputationStateSnapshot after = snapshot(playerId);
+        ReputationStateSnapshot after = snapshotLocked(requiredPlayerId);
         if (!after.checksum().equals(expectedChecksum)) {
             return driftResult(before, after);
         }
@@ -153,7 +179,25 @@ public final class ReputationModerationService implements ReputationModerationAp
     }
 
     @Override
-    public synchronized ReputationMutationResult removeBlacklist(
+    public ReputationMutationResult removeBlacklist(
+            UUID operationId,
+            UUID playerId,
+            String caseId,
+            long expectedBlacklistRevision,
+            String expectedReputationChecksum
+    ) {
+        synchronized (stateLock) {
+            return removeBlacklistLocked(
+                    operationId,
+                    playerId,
+                    caseId,
+                    expectedBlacklistRevision,
+                    expectedReputationChecksum
+            );
+        }
+    }
+
+    private ReputationMutationResult removeBlacklistLocked(
             UUID operationId,
             UUID playerId,
             String caseId,
@@ -161,41 +205,38 @@ public final class ReputationModerationService implements ReputationModerationAp
             String expectedReputationChecksum
     ) {
         Objects.requireNonNull(operationId, "operationId");
-        Objects.requireNonNull(playerId, "playerId");
-        if (expectedBlacklistRevision < 1L) {
-            throw new IllegalArgumentException("expectedBlacklistRevision must be positive for removal");
-        }
+        UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+        requireRemovalRevision(expectedBlacklistRevision);
         String normalizedCase = requireCaseId(caseId);
         String expectedChecksum = requireChecksum(expectedReputationChecksum);
-        String fingerprint = "REMOVE|" + playerId + '|' + normalizedCase + '|'
+        String fingerprint = "REMOVE|" + requiredPlayerId + '|' + normalizedCase + '|'
                 + expectedBlacklistRevision + '|' + expectedChecksum;
         ReputationMutationResult replay = replay(operationId, fingerprint);
         if (replay != null) {
             return replay;
         }
-        ReputationStateSnapshot before = snapshot(playerId);
+        ReputationStateSnapshot before = snapshotLocked(requiredPlayerId);
         if (!before.checksum().equals(expectedChecksum)) {
             return transientResult(ReputationMutationResult.Status.STALE_REPUTATION, before,
                     "Reputation changed after the moderation snapshot; retry from fresh state");
         }
-        ReputationBlacklist current = state.blacklists().get(playerId);
-        if (current == null || current.revision() != expectedBlacklistRevision
-                || current.status() == ReputationBlacklist.Status.REMOVED) {
+        ReputationBlacklist current = state.blacklists().get(requiredPlayerId);
+        if (isStaleRemoval(current, expectedBlacklistRevision)) {
             return transientResult(ReputationMutationResult.Status.STALE_BLACKLIST, before,
                     "Blacklist state changed after it was read; retry from fresh state");
         }
         Instant now = clock.instant();
         ReputationBlacklist removed = new ReputationBlacklist(
-                playerId,
+                requiredPlayerId,
                 current.startsAt(),
                 current.expirationAt(),
                 current.caseId(),
                 normalizedCase,
                 ReputationBlacklist.Status.REMOVED,
-                Math.addExact(current.revision(), 1L),
+                Math.addExact(current.revision(), FIRST_BLACKLIST_REVISION),
                 now
         );
-        ReputationStateSnapshot after = snapshot(playerId);
+        ReputationStateSnapshot after = snapshotLocked(requiredPlayerId);
         if (!after.checksum().equals(expectedChecksum)) {
             return driftResult(before, after);
         }
@@ -203,9 +244,27 @@ public final class ReputationModerationService implements ReputationModerationAp
                 Optional.of(removed), before, after, "Reputation blacklist removed", removed);
     }
 
+    private Optional<ReputationBlacklist> getBlacklistLocked(UUID playerId) {
+        UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+        ReputationBlacklist value = state.blacklists().get(requiredPlayerId);
+        return value == null ? Optional.empty() : Optional.of(value.effectiveAt(clock.instant()));
+    }
+
+    private ReputationStateSnapshot snapshotLocked(UUID playerId) {
+        UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+        ReputationStateSnapshot snapshot = Objects.requireNonNull(
+                snapshotProvider.apply(requiredPlayerId),
+                "snapshotProvider result"
+        );
+        if (!snapshot.playerId().equals(requiredPlayerId)) {
+            throw new IllegalStateException("snapshot provider returned a different player");
+        }
+        return snapshot;
+    }
+
     private long currentRevision(UUID playerId) {
         ReputationBlacklist value = state.blacklists().get(playerId);
-        return value == null ? 0L : value.revision();
+        return value == null ? NO_BLACKLIST_REVISION : value.revision();
     }
 
     private ReputationMutationResult replay(UUID operationId, String fingerprint) {
@@ -252,6 +311,7 @@ public final class ReputationModerationService implements ReputationModerationAp
         );
     }
 
+    @SuppressWarnings("PMD.UseConcurrentHashMap")
     private ReputationMutationResult commit(
             UUID operationId,
             String fingerprint,
@@ -262,6 +322,7 @@ public final class ReputationModerationService implements ReputationModerationAp
             String detail,
             ReputationBlacklist persistedBlacklist
     ) {
+        // These maps are copy-on-write candidates protected by stateLock; preserving operation order is required for bounded eviction.
         Map<UUID, ReputationBlacklist> blacklists = new LinkedHashMap<>(state.blacklists());
         blacklists.put(persistedBlacklist.playerId(), persistedBlacklist);
         LinkedHashMap<UUID, ReputationModerationStore.Operation> operations = new LinkedHashMap<>(state.operations());
@@ -275,6 +336,28 @@ public final class ReputationModerationService implements ReputationModerationAp
         store.save(candidate);
         state = candidate;
         return new ReputationMutationResult(status, resultBlacklist, before, after, detail);
+    }
+
+    private static boolean isExpiredAtCreation(Optional<Instant> expirationAt, Instant now) {
+        return expirationAt.map(expiration -> !expiration.isAfter(now)).orElse(false);
+    }
+
+    private static boolean isStaleRemoval(ReputationBlacklist current, long expectedRevision) {
+        return current == null
+                || current.revision() != expectedRevision
+                || current.status() == ReputationBlacklist.Status.REMOVED;
+    }
+
+    private static void requireApplyRevision(long expectedBlacklistRevision) {
+        if (expectedBlacklistRevision < NO_BLACKLIST_REVISION) {
+            throw new IllegalArgumentException("expectedBlacklistRevision cannot be negative");
+        }
+    }
+
+    private static void requireRemovalRevision(long expectedBlacklistRevision) {
+        if (expectedBlacklistRevision < FIRST_BLACKLIST_REVISION) {
+            throw new IllegalArgumentException("expectedBlacklistRevision must be positive for removal");
+        }
     }
 
     private static String requireCaseId(String value) {
