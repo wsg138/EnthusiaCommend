@@ -21,6 +21,11 @@ import org.enthusia.rep.api.ReputationMutationResult;
 import org.enthusia.rep.api.ReputationStateSnapshot;
 
 final class ReputationModerationStore {
+    private static final String BLACKLISTS_KEY = "blacklists";
+    private static final String OPERATIONS_KEY = "operations";
+    private static final String PLAYER_ID_KEY = "player-id";
+    private static final String STATUS_KEY = "status";
+
     private final Path file;
 
     ReputationModerationStore(Path file) {
@@ -37,46 +42,63 @@ final class ReputationModerationStore {
         } catch (IOException | InvalidConfigurationException exception) {
             throw new IllegalStateException("Reputation moderation state is unreadable", exception);
         }
+        return new State(
+                readBlacklists(yaml.getConfigurationSection(BLACKLISTS_KEY)),
+                readOperations(yaml.getConfigurationSection(OPERATIONS_KEY))
+        );
+    }
+
+    @SuppressWarnings("PMD.UseConcurrentHashMap")
+    private static Map<UUID, ReputationBlacklist> readBlacklists(ConfigurationSection section) {
+        // This ordered map is a method-local YAML assembly object and is never accessed concurrently.
+        if (section == null) {
+            return Map.of();
+        }
         Map<UUID, ReputationBlacklist> blacklists = new LinkedHashMap<>();
-        ConfigurationSection blacklistSection = yaml.getConfigurationSection("blacklists");
-        if (blacklistSection != null) {
-            for (String key : blacklistSection.getKeys(false)) {
-                ReputationBlacklist value = readBlacklist(blacklistSection.getConfigurationSection(key));
-                if (value == null) {
-                    throw new IllegalStateException("Invalid reputation blacklist record: " + key);
-                }
-                blacklists.put(value.playerId(), value);
+        for (String key : section.getKeys(false)) {
+            ReputationBlacklist value = readBlacklist(section.getConfigurationSection(key));
+            if (value == null) {
+                throw new IllegalStateException("Invalid reputation blacklist record: " + key);
             }
+            blacklists.put(value.playerId(), value);
         }
+        return blacklists;
+    }
+
+    private static LinkedHashMap<UUID, Operation> readOperations(ConfigurationSection section) {
         LinkedHashMap<UUID, Operation> operations = new LinkedHashMap<>();
-        ConfigurationSection operationSection = yaml.getConfigurationSection("operations");
-        if (operationSection != null) {
-            for (String key : operationSection.getKeys(false)) {
-                Operation value = readOperation(operationSection.getConfigurationSection(key));
-                if (value == null) {
-                    throw new IllegalStateException("Invalid reputation moderation operation: " + key);
-                }
-                operations.put(value.operationId(), value);
-            }
+        if (section == null) {
+            return operations;
         }
-        return new State(blacklists, operations);
+        for (String key : section.getKeys(false)) {
+            Operation value = readOperation(section.getConfigurationSection(key));
+            if (value == null) {
+                throw new IllegalStateException("Invalid reputation moderation operation: " + key);
+            }
+            operations.put(value.operationId(), value);
+        }
+        return operations;
     }
 
     void save(State state) {
         YamlConfiguration yaml = new YamlConfiguration();
         for (Map.Entry<UUID, ReputationBlacklist> entry : state.blacklists().entrySet()) {
-            writeBlacklist(yaml.createSection("blacklists." + entry.getKey()), entry.getValue());
+            writeBlacklist(yaml.createSection(BLACKLISTS_KEY + "." + entry.getKey()), entry.getValue());
         }
         for (Map.Entry<UUID, Operation> entry : state.operations().entrySet()) {
-            ConfigurationSection section = yaml.createSection("operations." + entry.getKey());
+            ConfigurationSection section = yaml.createSection(OPERATIONS_KEY + "." + entry.getKey());
             Operation operation = entry.getValue();
             section.set("fingerprint", operation.fingerprint());
-            section.set("status", operation.status().name());
+            section.set(STATUS_KEY, operation.status().name());
             section.set("detail", operation.detail());
             operation.blacklist().ifPresent(value -> writeBlacklist(section.createSection("blacklist"), value));
             writeSnapshot(section.createSection("before"), operation.before());
             writeSnapshot(section.createSection("after"), operation.after());
         }
+        persistAtomically(yaml);
+    }
+
+    private void persistAtomically(YamlConfiguration yaml) {
         Path parent = file.getParent();
         try {
             if (parent != null) {
@@ -84,23 +106,27 @@ final class ReputationModerationStore {
             }
             Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
             yaml.save(temporary.toFile());
-            try {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException exception) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            moveIntoPlace(temporary);
         } catch (IOException exception) {
             throw new IllegalStateException("Could not persist reputation moderation state", exception);
         }
     }
 
+    private void moveIntoPlace(Path temporary) throws IOException {
+        try {
+            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException exception) {
+            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
     private static void writeBlacklist(ConfigurationSection section, ReputationBlacklist value) {
-        section.set("player-id", value.playerId().toString());
+        section.set(PLAYER_ID_KEY, value.playerId().toString());
         section.set("starts-at", value.startsAt().toEpochMilli());
         section.set("expiration-at", value.expirationAt().map(Instant::toEpochMilli).orElse(null));
         section.set("case-id", value.caseId());
         section.set("last-action-case-id", value.lastActionCaseId());
-        section.set("status", value.status().name());
+        section.set(STATUS_KEY, value.status().name());
         section.set("revision", value.revision());
         section.set("updated-at", value.updatedAt().toEpochMilli());
     }
@@ -110,7 +136,7 @@ final class ReputationModerationStore {
             return null;
         }
         try {
-            UUID playerId = UUID.fromString(section.getString("player-id"));
+            UUID playerId = UUID.fromString(section.getString(PLAYER_ID_KEY));
             Optional<Instant> expiration = section.isLong("expiration-at")
                     ? Optional.of(Instant.ofEpochMilli(section.getLong("expiration-at")))
                     : Optional.empty();
@@ -120,7 +146,7 @@ final class ReputationModerationStore {
                     expiration,
                     section.getString("case-id"),
                     section.getString("last-action-case-id"),
-                    ReputationBlacklist.Status.valueOf(section.getString("status")),
+                    ReputationBlacklist.Status.valueOf(section.getString(STATUS_KEY)),
                     section.getLong("revision"),
                     Instant.ofEpochMilli(section.getLong("updated-at"))
             );
@@ -130,29 +156,32 @@ final class ReputationModerationStore {
     }
 
     private static void writeSnapshot(ConfigurationSection section, ReputationStateSnapshot snapshot) {
-        section.set("player-id", snapshot.playerId().toString());
+        section.set(PLAYER_ID_KEY, snapshot.playerId().toString());
         section.set("total-score", snapshot.totalScore());
         section.set("checksum", snapshot.checksum());
-        List<Map<String, Object>> entries = new ArrayList<>();
-        for (ReputationEntrySnapshot entry : snapshot.entries()) {
-            Map<String, Object> serialized = new LinkedHashMap<>();
-            serialized.put("giver-id", entry.giverId().toString());
-            serialized.put("target-id", entry.targetId().toString());
-            serialized.put("positive", entry.positive());
-            serialized.put("category", entry.category());
-            serialized.put("score-value", entry.scoreValue());
-            serialized.put("created-at", entry.createdAt());
-            serialized.put("last-edited-at", entry.lastEditedAt());
-            entries.add(serialized);
-        }
+        List<Map<String, Object>> entries = snapshot.entries().stream()
+                .map(ReputationModerationStore::serializeEntry)
+                .toList();
         section.set("entries", entries);
+    }
+
+    private static Map<String, Object> serializeEntry(ReputationEntrySnapshot entry) {
+        return Map.of(
+                "giver-id", entry.giverId().toString(),
+                "target-id", entry.targetId().toString(),
+                "positive", entry.positive(),
+                "category", entry.category(),
+                "score-value", entry.scoreValue(),
+                "created-at", entry.createdAt(),
+                "last-edited-at", entry.lastEditedAt()
+        );
     }
 
     private static ReputationStateSnapshot readSnapshot(ConfigurationSection section) {
         if (section == null) {
             throw new IllegalArgumentException("snapshot section is missing");
         }
-        UUID playerId = UUID.fromString(section.getString("player-id"));
+        UUID playerId = UUID.fromString(section.getString(PLAYER_ID_KEY));
         List<ReputationEntrySnapshot> entries = new ArrayList<>();
         for (Map<?, ?> raw : section.getMapList("entries")) {
             entries.add(new ReputationEntrySnapshot(
@@ -190,7 +219,7 @@ final class ReputationModerationStore {
             return new Operation(
                     operationId,
                     section.getString("fingerprint"),
-                    ReputationMutationResult.Status.valueOf(section.getString("status")),
+                    ReputationMutationResult.Status.valueOf(section.getString(STATUS_KEY)),
                     Optional.ofNullable(readBlacklist(section.getConfigurationSection("blacklist"))),
                     before,
                     after,
