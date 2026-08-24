@@ -26,6 +26,7 @@ public final class ReputationModerationService implements ReputationModerationAp
     private final Function<UUID, ReputationStateSnapshot> snapshotProvider;
     private final ReputationModerationStore store;
     private final Object stateLock = new Object();
+    private final Set<UUID> storageFailureFences = new HashSet<>();
     private ReputationModerationStore.State state;
 
     public ReputationModerationService(
@@ -98,7 +99,8 @@ public final class ReputationModerationService implements ReputationModerationAp
     public boolean canGiveReputation(UUID playerId) {
         synchronized (stateLock) {
             UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
-            return !state.reconciliationPending().contains(requiredPlayerId)
+            return !storageFailureFences.contains(requiredPlayerId)
+                    && !state.reconciliationPending().contains(requiredPlayerId)
                     && getBlacklistLocked(requiredPlayerId)
                     .map(value -> !value.activeAt(clock.instant()))
                     .orElse(true);
@@ -110,14 +112,21 @@ public final class ReputationModerationService implements ReputationModerationAp
         synchronized (stateLock) {
             UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
             if (state.reconciliationPending().contains(requiredPlayerId)) {
+                storageFailureFences.remove(requiredPlayerId);
                 return;
             }
             Set<UUID> pending = new HashSet<>(state.reconciliationPending());
             pending.add(requiredPlayerId);
             ReputationModerationStore.State candidate = new ReputationModerationStore.State(
                     state.blacklists(), state.operations(), pending);
-            store.save(candidate);
+            try {
+                store.save(candidate);
+            } catch (RuntimeException exception) {
+                storageFailureFences.add(requiredPlayerId);
+                throw exception;
+            }
             state = candidate;
+            storageFailureFences.remove(requiredPlayerId);
         }
     }
 
@@ -126,6 +135,7 @@ public final class ReputationModerationService implements ReputationModerationAp
         synchronized (stateLock) {
             UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
             if (!state.reconciliationPending().contains(requiredPlayerId)) {
+                storageFailureFences.remove(requiredPlayerId);
                 return;
             }
             Set<UUID> pending = new HashSet<>(state.reconciliationPending());
@@ -134,6 +144,7 @@ public final class ReputationModerationService implements ReputationModerationAp
                     state.blacklists(), state.operations(), pending);
             store.save(candidate);
             state = candidate;
+            storageFailureFences.remove(requiredPlayerId);
         }
     }
 
