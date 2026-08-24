@@ -19,13 +19,13 @@ public final class ReputationModerationService implements ReputationModerationAp
     private static final int MAX_OPERATIONS = 4096;
     private static final long NO_BLACKLIST_REVISION = 0L;
     private static final long FIRST_BLACKLIST_REVISION = 1L;
+    private static final long REVISION_INCREMENT = 1L;
     private static final String PLAYER_ID_ARGUMENT = "playerId";
 
     private final Clock clock;
     private final Function<UUID, ReputationStateSnapshot> snapshotProvider;
     private final ReputationModerationStore store;
     private final Object stateLock = new Object();
-    private final Set<UUID> reconciliationPending = new HashSet<>();
     private ReputationModerationStore.State state;
 
     public ReputationModerationService(
@@ -54,10 +54,11 @@ public final class ReputationModerationService implements ReputationModerationAp
     @Override
     public ReputationBlacklist blacklist(UUID playerId, Instant expirationAt, String caseId) {
         synchronized (stateLock) {
+            Instant requiredExpiration = Objects.requireNonNull(expirationAt, "expirationAt");
             ReputationStateSnapshot before = snapshotLocked(playerId);
             long revision = currentRevision(playerId);
             ReputationMutationResult result = applyBlacklistLocked(
-                    UUID.randomUUID(), playerId, Optional.ofNullable(expirationAt), caseId, revision, before.checksum());
+                    UUID.randomUUID(), playerId, Optional.of(requiredExpiration), caseId, revision, before.checksum());
             if (!result.success() || result.blacklist().isEmpty()) {
                 throw new IllegalStateException("Reputation blacklist failed: " + result.detail());
             }
@@ -97,7 +98,7 @@ public final class ReputationModerationService implements ReputationModerationAp
     public boolean canGiveReputation(UUID playerId) {
         synchronized (stateLock) {
             UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
-            return !reconciliationPending.contains(requiredPlayerId)
+            return !state.reconciliationPending().contains(requiredPlayerId)
                     && getBlacklistLocked(requiredPlayerId)
                     .map(value -> !value.activeAt(clock.instant()))
                     .orElse(true);
@@ -107,14 +108,32 @@ public final class ReputationModerationService implements ReputationModerationAp
     @Override
     public void markReconciliationPending(UUID playerId) {
         synchronized (stateLock) {
-            reconciliationPending.add(Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT));
+            UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+            if (state.reconciliationPending().contains(requiredPlayerId)) {
+                return;
+            }
+            Set<UUID> pending = new HashSet<>(state.reconciliationPending());
+            pending.add(requiredPlayerId);
+            ReputationModerationStore.State candidate = new ReputationModerationStore.State(
+                    state.blacklists(), state.operations(), pending);
+            state = candidate;
+            store.save(candidate);
         }
     }
 
     @Override
     public void clearReconciliationPending(UUID playerId) {
         synchronized (stateLock) {
-            reconciliationPending.remove(Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT));
+            UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+            if (!state.reconciliationPending().contains(requiredPlayerId)) {
+                return;
+            }
+            Set<UUID> pending = new HashSet<>(state.reconciliationPending());
+            pending.remove(requiredPlayerId);
+            ReputationModerationStore.State candidate = new ReputationModerationStore.State(
+                    state.blacklists(), state.operations(), pending);
+            store.save(candidate);
+            state = candidate;
         }
     }
 
@@ -189,7 +208,7 @@ public final class ReputationModerationService implements ReputationModerationAp
             return transientResult(ReputationMutationResult.Status.REJECTED, before,
                     "Reputation blacklist expiration must be in the future");
         }
-        long revision = Math.addExact(actualRevision, FIRST_BLACKLIST_REVISION);
+        long revision = Math.addExact(actualRevision, REVISION_INCREMENT);
         ReputationBlacklist blacklist = new ReputationBlacklist(
                 requiredPlayerId, now, normalizedExpiration, normalizedCase, normalizedCase,
                 ReputationBlacklist.Status.ACTIVE, revision, now);
@@ -256,7 +275,7 @@ public final class ReputationModerationService implements ReputationModerationAp
                 current.caseId(),
                 normalizedCase,
                 ReputationBlacklist.Status.REMOVED,
-                Math.addExact(current.revision(), FIRST_BLACKLIST_REVISION),
+                Math.addExact(current.revision(), REVISION_INCREMENT),
                 now
         );
         ReputationStateSnapshot after = snapshotLocked(requiredPlayerId);
@@ -355,7 +374,8 @@ public final class ReputationModerationService implements ReputationModerationAp
         }
         operations.put(operationId, new ReputationModerationStore.Operation(
                 operationId, fingerprint, status, resultBlacklist, before, after, detail));
-        ReputationModerationStore.State candidate = new ReputationModerationStore.State(blacklists, operations);
+        ReputationModerationStore.State candidate = new ReputationModerationStore.State(
+                blacklists, operations, state.reconciliationPending());
         store.save(candidate);
         state = candidate;
         return new ReputationMutationResult(status, resultBlacklist, before, after, detail);
