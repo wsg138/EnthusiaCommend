@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.api.ReputationBlacklist;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
 import org.enthusia.rep.api.ReputationMutationResult;
@@ -83,25 +84,43 @@ class ReputationModerationServiceTest {
     }
 
     @Test
-    void pendingAuthoritativeReconciliationFailsClosedWithoutChangingReputation() {
+    void pendingAuthoritativeReconciliationFailsClosedAcrossRestart() {
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        Path file = temporaryDirectory.resolve(STATE_FILE);
         ReputationModerationService service = new ReputationModerationService(
-                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
 
         service.markReconciliationPending(PLAYER);
         assertFalse(service.canGiveReputation(PLAYER));
         assertTrue(service.getBlacklist(PLAYER).isEmpty());
         assertEquals(state.get(), service.snapshot(PLAYER));
 
-        service.clearReconciliationPending(PLAYER);
-        assertTrue(service.canGiveReputation(PLAYER));
+        ReputationModerationService restarted = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
+        assertFalse(restarted.canGiveReputation(PLAYER));
+        restarted.clearReconciliationPending(PLAYER);
+        assertTrue(restarted.canGiveReputation(PLAYER));
 
-        ReputationMutationResult applied = service.applyBlacklist(
+        ReputationModerationService afterClearRestart = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
+        assertTrue(afterClearRestart.canGiveReputation(PLAYER));
+
+        ReputationMutationResult applied = afterClearRestart.applyBlacklist(
                 UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.APPLIED, applied.status());
-        service.markReconciliationPending(PLAYER);
-        service.clearReconciliationPending(PLAYER);
-        assertFalse(service.canGiveReputation(PLAYER));
+        afterClearRestart.markReconciliationPending(PLAYER);
+        afterClearRestart.clearReconciliationPending(PLAYER);
+        assertFalse(afterClearRestart.canGiveReputation(PLAYER));
+    }
+
+    @Test
+    void timedBlacklistRejectsNullExpiration() {
+        AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        ReputationModerationService service = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
+
+        assertThrows(NullPointerException.class, () -> service.blacklist(PLAYER, null, CASE_ONE));
+        assertTrue(service.getBlacklist(PLAYER).isEmpty());
     }
 
     @Test
@@ -228,6 +247,24 @@ class ReputationModerationServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
         service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
         Files.writeString(file, "blacklists:\n  invalid: [\n");
+
+        assertThrows(IllegalStateException.class, () -> new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file));
+    }
+
+    @Test
+    void corruptNestedOperationBlacklistBlocksProviderRestart() throws Exception {
+        Path file = temporaryDirectory.resolve("nested-corrupt.yml");
+        AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        ReputationModerationService service = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
+        UUID operationId = UUID.randomUUID();
+        service.applyBlacklist(operationId, PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
+
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.load(file.toFile());
+        yaml.set("operations." + operationId + ".blacklist.player-id", "not-a-uuid");
+        yaml.save(file.toFile());
 
         assertThrows(IllegalStateException.class, () -> new ReputationModerationService(
                 Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file));
