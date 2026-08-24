@@ -9,15 +9,18 @@ import java.util.Set;
 
 /** Migrates only the exact region lists shipped before the production-zone update. */
 public final class LegacyRegionConfigMigration {
-    private static final Set<String> EXPECTED_KEYS = Set.of("world", "min", "max");
+    private static final String WORLD_KEY = "world";
+    private static final String MINIMUM_KEY = "min";
+    private static final String MAXIMUM_KEY = "max";
+    private static final Set<String> EXPECTED_KEYS = Set.of(WORLD_KEY, MINIMUM_KEY, MAXIMUM_KEY);
     private static final RegionValue OLD_SPAWN =
-            new RegionValue("world", "-50, 0, -50", "50, 256, 50");
+            new RegionValue(WORLD_KEY, "-50, 0, -50", "50, 256, 50");
     private static final RegionValue NEW_SPAWN =
-            new RegionValue("world", "-48, 0, -33", "69, 256, 84");
+            new RegionValue(WORLD_KEY, "-48, 0, -33", "69, 256, 84");
     private static final RegionValue OLD_WARZONE =
-            new RegionValue("world", "-500, 0, -500", "500, 256, 500");
+            new RegionValue(WORLD_KEY, "-500, 0, -500", "500, 256, 500");
     private static final RegionValue NEW_WARZONE =
-            new RegionValue("world", "-218, 0, -404", "219, 256, 188");
+            new RegionValue(WORLD_KEY, "-218, 0, -404", "219, 256, 188");
 
     private LegacyRegionConfigMigration() { }
 
@@ -44,9 +47,9 @@ public final class LegacyRegionConfigMigration {
                 .collect(java.util.stream.Collectors.toSet()).equals(EXPECTED_KEYS)) {
             return false;
         }
-        return expected.world().equals(String.valueOf(raw.get("world")))
-                && sameCoordinates(raw.get("min"), expected.minimum())
-                && sameCoordinates(raw.get("max"), expected.maximum());
+        return expected.world().equals(String.valueOf(raw.get(WORLD_KEY)))
+                && sameCoordinates(raw.get(MINIMUM_KEY), expected.minimum())
+                && sameCoordinates(raw.get(MAXIMUM_KEY), expected.maximum());
     }
 
     private static boolean sameCoordinates(Object actual, String expected) {
@@ -68,7 +71,7 @@ public final class LegacyRegionConfigMigration {
             return new int[] {
                     Integer.parseInt(parts[0].trim()),
                     Integer.parseInt(parts[1].trim()),
-                     Integer.parseInt(parts[2].trim())
+                    Integer.parseInt(parts[2].trim())
             };
         } catch (NumberFormatException ignored) {
             return null;
@@ -78,9 +81,9 @@ public final class LegacyRegionConfigMigration {
     private record RegionValue(String world, String minimum, String maximum) {
         private Map<String, Object> asMap() {
             Map<String, Object> value = new LinkedHashMap<>();
-            value.put("world", world);
-            value.put("min", minimum);
-            value.put("max", maximum);
+            value.put(WORLD_KEY, world);
+            value.put(MINIMUM_KEY, minimum);
+            value.put(MAXIMUM_KEY, maximum);
             return value;
         }
     }
