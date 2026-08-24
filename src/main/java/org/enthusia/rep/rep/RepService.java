@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 public final class RepService {
     private static final long ALT_WINDOW_MILLIS = 48L * 60L * 60L * 1000L;
@@ -42,6 +43,7 @@ public final class RepService {
     private final RepAlertPreferences alertPreferences;
 
     private volatile org.enthusia.rep.config.RepConfig repConfig;
+    private volatile Predicate<UUID> grantPolicy = ignored -> true;
 
     private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
     private final Map<UUID, String> knownNames = new ConcurrentHashMap<>();
@@ -88,6 +90,10 @@ public final class RepService {
     public void reload(org.enthusia.rep.config.RepConfig repConfig) {
         this.repConfig = repConfig;
         this.alertPreferences.reloadDefault(repConfig.areRepTradingAlertsEnabledByDefault());
+    }
+
+    public void setGrantPolicy(Predicate<UUID> grantPolicy) {
+        this.grantPolicy = Objects.requireNonNull(grantPolicy, "grantPolicy");
     }
 
     private void loadSnapshot(PluginDataSnapshot snapshot) {
@@ -377,6 +383,10 @@ public final class RepService {
             String reasonText,
             String ipHash
     ) {
+        Objects.requireNonNull(giverId, "giverId");
+        if (!grantPolicy.test(giverId)) {
+            return CommendationResult.blacklisted();
+        }
         RepCategory normalizedCategory = RepRules.acceptedCategory(category, positive);
         if (normalizedCategory == null) {
             return CommendationResult.invalid();
@@ -909,7 +919,8 @@ public final class RepService {
         public enum Failure {
             NONE,
             COOLDOWN,
-            INVALID_CATEGORY
+            INVALID_CATEGORY,
+            REPUTATION_BLACKLISTED
         }
 
         public static CommendationResult created(Commendation commendation) {
@@ -927,6 +938,10 @@ public final class RepService {
 
         public static CommendationResult invalid() {
             return new CommendationResult(false, false, null, 0L, 0, Failure.INVALID_CATEGORY);
+        }
+
+        public static CommendationResult blacklisted() {
+            return new CommendationResult(false, false, null, 0L, 0, Failure.REPUTATION_BLACKLISTED);
         }
     }
 
