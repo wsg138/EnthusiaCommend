@@ -12,11 +12,11 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: package/es-x04-commend-provider
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -27,6 +27,7 @@ jobs:
           set -Eeuo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           message_file = Path('src/main/resources/messages.yml')
           messages = message_file.read_text()
@@ -40,22 +41,18 @@ jobs:
 
           command_file = Path('src/main/java/org/enthusia/rep/command/CommendCommand.java')
           command = command_file.read_text()
-          old_call = '''        if (!result.success()) {
-              sendCooldownMessage(player, result);
-              return true;
-          }
-          '''
-          new_call = '''        if (!result.success()) {
-              sendGiveFailureMessage(player, result);
-              return true;
-          }
-          '''
           if 'sendGiveFailureMessage(player, result);' not in command:
-              if old_call not in command:
-                  raise SystemExit('CommendCommand failure block not found')
-              command = command.replace(old_call, new_call, 1)
-          helper_anchor = '    private void sendCooldownMessage(Player giver, RepService.CommendationResult result) {\n'
-          helper = '''    private void sendGiveFailureMessage(Player giver, RepService.CommendationResult result) {
+              command, count = re.subn(
+                  r'(if \(!result\.success\(\)\) \{\s*)sendCooldownMessage\(player, result\);(\s*return true;\s*\})',
+                  r'\1sendGiveFailureMessage(player, result);\2',
+                  command,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'CommendCommand failure block matches: {count}')
+          if 'private void sendGiveFailureMessage(' not in command:
+              helper_anchor = '    private void sendCooldownMessage(Player giver, RepService.CommendationResult result) {\n'
+              helper = '''    private void sendGiveFailureMessage(Player giver, RepService.CommendationResult result) {
               if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
                   giver.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
                   return;
@@ -64,7 +61,6 @@ jobs:
           }
 
           '''
-          if 'private void sendGiveFailureMessage(' not in command:
               if helper_anchor not in command:
                   raise SystemExit('CommendCommand helper anchor not found')
               command = command.replace(helper_anchor, helper + helper_anchor, 1)
@@ -72,18 +68,21 @@ jobs:
 
           gui_file = Path('src/main/java/org/enthusia/rep/gui/RepGuiManager.java')
           gui = gui_file.read_text()
-          old_else = '''            } else {
-                  long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
-          '''
-          new_else = '''            } else if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
-                  player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
-              } else {
-                  long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
-          '''
-          if 'player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));' not in gui:
-              if old_else not in gui:
-                  raise SystemExit('RepGuiManager cooldown branch not found')
-              gui = gui.replace(old_else, new_else, 1)
+          marker = 'player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));'
+          if marker not in gui:
+              pattern = (
+                  r'(if \(result\.failure\(\) == RepService\.CommendationResult\.Failure\.INVALID_CATEGORY\) \{.*?'
+                  r'\n\s*\})\s*else \{\s*'
+                  r'(long hoursLeft = \(long\) Math\.ceil\(result\.cooldownRemainingMillis\(\) / 1000\.0D / 3600\.0D\);)'
+              )
+              replacement = (
+                  r'\1 else if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {\n'
+                  r'                player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));\n'
+                  r'            } else {\n                \2'
+              )
+              gui, count = re.subn(pattern, replacement, gui, count=1, flags=re.DOTALL)
+              if count != 1:
+                  raise SystemExit(f'RepGuiManager failure branch matches: {count}')
           gui_file.write_text(gui)
           PY
 
