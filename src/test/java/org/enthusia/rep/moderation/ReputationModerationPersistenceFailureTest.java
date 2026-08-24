@@ -1,7 +1,7 @@
 package org.enthusia.rep.moderation;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +24,7 @@ class ReputationModerationPersistenceFailureTest {
     Path temporaryDirectory;
 
     @Test
-    void failedReconciliationFenceWriteDoesNotPublishUnpersistedState() throws Exception {
+    void failedReconciliationFenceWriteFailsClosedWithoutPublishingDurableState() throws Exception {
         Path blockedParent = temporaryDirectory.resolve("not-a-directory");
         Files.writeString(blockedParent, "blocking file");
         ReputationStateSnapshot snapshot = snapshot();
@@ -35,7 +35,7 @@ class ReputationModerationPersistenceFailureTest {
         );
 
         assertThrows(IllegalStateException.class, () -> service.markReconciliationPending(PLAYER));
-        assertTrue(service.canGiveReputation(PLAYER));
+        assertFalse(service.canGiveReputation(PLAYER));
     }
 
     private static ReputationStateSnapshot snapshot() {
