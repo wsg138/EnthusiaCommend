@@ -624,11 +624,11 @@ public final class RepGuiManager implements Listener {
     }
 
     private void handleRemovedLogClick(Player player, RemovedLogHolder holder, int slot, ItemStack clicked) {
-        if (slot == 45) {
+        if (slot == PREVIOUS_PAGE_SLOT) {
             openRemovedLog(player, holder.page() - 1);
             return;
         }
-        if (slot == 53) {
+        if (slot == NEXT_PAGE_SLOT) {
             openRemovedLog(player, holder.page() + 1);
             return;
         }
