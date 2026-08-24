@@ -20,7 +20,7 @@ jobs:
             curl --fail --silent --show-error --location --header 'Accept: application/json' "$url" -o codacy.json
             total="$(jq -r '.pagination.total // 0' codacy.json)"
             if [[ "$total" =~ ^[0-9]+$ ]] && (( total > 0 )); then
-              jq '{pagination, count:(.data|length), issues:[.data[] | {id, status, filePath, lineNumber, message, patternInfo, toolInfo}]}' codacy.json
+              jq '{pagination, count:(.data|length), sample:(.data[0] // null), issues:.data}' codacy.json
               exit 0
             fi
             sleep 5
