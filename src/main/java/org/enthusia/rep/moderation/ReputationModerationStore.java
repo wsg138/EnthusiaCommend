@@ -116,8 +116,10 @@ final class ReputationModerationStore {
             section.set(STATUS_KEY, operation.status().name());
             section.set("detail", operation.detail());
             operation.blacklist().ifPresent(value -> writeBlacklist(section.createSection("blacklist"), value));
-            writeSnapshot(section.createSection("before"), operation.before());
-            writeSnapshot(section.createSection("after"), operation.after());
+            if (!operation.before().equals(operation.after())) {
+                throw new IllegalStateException("Committed reputation moderation operation changed reputation state");
+            }
+            writeSnapshot(section.createSection("snapshot"), operation.before());
         }
         yaml.set(RECONCILIATION_PENDING_KEY, state.reconciliationPending().stream()
                 .map(UUID::toString)
@@ -260,8 +262,7 @@ final class ReputationModerationStore {
         }
         try {
             UUID operationId = UUID.fromString(section.getName());
-            ReputationStateSnapshot before = readSnapshot(section.getConfigurationSection("before"));
-            ReputationStateSnapshot after = readSnapshot(section.getConfigurationSection("after"));
+            ReputationStateSnapshot snapshot = readOperationSnapshot(section);
             ConfigurationSection blacklistSection = section.getConfigurationSection("blacklist");
             ReputationBlacklist parsedBlacklist = readBlacklist(blacklistSection);
             if (blacklistSection != null && parsedBlacklist == null) {
@@ -272,13 +273,26 @@ final class ReputationModerationStore {
                     section.getString("fingerprint"),
                     ReputationMutationResult.Status.valueOf(section.getString(STATUS_KEY)),
                     Optional.ofNullable(parsedBlacklist),
-                    before,
-                    after,
+                    snapshot,
+                    snapshot,
                     section.getString("detail", "")
             );
         } catch (RuntimeException exception) {
             return null;
         }
+    }
+
+    private static ReputationStateSnapshot readOperationSnapshot(ConfigurationSection section) {
+        ConfigurationSection compactSnapshot = section.getConfigurationSection("snapshot");
+        if (compactSnapshot != null) {
+            return readSnapshot(compactSnapshot);
+        }
+        ReputationStateSnapshot before = readSnapshot(section.getConfigurationSection("before"));
+        ReputationStateSnapshot after = readSnapshot(section.getConfigurationSection("after"));
+        if (!before.equals(after)) {
+            throw new IllegalArgumentException("Persisted committed operation changed reputation state");
+        }
+        return before;
     }
 
     record State(
