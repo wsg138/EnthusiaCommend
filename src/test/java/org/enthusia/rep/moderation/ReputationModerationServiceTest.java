@@ -40,7 +40,7 @@ class ReputationModerationServiceTest {
         UUID applyId = UUID.fromString("00000000-0000-0000-0000-000000000101");
 
         ReputationMutationResult applied = service.applyBlacklist(
-                applyId, PLAYER, Optional.empty(), "case-42", state.get().checksum());
+                applyId, PLAYER, Optional.empty(), "case-42", 0L, state.get().checksum());
 
         assertEquals(ReputationMutationResult.Status.APPLIED, applied.status());
         assertEquals(applied.before(), applied.after());
@@ -50,14 +50,14 @@ class ReputationModerationServiceTest {
         assertEquals(1L, blacklist.revision());
 
         ReputationMutationResult replay = service.applyBlacklist(
-                applyId, PLAYER, Optional.empty(), "case-42", state.get().checksum());
+                applyId, PLAYER, Optional.empty(), "case-42", 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.REPLAYED, replay.status());
         assertEquals(1L, service.getBlacklist(PLAYER).orElseThrow().revision());
 
         ReputationModerationService restarted = new ReputationModerationService(clock, ignored -> state.get(), file);
         assertFalse(restarted.canGiveReputation(PLAYER));
         assertEquals(ReputationMutationResult.Status.REPLAYED, restarted.applyBlacklist(
-                applyId, PLAYER, Optional.empty(), "case-42", state.get().checksum()).status());
+                applyId, PLAYER, Optional.empty(), "case-42", 0L, state.get().checksum()).status());
 
         UUID removeId = UUID.fromString("00000000-0000-0000-0000-000000000102");
         ReputationMutationResult removed = restarted.removeBlacklist(
@@ -86,14 +86,19 @@ class ReputationModerationServiceTest {
         state.set(snapshot(8));
 
         ReputationMutationResult staleApply = service.applyBlacklist(
-                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", originalChecksum);
+                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, originalChecksum);
         assertEquals(ReputationMutationResult.Status.STALE_REPUTATION, staleApply.status());
         assertTrue(service.canGiveReputation(PLAYER));
 
         ReputationMutationResult applied = service.applyBlacklist(
-                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", state.get().checksum());
+                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.APPLIED, applied.status());
         long revision = applied.blacklist().orElseThrow().revision();
+
+        ReputationMutationResult staleApplyRevision = service.applyBlacklist(
+                UUID.randomUUID(), PLAYER, Optional.empty(), "case-new", 0L, state.get().checksum());
+        assertEquals(ReputationMutationResult.Status.STALE_BLACKLIST, staleApplyRevision.status());
+        assertEquals("case-1", service.getBlacklist(PLAYER).orElseThrow().caseId());
 
         ReputationMutationResult staleRevision = service.removeBlacklist(
                 UUID.randomUUID(), PLAYER, "case-2", revision + 1L, state.get().checksum());
@@ -110,10 +115,10 @@ class ReputationModerationServiceTest {
                 clock, ignored -> state.get(), temporaryDirectory.resolve("state.yml"));
         UUID operationId = UUID.randomUUID();
         assertEquals(ReputationMutationResult.Status.APPLIED, service.applyBlacklist(
-                operationId, PLAYER, Optional.empty(), "case-a", state.get().checksum()).status());
+                operationId, PLAYER, Optional.empty(), "case-a", 0L, state.get().checksum()).status());
 
         ReputationMutationResult rejected = service.applyBlacklist(
-                operationId, PLAYER, Optional.empty(), "case-b", state.get().checksum());
+                operationId, PLAYER, Optional.empty(), "case-b", 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.REJECTED, rejected.status());
         assertEquals("case-a", service.getBlacklist(PLAYER).orElseThrow().caseId());
         assertEquals(1L, service.getBlacklist(PLAYER).orElseThrow().revision());
@@ -126,7 +131,7 @@ class ReputationModerationServiceTest {
         ReputationModerationService service = new ReputationModerationService(
                 clock, ignored -> state.get(), temporaryDirectory.resolve("state.yml"));
         service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.of(NOW.plus(Duration.ofHours(2))),
-                "case-temp", state.get().checksum());
+                "case-temp", 0L, state.get().checksum());
         assertFalse(service.canGiveReputation(PLAYER));
 
         clock.advance(Duration.ofHours(3));
@@ -141,7 +146,7 @@ class ReputationModerationServiceTest {
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
                 Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
-        service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", state.get().checksum());
+        service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, state.get().checksum());
         Files.writeString(file, "blacklists:\n  invalid: [\n");
 
         assertThrows(IllegalStateException.class, () -> new ReputationModerationService(
