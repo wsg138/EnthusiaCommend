@@ -2,10 +2,12 @@ package org.enthusia.rep.moderation;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import org.enthusia.rep.api.ReputationBlacklist;
@@ -23,6 +25,7 @@ public final class ReputationModerationService implements ReputationModerationAp
     private final Function<UUID, ReputationStateSnapshot> snapshotProvider;
     private final ReputationModerationStore store;
     private final Object stateLock = new Object();
+    private final Set<UUID> reconciliationPending = new HashSet<>();
     private ReputationModerationStore.State state;
 
     public ReputationModerationService(
@@ -92,7 +95,27 @@ public final class ReputationModerationService implements ReputationModerationAp
 
     @Override
     public boolean canGiveReputation(UUID playerId) {
-        return !isReputationBlacklisted(playerId);
+        synchronized (stateLock) {
+            UUID requiredPlayerId = Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT);
+            return !reconciliationPending.contains(requiredPlayerId)
+                    && getBlacklistLocked(requiredPlayerId)
+                    .map(value -> !value.activeAt(clock.instant()))
+                    .orElse(true);
+        }
+    }
+
+    @Override
+    public void markReconciliationPending(UUID playerId) {
+        synchronized (stateLock) {
+            reconciliationPending.add(Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT));
+        }
+    }
+
+    @Override
+    public void clearReconciliationPending(UUID playerId) {
+        synchronized (stateLock) {
+            reconciliationPending.remove(Objects.requireNonNull(playerId, PLAYER_ID_ARGUMENT));
+        }
     }
 
     @Override
