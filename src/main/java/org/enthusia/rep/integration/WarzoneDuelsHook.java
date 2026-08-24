@@ -51,6 +51,9 @@ public final class WarzoneDuelsHook {
         DuelLookup current = lookup.get();
         try {
             Object duelService = current.duelServiceMethod().invoke(current.duelPlugin());
+            if (duelService == null) {
+                return null;
+            }
             return new DuelAccess(duelService, current.isParticipantRestrictedMethod());
         } catch (ReflectiveOperationException ex) {
             warnLookupFailure("Failed to access WarzoneDuels duel service", ex);
