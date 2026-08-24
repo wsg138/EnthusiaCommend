@@ -1,0 +1,101 @@
+name: X04 feedback fix
+
+on:
+  push:
+    branches:
+      - package/es-x04-commend-provider
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: package/es-x04-commend-provider
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Apply focused X04 feedback handling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          message_file = Path('src/main/resources/messages.yml')
+          messages = message_file.read_text()
+          message_line = '  blacklisted-giver: "&cYou are currently restricted from giving reputation."\n'
+          if message_line not in messages:
+              anchor = '  cooldown: "&cYou can edit your commendation for this player again in &e{hours}h&c."\n'
+              if anchor not in messages:
+                  raise SystemExit('messages.yml cooldown anchor not found')
+              messages = messages.replace(anchor, anchor + message_line, 1)
+              message_file.write_text(messages)
+
+          command_file = Path('src/main/java/org/enthusia/rep/command/CommendCommand.java')
+          command = command_file.read_text()
+          old_call = '''        if (!result.success()) {
+              sendCooldownMessage(player, result);
+              return true;
+          }
+          '''
+          new_call = '''        if (!result.success()) {
+              sendGiveFailureMessage(player, result);
+              return true;
+          }
+          '''
+          if 'sendGiveFailureMessage(player, result);' not in command:
+              if old_call not in command:
+                  raise SystemExit('CommendCommand failure block not found')
+              command = command.replace(old_call, new_call, 1)
+          helper_anchor = '    private void sendCooldownMessage(Player giver, RepService.CommendationResult result) {\n'
+          helper = '''    private void sendGiveFailureMessage(Player giver, RepService.CommendationResult result) {
+              if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+                  giver.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
+                  return;
+              }
+              sendCooldownMessage(giver, result);
+          }
+
+          '''
+          if 'private void sendGiveFailureMessage(' not in command:
+              if helper_anchor not in command:
+                  raise SystemExit('CommendCommand helper anchor not found')
+              command = command.replace(helper_anchor, helper + helper_anchor, 1)
+          command_file.write_text(command)
+
+          gui_file = Path('src/main/java/org/enthusia/rep/gui/RepGuiManager.java')
+          gui = gui_file.read_text()
+          old_else = '''            } else {
+                  long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
+          '''
+          new_else = '''            } else if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+                  player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
+              } else {
+                  long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
+          '''
+          if 'player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));' not in gui:
+              if old_else not in gui:
+                  raise SystemExit('RepGuiManager cooldown branch not found')
+              gui = gui.replace(old_else, new_else, 1)
+          gui_file.write_text(gui)
+          PY
+
+          if git diff --quiet; then
+            echo 'Focused fixes already applied.'
+            exit 0
+          fi
+          mvn --batch-mode --no-transfer-progress test
+          git config user.name 'P2wn'
+          git config user.email 'racecarboy77@gmail.com'
+          git add src/main/java/org/enthusia/rep/command/CommendCommand.java \
+                  src/main/java/org/enthusia/rep/gui/RepGuiManager.java \
+                  src/main/resources/messages.yml
+          git commit -m 'ES-X04: report reputation restriction rejections'
+          git push origin HEAD:package/es-x04-commend-provider
