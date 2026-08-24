@@ -923,6 +923,8 @@ public final class RepGuiManager implements Listener {
                         "list", RepCategory.selectableValues().stream()
                                 .map(RepCategory::displayName)
                                 .collect(Collectors.joining(", ")))));
+            } else if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+                player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
             } else {
                 long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
                 player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(
