@@ -116,8 +116,8 @@ public final class ReputationModerationService implements ReputationModerationAp
             pending.add(requiredPlayerId);
             ReputationModerationStore.State candidate = new ReputationModerationStore.State(
                     state.blacklists(), state.operations(), pending);
-            state = candidate;
             store.save(candidate);
+            state = candidate;
         }
     }
 
