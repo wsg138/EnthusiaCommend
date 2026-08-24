@@ -15,6 +15,10 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import org.enthusia.rep.api.ReputationBlacklist;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
@@ -105,6 +109,57 @@ class ReputationModerationServiceTest {
         assertEquals(ReputationMutationResult.Status.STALE_BLACKLIST, staleRevision.status());
         assertFalse(service.canGiveReputation(PLAYER));
         assertEquals(revision, service.getBlacklist(PLAYER).orElseThrow().revision());
+    }
+
+    @Test
+    void concurrentApplyWithSameRevisionAllowsOnlyOneCommit() throws Exception {
+        MutableClock clock = new MutableClock(NOW);
+        AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        ReputationModerationService service = new ReputationModerationService(
+                clock, ignored -> state.get(), temporaryDirectory.resolve("concurrent-state.yml"));
+        CyclicBarrier start = new CyclicBarrier(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<ReputationMutationResult.Status> first = executor.submit(() -> {
+                start.await();
+                return service.applyBlacklist(
+                        UUID.randomUUID(), PLAYER, Optional.empty(), "case-a", 0L, state.get().checksum()).status();
+            });
+            Future<ReputationMutationResult.Status> second = executor.submit(() -> {
+                start.await();
+                return service.applyBlacklist(
+                        UUID.randomUUID(), PLAYER, Optional.empty(), "case-b", 0L, state.get().checksum()).status();
+            });
+
+            List<ReputationMutationResult.Status> statuses = List.of(first.get(), second.get());
+            assertEquals(1L, statuses.stream()
+                    .filter(status -> status == ReputationMutationResult.Status.APPLIED)
+                    .count());
+            assertEquals(1L, statuses.stream()
+                    .filter(status -> status == ReputationMutationResult.Status.STALE_BLACKLIST)
+                    .count());
+            assertEquals(1L, service.getBlacklist(PLAYER).orElseThrow().revision());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void failedDurableWriteDoesNotPublishInMemoryBlacklist() throws Exception {
+        Path blockedParent = temporaryDirectory.resolve("not-a-directory");
+        Files.writeString(blockedParent, "blocking file");
+        AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
+        ReputationModerationService service = new ReputationModerationService(
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                ignored -> state.get(),
+                blockedParent.resolve("moderation-state.yml")
+        );
+
+        assertThrows(IllegalStateException.class, () -> service.applyBlacklist(
+                UUID.randomUUID(), PLAYER, Optional.empty(), "case-write-failure", 0L, state.get().checksum()));
+
+        assertTrue(service.canGiveReputation(PLAYER));
+        assertTrue(service.getBlacklist(PLAYER).isEmpty());
     }
 
     @Test
