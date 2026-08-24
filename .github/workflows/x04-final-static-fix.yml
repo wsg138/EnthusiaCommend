@@ -16,11 +16,6 @@ jobs:
         with:
           ref: package/es-x04-commend-provider
           fetch-depth: 0
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
       - name: Replace removed-log slot literals with existing constants
         shell: bash
         run: |
@@ -29,34 +24,23 @@ jobs:
           from pathlib import Path
           path = Path('src/main/java/org/enthusia/rep/gui/RepGuiManager.java')
           text = path.read_text()
-          old = '''    private void handleRemovedLogClick(Player player, RemovedLogHolder holder, int slot, ItemStack clicked) {
-              if (slot == 45) {
-                  openRemovedLog(player, holder.page() - 1);
-                  return;
-              }
-              if (slot == 53) {
-                  openRemovedLog(player, holder.page() + 1);
-                  return;
-              }
-          '''
-          new = '''    private void handleRemovedLogClick(Player player, RemovedLogHolder holder, int slot, ItemStack clicked) {
-              if (slot == PREVIOUS_PAGE_SLOT) {
-                  openRemovedLog(player, holder.page() - 1);
-                  return;
-              }
-              if (slot == NEXT_PAGE_SLOT) {
-                  openRemovedLog(player, holder.page() + 1);
-                  return;
-              }
-          '''
-          if old not in text:
-              if new in text:
-                  raise SystemExit(0)
-              raise SystemExit('expected removed-log slot block not found')
-          path.write_text(text.replace(old, new, 1))
+          replacements = {
+              '''        if (slot == 45) {\n            openRemovedLog(player, holder.page() - 1);''':
+              '''        if (slot == PREVIOUS_PAGE_SLOT) {\n            openRemovedLog(player, holder.page() - 1);''',
+              '''        if (slot == 53) {\n            openRemovedLog(player, holder.page() + 1);''':
+              '''        if (slot == NEXT_PAGE_SLOT) {\n            openRemovedLog(player, holder.page() + 1);''',
+          }
+          changed = False
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new, 1)
+                  changed = True
+              elif new not in text:
+                  raise SystemExit(f'expected GUI slot block not found: {old!r}')
+          if changed:
+              path.write_text(text)
           PY
           if git diff --quiet; then exit 0; fi
-          mvn --batch-mode --no-transfer-progress test
           git config user.name 'P2wn'
           git config user.email 'racecarboy77@gmail.com'
           git add src/main/java/org/enthusia/rep/gui/RepGuiManager.java
