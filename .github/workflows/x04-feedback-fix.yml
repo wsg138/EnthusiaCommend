@@ -1,9 +1,9 @@
 name: X04 feedback fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - package/es-x04-commend-provider
+      - main
 
 permissions:
   contents: write
