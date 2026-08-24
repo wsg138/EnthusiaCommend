@@ -31,6 +31,8 @@ class ReputationModerationServiceTest {
     private static final UUID PLAYER = UUID.fromString("00000000-0000-0000-0000-000000000010");
     private static final UUID GIVER = UUID.fromString("00000000-0000-0000-0000-000000000011");
     private static final Instant NOW = Instant.parse("2026-08-23T20:00:00Z");
+    private static final String STATE_FILE = "state.yml";
+    private static final String CASE_ONE = "case-1";
 
     @TempDir
     Path temporaryDirectory;
@@ -85,24 +87,24 @@ class ReputationModerationServiceTest {
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
-                clock, ignored -> state.get(), temporaryDirectory.resolve("state.yml"));
+                clock, ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
         String originalChecksum = state.get().checksum();
         state.set(snapshot(8));
 
         ReputationMutationResult staleApply = service.applyBlacklist(
-                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, originalChecksum);
+                UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, originalChecksum);
         assertEquals(ReputationMutationResult.Status.STALE_REPUTATION, staleApply.status());
         assertTrue(service.canGiveReputation(PLAYER));
 
         ReputationMutationResult applied = service.applyBlacklist(
-                UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, state.get().checksum());
+                UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.APPLIED, applied.status());
         long revision = applied.blacklist().orElseThrow().revision();
 
         ReputationMutationResult staleApplyRevision = service.applyBlacklist(
                 UUID.randomUUID(), PLAYER, Optional.empty(), "case-new", 0L, state.get().checksum());
         assertEquals(ReputationMutationResult.Status.STALE_BLACKLIST, staleApplyRevision.status());
-        assertEquals("case-1", service.getBlacklist(PLAYER).orElseThrow().caseId());
+        assertEquals(CASE_ONE, service.getBlacklist(PLAYER).orElseThrow().caseId());
 
         ReputationMutationResult staleRevision = service.removeBlacklist(
                 UUID.randomUUID(), PLAYER, "case-2", revision + 1L, state.get().checksum());
@@ -111,8 +113,10 @@ class ReputationModerationServiceTest {
         assertEquals(revision, service.getBlacklist(PLAYER).orElseThrow().revision());
     }
 
+    @SuppressWarnings("PMD.DoNotUseThreads")
     @Test
     void concurrentApplyWithSameRevisionAllowsOnlyOneCommit() throws Exception {
+        // X04 explicitly requires real concurrent callers to prove optimistic revision fencing.
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
@@ -167,7 +171,7 @@ class ReputationModerationServiceTest {
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
-                clock, ignored -> state.get(), temporaryDirectory.resolve("state.yml"));
+                clock, ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
         UUID operationId = UUID.randomUUID();
         assertEquals(ReputationMutationResult.Status.APPLIED, service.applyBlacklist(
                 operationId, PLAYER, Optional.empty(), "case-a", 0L, state.get().checksum()).status());
@@ -184,7 +188,7 @@ class ReputationModerationServiceTest {
         MutableClock clock = new MutableClock(NOW);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
-                clock, ignored -> state.get(), temporaryDirectory.resolve("state.yml"));
+                clock, ignored -> state.get(), temporaryDirectory.resolve(STATE_FILE));
         service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.of(NOW.plus(Duration.ofHours(2))),
                 "case-temp", 0L, state.get().checksum());
         assertFalse(service.canGiveReputation(PLAYER));
@@ -197,11 +201,11 @@ class ReputationModerationServiceTest {
 
     @Test
     void corruptDurableStateBlocksProviderRestart() throws Exception {
-        Path file = temporaryDirectory.resolve("state.yml");
+        Path file = temporaryDirectory.resolve(STATE_FILE);
         AtomicReference<ReputationStateSnapshot> state = new AtomicReference<>(snapshot(7));
         ReputationModerationService service = new ReputationModerationService(
                 Clock.fixed(NOW, ZoneOffset.UTC), ignored -> state.get(), file);
-        service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.empty(), "case-1", 0L, state.get().checksum());
+        service.applyBlacklist(UUID.randomUUID(), PLAYER, Optional.empty(), CASE_ONE, 0L, state.get().checksum());
         Files.writeString(file, "blacklists:\n  invalid: [\n");
 
         assertThrows(IllegalStateException.class, () -> new ReputationModerationService(
@@ -220,14 +224,14 @@ class ReputationModerationServiceTest {
     }
 
     private static final class MutableClock extends Clock {
-        private Instant instant;
+        private Instant currentInstant;
 
         private MutableClock(Instant instant) {
-            this.instant = instant;
+            this.currentInstant = instant;
         }
 
         private void advance(Duration duration) {
-            instant = instant.plus(duration);
+            currentInstant = currentInstant.plus(duration);
         }
 
         @Override
@@ -245,7 +249,7 @@ class ReputationModerationServiceTest {
 
         @Override
         public Instant instant() {
-            return instant;
+            return currentInstant;
         }
     }
 }
