@@ -3,6 +3,7 @@ package org.enthusia.rep.moderation;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -379,9 +380,10 @@ public final class ReputationModerationService implements ReputationModerationAp
         Map<UUID, ReputationBlacklist> blacklists = new LinkedHashMap<>(state.blacklists());
         blacklists.put(persistedBlacklist.playerId(), persistedBlacklist);
         LinkedHashMap<UUID, ReputationModerationStore.Operation> operations = new LinkedHashMap<>(state.operations());
-        while (operations.size() >= MAX_OPERATIONS) {
-            UUID oldestOperation = operations.keySet().iterator().next();
-            operations.remove(oldestOperation);
+        Iterator<UUID> operationIterator = operations.keySet().iterator();
+        while (operations.size() >= MAX_OPERATIONS && operationIterator.hasNext()) {
+            operationIterator.next();
+            operationIterator.remove();
         }
         operations.put(operationId, new ReputationModerationStore.Operation(
                 operationId, fingerprint, status, resultBlacklist, before, after, detail));
