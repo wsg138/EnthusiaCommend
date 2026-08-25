@@ -624,11 +624,11 @@ public final class RepGuiManager implements Listener {
     }
 
     private void handleRemovedLogClick(Player player, RemovedLogHolder holder, int slot, ItemStack clicked) {
-        if (slot == 45) {
+        if (slot == PREVIOUS_PAGE_SLOT) {
             openRemovedLog(player, holder.page() - 1);
             return;
         }
-        if (slot == 53) {
+        if (slot == NEXT_PAGE_SLOT) {
             openRemovedLog(player, holder.page() + 1);
             return;
         }
@@ -923,6 +923,8 @@ public final class RepGuiManager implements Listener {
                         "list", RepCategory.selectableValues().stream()
                                 .map(RepCategory::displayName)
                                 .collect(Collectors.joining(", ")))));
+            } else if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+                player.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
             } else {
                 long hoursLeft = (long) Math.ceil(result.cooldownRemainingMillis() / 1000.0D / 3600.0D);
                 player.sendMessage(plugin.getMessages().get("rep.cooldown", Map.of(

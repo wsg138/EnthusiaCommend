@@ -7,9 +7,11 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.RegisteredServiceProvider;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.rep.analytics.ReputationAnalyticsService;
+import org.enthusia.rep.api.ReputationModerationApi;
 import org.enthusia.rep.command.CommendCommand;
 import org.enthusia.rep.config.Messages;
 import org.enthusia.rep.config.RepConfig;
@@ -21,6 +23,8 @@ import org.enthusia.rep.gui.RepLeaderboardGui;
 import org.enthusia.rep.integration.TeleportIntegration;
 import org.enthusia.rep.integration.WarzoneDuelsHook;
 import org.enthusia.rep.integration.plan.PlanIntegrationBootstrap;
+import org.enthusia.rep.moderation.ReputationModerationService;
+import org.enthusia.rep.moderation.ReputationSnapshotFactory;
 import org.enthusia.rep.placeholder.RepPlaceholderExpansion;
 import org.enthusia.rep.playtime.PlaytimeService;
 import org.enthusia.rep.region.RegionManager;
@@ -34,6 +38,7 @@ import org.enthusia.rep.storage.YamlPluginDataStore;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -99,6 +104,18 @@ public final class CommendPlugin extends JavaPlugin {
                 analyticsService,
                 record -> handleAuditRecord(record)
         );
+        ReputationModerationService moderationService = new ReputationModerationService(
+                Clock.systemUTC(),
+                playerId -> ReputationSnapshotFactory.snapshot(repService, playerId),
+                getDataFolder().toPath().resolve("moderation-state.yml")
+        );
+        this.repService.setGrantPolicy(moderationService::canGiveReputation);
+        getServer().getServicesManager().register(
+                ReputationModerationApi.class,
+                moderationService,
+                this,
+                ServicePriority.Normal
+        );
         for (var player : Bukkit.getOnlinePlayers()) {
             repService.rememberName(player.getUniqueId(), player.getName());
         }
@@ -132,6 +149,7 @@ public final class CommendPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         cancelAutoSaveTask();
+        getServer().getServicesManager().unregisterAll(this);
         if (repGuiManager != null) {
             repGuiManager.shutdown();
         }

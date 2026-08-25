@@ -111,7 +111,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                 player.getUniqueId(), target.getUniqueId(), category.isPositive(), category,
                 trimReason(joinReason(args, 3)), giverIpHash(player));
         if (!result.success()) {
-            sendCooldownMessage(player, result);
+            sendGiveFailureMessage(player, result);
             return true;
         }
         sendDirectGiveSuccess(player, target, result.commendation());
@@ -178,6 +178,14 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                 ? giver.getAddress().getAddress().getHostAddress() : null;
         return repService.hashIp(address);
     }
+
+    private void sendGiveFailureMessage(Player giver, RepService.CommendationResult result) {
+    if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+        giver.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
+        return;
+    }
+    sendCooldownMessage(giver, result);
+}
 
     private void sendCooldownMessage(Player giver, RepService.CommendationResult result) {
         if (result.cooldownRemainingMillis() <= 0L) {
