@@ -57,7 +57,7 @@ class ReputationModerationStoreTest {
         yaml.load(file.toFile());
         String operationPath = "operations." + OPERATION;
         ConfigurationSection compact = yaml.getConfigurationSection(operationPath + ".snapshot");
-        Map<String, Object> values = new LinkedHashMap<>(compact.getValues(false));
+        Map<String, Object> values = compact.getValues(false);
         yaml.set(operationPath + ".snapshot", null);
         yaml.createSection(operationPath + ".before", values);
         yaml.createSection(operationPath + ".after", values);
