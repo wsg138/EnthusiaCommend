@@ -3,11 +3,13 @@ package org.enthusia.rep.region;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +20,7 @@ class RegionDefaultsTest {
     private static final String WORLD = "world";
 
     @Test
-    void freshPackagedConfigurationContainsAllProductionDefaults() {
+    void freshPackagedConfigurationContainsAllProductionDefaults() throws IOException {
         Regions regions = loadRegions();
         assertNotNull(regions.market());
         assertNotNull(regions.spawn());
@@ -26,7 +28,7 @@ class RegionDefaultsTest {
     }
 
     @Test
-    void defaultsResolveGeneralAndStalkingOverlapsAtAnyHeight() {
+    void defaultsResolveGeneralAndStalkingOverlapsAtAnyHeight() throws IOException {
         Regions regions = loadRegions();
 
         assertEquals(RegionManager.LogicalZone.WARZONE, resolveGeneral(regions, 0, -200));
@@ -43,7 +45,7 @@ class RegionDefaultsTest {
     }
 
     @Test
-    void horizontalBoundariesCornersAndWorldChecksAreInclusive() {
+    void horizontalBoundariesCornersAndWorldChecksAreInclusive() throws IOException {
         Regions regions = loadRegions();
         assertHorizontalInclusive(regions.market(), -72, 102, -281, -162);
         assertHorizontalInclusive(regions.spawn(), -48, 69, -33, 84);
@@ -95,15 +97,18 @@ class RegionDefaultsTest {
                 true);
     }
 
-    private Regions loadRegions() {
-        InputStream stream = getClass().getClassLoader().getResourceAsStream("config.yml");
-        assertNotNull(stream);
-        YamlConfiguration config = YamlConfiguration.loadConfiguration(
-                new InputStreamReader(stream, StandardCharsets.UTF_8));
-        return new Regions(
-                loadRegion(config, "regions.market"),
-                loadRegion(config, "regions.spawn"),
-                loadRegion(config, "regions.warzone"));
+    private Regions loadRegions() throws IOException {
+        InputStream resource = Objects.requireNonNull(
+                getClass().getClassLoader().getResourceAsStream("config.yml"),
+                "Packaged config.yml is missing");
+        try (InputStream stream = resource;
+             InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(reader);
+            return new Regions(
+                    loadRegion(config, "regions.market"),
+                    loadRegion(config, "regions.spawn"),
+                    loadRegion(config, "regions.warzone"));
+        }
     }
 
     private CuboidRegion loadRegion(YamlConfiguration config, String path) {
