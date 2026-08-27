@@ -99,7 +99,7 @@ class RegionDefaultsTest {
 
     private Regions loadRegions() throws IOException {
         InputStream resource = Objects.requireNonNull(
-                getClass().getClassLoader().getResourceAsStream("config.yml"),
+                RegionDefaultsTest.class.getResourceAsStream("/config.yml"),
                 "Packaged config.yml is missing");
         try (InputStream stream = resource;
              InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
