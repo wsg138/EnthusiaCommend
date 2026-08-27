@@ -1,7 +1,9 @@
 package org.enthusia.rep.moderation;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -165,6 +167,11 @@ final class ReputationModerationStore {
         }
         try (FileChannel channel = FileChannel.open(parent, StandardOpenOption.READ)) {
             channel.force(true);
+        } catch (AccessDeniedException exception) {
+            // The default Windows provider does not permit opening a directory as a FileChannel.
+            if (File.separatorChar != '\\' || !Files.isDirectory(parent)) {
+                throw exception;
+            }
         }
     }
 
