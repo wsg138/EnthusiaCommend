@@ -149,20 +149,19 @@ public class GlowManager {
                     Player.class,
                     net.md_5.bungee.api.ChatColor.class
             );
+            boolean success = false;
             for (Player viewer : viewers) {
                 try {
                     legacy.invoke(glowing, target, viewer, color);
+                    success = true;
                 } catch (ReflectiveOperationException ignored) {
                 }
             }
-            logDebug("Glow path: legacy-bungee");
-            return true;
+            if (success) logDebug("Glow path: legacy-bungee");
+            return success;
         } catch (NoSuchMethodException ignored) {
-            // nothing left to try
-        } catch (ReflectiveOperationException ex) {
-            plugin.getLogger().warning("Failed to apply glow to " + target.getName() + ": " + ex.getMessage());
+            return false;
         }
-        return false;
     }
 
     private boolean invokeTeam(Player target, ChatColor color, Player[] viewers) {
@@ -186,9 +185,6 @@ public class GlowManager {
             if (success) logDebug("Glow path: team-bukkit (" + team + ")");
             return success;
         } catch (NoSuchMethodException ignored) {
-            return false;
-        } catch (ReflectiveOperationException ex) {
-            plugin.getLogger().warning("Failed to apply team-based glow to " + target.getName() + ": " + ex.getMessage());
             return false;
         }
     }
