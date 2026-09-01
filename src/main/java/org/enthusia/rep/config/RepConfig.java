@@ -71,55 +71,17 @@ public final class RepConfig {
     }
 
     public String formatColoredScore(int score) {
-        return colorForScore(score) + String.valueOf(score);
+        return colorForScore(score).toString() + score;
     }
 
     /** Movement-speed reputation modifiers are intentionally disabled. */
     public RepAppliedEffects resolveEffects(int score) {
-        int potionDurationPercent = 0;
-        int fireworkDurationPercent = 0;
-        int pearlCooldownSeconds = 0;
-        int windCooldownSeconds = 0;
-        boolean glow = false;
-        ChatColor glowColor = null;
-        boolean stalkable = false;
-        int cashbackPercent = 0;
-
-        if (score <= effectThresholds.pearlCooldownThreeSecondsAt) pearlCooldownSeconds = 3;
-        if (score <= effectThresholds.fireworkDurationMinusFiveAt) fireworkDurationPercent = -5;
-        if (score <= effectThresholds.windChargeCooldownTwoSecondsAt) windCooldownSeconds = 2;
-        if (score <= effectThresholds.fireworkDurationMinusTenAt) fireworkDurationPercent = -10;
-        if (score <= effectThresholds.glowAt) glow = true;
-        if (score <= effectThresholds.stalkableAt) stalkable = true;
-        if (score <= effectThresholds.potionDurationMinusTenAt) potionDurationPercent = -10;
-        if (score <= effectThresholds.pearlCooldownSevenSecondsAt) pearlCooldownSeconds = 7;
-        if (score <= effectThresholds.windChargeCooldownFiveSecondsAt) windCooldownSeconds = 5;
-        if (score <= effectThresholds.fireworkDurationMinusFifteenAt) fireworkDurationPercent = -15;
-        if (score <= effectThresholds.pearlCooldownTenSecondsAt) pearlCooldownSeconds = 10;
-        if (score <= effectThresholds.windChargeCooldownTenSecondsAt) windCooldownSeconds = 10;
-        if (score <= effectThresholds.potionDurationMinusFifteenAt) potionDurationPercent = -15;
-        if (score <= effectThresholds.fireworkDurationMinusTwentyFiveAt) fireworkDurationPercent = -25;
-        if (score <= effectThresholds.redGlowAt) {
-            glow = true;
-            glowColor = ChatColor.RED;
-        }
-
-        if (score >= effectThresholds.potionDurationPlusFiveAt) potionDurationPercent = 5;
-        if (score >= effectThresholds.cashbackThreePercentAt) cashbackPercent = 3;
-        if (score >= effectThresholds.potionDurationPlusTenAt) potionDurationPercent = 10;
-        if (score >= effectThresholds.cashbackFivePercentAt) cashbackPercent = 5;
-
-        return new RepAppliedEffects(
-                0,
-                potionDurationPercent,
-                fireworkDurationPercent,
-                pearlCooldownSeconds,
-                windCooldownSeconds,
-                glow,
-                glowColor,
-                stalkable,
-                cashbackPercent
-        );
+        EffectAccumulator effects = new EffectAccumulator();
+        effects.applyCooldownPenalties(score, effectThresholds);
+        effects.applyDurationPenalties(score, effectThresholds);
+        effects.applyRestrictions(score, effectThresholds);
+        effects.applyBenefits(score, effectThresholds);
+        return effects.toAppliedEffects();
     }
 
     public boolean crossedEffectThreshold(int oldScore, int newScore) {
@@ -145,6 +107,65 @@ public final class RepConfig {
             } catch (IllegalArgumentException ignored) {
                 return ANVIL;
             }
+        }
+    }
+
+    private static final class EffectAccumulator {
+        private int potionDurationPercent;
+        private int fireworkDurationPercent;
+        private int pearlCooldownSeconds;
+        private int windCooldownSeconds;
+        private boolean glow;
+        private ChatColor glowColor;
+        private boolean stalkable;
+        private int cashbackPercent;
+
+        private void applyCooldownPenalties(int score, EffectThresholds thresholds) {
+            if (score <= thresholds.pearlCooldownThreeSecondsAt) pearlCooldownSeconds = 3;
+            if (score <= thresholds.pearlCooldownSevenSecondsAt) pearlCooldownSeconds = 7;
+            if (score <= thresholds.pearlCooldownTenSecondsAt) pearlCooldownSeconds = 10;
+            if (score <= thresholds.windChargeCooldownTwoSecondsAt) windCooldownSeconds = 2;
+            if (score <= thresholds.windChargeCooldownFiveSecondsAt) windCooldownSeconds = 5;
+            if (score <= thresholds.windChargeCooldownTenSecondsAt) windCooldownSeconds = 10;
+        }
+
+        private void applyDurationPenalties(int score, EffectThresholds thresholds) {
+            if (score <= thresholds.fireworkDurationMinusFiveAt) fireworkDurationPercent = -5;
+            if (score <= thresholds.fireworkDurationMinusTenAt) fireworkDurationPercent = -10;
+            if (score <= thresholds.fireworkDurationMinusFifteenAt) fireworkDurationPercent = -15;
+            if (score <= thresholds.fireworkDurationMinusTwentyFiveAt) fireworkDurationPercent = -25;
+            if (score <= thresholds.potionDurationMinusTenAt) potionDurationPercent = -10;
+            if (score <= thresholds.potionDurationMinusFifteenAt) potionDurationPercent = -15;
+        }
+
+        private void applyRestrictions(int score, EffectThresholds thresholds) {
+            if (score <= thresholds.glowAt) glow = true;
+            if (score <= thresholds.stalkableAt) stalkable = true;
+            if (score <= thresholds.redGlowAt) {
+                glow = true;
+                glowColor = ChatColor.RED;
+            }
+        }
+
+        private void applyBenefits(int score, EffectThresholds thresholds) {
+            if (score >= thresholds.potionDurationPlusFiveAt) potionDurationPercent = 5;
+            if (score >= thresholds.cashbackThreePercentAt) cashbackPercent = 3;
+            if (score >= thresholds.potionDurationPlusTenAt) potionDurationPercent = 10;
+            if (score >= thresholds.cashbackFivePercentAt) cashbackPercent = 5;
+        }
+
+        private RepAppliedEffects toAppliedEffects() {
+            return new RepAppliedEffects(
+                    0,
+                    potionDurationPercent,
+                    fireworkDurationPercent,
+                    pearlCooldownSeconds,
+                    windCooldownSeconds,
+                    glow,
+                    glowColor,
+                    stalkable,
+                    cashbackPercent
+            );
         }
     }
 

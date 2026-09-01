@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class RegionManager {
+    private static final int COORDINATE_COMPONENTS = 3;
     private volatile List<CuboidRegion> marketRegions = List.of();
     private volatile List<CuboidRegion> spawnRegions = List.of();
     private volatile List<CuboidRegion> warzoneRegions = List.of();
@@ -75,7 +76,7 @@ public final class RegionManager {
 
     private static int[] parseCoord(String value) {
         String[] parts = value.split(",");
-        if (parts.length != 3) return null;
+        if (parts.length != COORDINATE_COMPONENTS) return null;
         try {
             return new int[] {Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim()), Integer.parseInt(parts[2].trim())};
         } catch (NumberFormatException ignored) {

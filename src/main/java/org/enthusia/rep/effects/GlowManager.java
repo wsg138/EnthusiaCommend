@@ -14,6 +14,11 @@ import java.util.Objects;
  */
 public class GlowManager {
 
+    private static final String SET_GLOWING_METHOD = "setGlowing";
+    private static final String UNSET_GLOWING_METHOD = "unsetGlowing";
+    private static final int TEAM_NAME_LIMIT = 16;
+    private static final int TEAM_UUID_PREFIX_LENGTH = 12;
+
     private final GlowingEntities glowing;
     private final JavaPlugin plugin;
 
@@ -26,43 +31,36 @@ public class GlowManager {
     public void setGlow(Player target, ChatColor color, Collection<? extends Player> viewers) {
         if (target == null || viewers == null) return;
 
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            // Prefer bungee ChatColor (most libs) but fall back to Bukkit ChatColor if only that API exists
-            net.md_5.bungee.api.ChatColor bungeeColor = color != null
-                    ? net.md_5.bungee.api.ChatColor.valueOf(color.name())
-                    : net.md_5.bungee.api.ChatColor.WHITE;
-            ChatColor bukkitColor = color != null ? color : ChatColor.WHITE;
+        plugin.getServer().getScheduler().runTask(plugin, () -> applyGlow(target, color, viewers));
+    }
 
-            Player[] viewerArray = viewers.stream()
-                    .filter(Objects::nonNull)
-                    .toArray(Player[]::new);
-            if (viewerArray.length == 0) return;
+    private void applyGlow(Player target, ChatColor color, Collection<? extends Player> viewers) {
+        ChatColor bukkitColor = color != null ? color : ChatColor.WHITE;
+        net.md_5.bungee.api.ChatColor bungeeColor = net.md_5.bungee.api.ChatColor.valueOf(bukkitColor.name());
+        Player[] viewerArray = viewers.stream()
+                .filter(Objects::nonNull)
+                .toArray(Player[]::new);
+        if (viewerArray.length == 0) return;
 
-            // Clear existing glow per viewer before reapplying so color updates reliably
-            unsetGlow(target, viewerArray);
+        unsetGlow(target, viewerArray);
+        if (!applyWithAvailableApi(target, bukkitColor, bungeeColor, viewerArray)) {
+            logDebug("Glow path: none matched (still white?)");
+            return;
+        }
+        try {
+            target.setGlowing(true);
+        } catch (Exception ignored) {
+        }
+    }
 
-            boolean applied = false;
-
-            // Try bulk color overloads first (most reliable for setting team color)
-            applied |= invokeBulk(target, bukkitColor, viewerArray, "bulk-bukkit");
-            applied |= !applied && invokeBulk(target, bungeeColor, viewerArray, "bulk-bungee");
-
-            // Team-based overload available in legacy library: setGlowing(int entityId, String team, Player viewer, ChatColor color)
-            applied |= !applied && invokeTeam(target, bukkitColor, viewerArray);
-
-            // Legacy per-viewer fallbacks
-            applied |= !applied && invokeLegacy(target, bukkitColor, viewerArray);
-            applied |= !applied && invokeLegacyBungee(target, bungeeColor, viewerArray);
-
-            if (applied) {
-                try {
-                    target.setGlowing(true);
-                } catch (Exception ignored) {
-                }
-            } else {
-                logDebug("Glow path: none matched (still white?)");
-            }
-        });
+    private boolean applyWithAvailableApi(Player target, ChatColor bukkitColor,
+                                          net.md_5.bungee.api.ChatColor bungeeColor,
+                                          Player[] viewers) {
+        return invokeBulk(target, bukkitColor, viewers, "bulk-bukkit")
+                || invokeBulk(target, bungeeColor, viewers, "bulk-bungee")
+                || invokeTeam(target, bukkitColor, viewers)
+                || invokeLegacy(target, bukkitColor, viewers)
+                || invokeLegacyBungee(target, bungeeColor, viewers);
     }
 
     public void clearGlow(Player target) {
@@ -97,7 +95,7 @@ public class GlowManager {
 
     private boolean unsetAll(Player target) {
         try {
-            Method unsetAll = glowing.getClass().getMethod("unsetGlowing", org.bukkit.entity.Entity.class);
+            Method unsetAll = glowing.getClass().getMethod(UNSET_GLOWING_METHOD, org.bukkit.entity.Entity.class);
             unsetAll.invoke(glowing, target);
             logDebug("Glow unset: global");
             return true;
@@ -112,7 +110,7 @@ public class GlowManager {
     private boolean invokeBulk(Player target, Object color, Player[] viewers, String pathName) {
         try {
             Method m = glowing.getClass().getMethod(
-                    "setGlowing",
+                    SET_GLOWING_METHOD,
                     org.bukkit.entity.Entity.class,
                     color instanceof ChatColor ? ChatColor.class : net.md_5.bungee.api.ChatColor.class,
                     Player[].class
@@ -144,7 +142,7 @@ public class GlowManager {
     private boolean invokeLegacyBungee(Player target, net.md_5.bungee.api.ChatColor color, Player[] viewers) {
         try {
             Method legacy = glowing.getClass().getMethod(
-                    "setGlowing",
+                    SET_GLOWING_METHOD,
                     org.bukkit.entity.Entity.class,
                     Player.class,
                     net.md_5.bungee.api.ChatColor.class
@@ -167,7 +165,7 @@ public class GlowManager {
     private boolean invokeTeam(Player target, ChatColor color, Player[] viewers) {
         try {
             Method teamMethod = glowing.getClass().getMethod(
-                    "setGlowing",
+                    SET_GLOWING_METHOD,
                     int.class,
                     String.class,
                     Player.class,
@@ -192,11 +190,13 @@ public class GlowManager {
     private String buildTeamName(Player target, ChatColor color) {
         // Max scoreboard team length is 16
         String hex = target.getUniqueId().toString().replace("-", "");
-        String colorTag = color != null ? String.valueOf(color.getChar()) : "w";
-        String suffix = hex.length() >= 12 ? hex.substring(0, 12) : hex;
+        String colorTag = color != null ? Character.toString(color.getChar()) : "w";
+        String suffix = hex.length() >= TEAM_UUID_PREFIX_LENGTH
+                ? hex.substring(0, TEAM_UUID_PREFIX_LENGTH)
+                : hex;
         String name = "cmg" + suffix + colorTag;
-        if (name.length() > 16) {
-            name = name.substring(0, 16);
+        if (name.length() > TEAM_NAME_LIMIT) {
+            name = name.substring(0, TEAM_NAME_LIMIT);
         }
         return name;
     }
@@ -204,7 +204,7 @@ public class GlowManager {
     private void logAvailableMethods() {
         for (Method m : glowing.getClass().getMethods()) {
             String name = m.getName();
-            if ("setGlowing".equals(name) || "unsetGlowing".equals(name)) {
+            if (SET_GLOWING_METHOD.equals(name) || UNSET_GLOWING_METHOD.equals(name)) {
                 plugin.getLogger().info("[GlowDebug] GlowingEntities method: " + m);
             }
         }

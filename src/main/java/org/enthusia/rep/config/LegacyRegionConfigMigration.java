@@ -9,6 +9,7 @@ import java.util.Set;
 
 /** Migrates only the exact region lists shipped before the production-zone update. */
 public final class LegacyRegionConfigMigration {
+    private static final int COORDINATE_COMPONENTS = 3;
     private static final String WORLD_KEY = "world";
     private static final String MINIMUM_KEY = "min";
     private static final String MAXIMUM_KEY = "max";
@@ -55,8 +56,7 @@ public final class LegacyRegionConfigMigration {
     private static boolean sameCoordinates(Object actual, String expected) {
         int[] actualCoordinates = parseCoordinates(actual);
         int[] expectedCoordinates = parseCoordinates(expected);
-        return actualCoordinates != null && expectedCoordinates != null
-                && java.util.Arrays.equals(actualCoordinates, expectedCoordinates);
+        return actualCoordinates != null && java.util.Arrays.equals(actualCoordinates, expectedCoordinates);
     }
 
     private static int[] parseCoordinates(Object value) {
@@ -64,7 +64,7 @@ public final class LegacyRegionConfigMigration {
             return null;
         }
         String[] parts = String.valueOf(value).split(",");
-        if (parts.length != 3) {
+        if (parts.length != COORDINATE_COMPONENTS) {
             return null;
         }
         try {

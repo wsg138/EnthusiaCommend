@@ -23,6 +23,7 @@ public final class DiscordWebhookService implements AutoCloseable {
     private static final int QUEUE_CAPACITY = 256;
     private static final long FAILURE_LOG_INTERVAL_MILLIS = 60_000L;
     private static final int DESCRIPTION_LIMIT = 4096;
+    private static final int JSON_CONTROL_CHARACTER_LIMIT = 0x20;
 
     private final URI webhookUri;
     private final Logger logger;
@@ -79,6 +80,18 @@ public final class DiscordWebhookService implements AutoCloseable {
 
     static String toJson(LogEntry entry) {
         Action action = entry.action() == null ? Action.CREATED : entry.action();
+        String description = buildDescription(entry, action);
+        int color = embedColor(entry.category());
+        String thumbnail = thumbnailJson(entry.thumbnailUrl());
+        Instant timestamp = entry.timestamp() == null ? Instant.now() : entry.timestamp();
+        return "{\"allowed_mentions\":{\"parse\":[]},\"embeds\":[{"
+                + "\"description\":\"" + escape(description) + "\","
+                + "\"color\":" + color + ","
+                + "\"timestamp\":\"" + timestamp + "\""
+                + thumbnail + "}]}";
+    }
+
+    private static String buildDescription(LogEntry entry, Action action) {
         String actor = singleLine(entry.actorName(), 64, "Administrator");
         String giver = singleLine(entry.giverName(), 64, "Unknown player");
         String target = singleLine(entry.targetName(), 64, "Unknown player");
@@ -90,15 +103,18 @@ public final class DiscordWebhookService implements AutoCloseable {
             case RESTORED -> actor + " restored reputation for " + target;
         };
         String secondLine = reason.isBlank() ? category : category + " • " + reason;
-        String description = truncate(firstLine + "\n" + secondLine, DESCRIPTION_LIMIT);
-        int color = entry.category() != null && !entry.category().isPositive() ? 0xED4245 : 0x57F287;
-        String thumbnail = entry.thumbnailUrl() == null || entry.thumbnailUrl().isBlank()
-                ? "" : ",\"thumbnail\":{\"url\":\"" + escape(entry.thumbnailUrl()) + "\"}";
-        return "{\"allowed_mentions\":{\"parse\":[]},\"embeds\":[{"
-                + "\"description\":\"" + escape(description) + "\","
-                + "\"color\":" + color + ","
-                + "\"timestamp\":\"" + (entry.timestamp() == null ? Instant.now() : entry.timestamp()) + "\""
-                + thumbnail + "}]}";
+        return truncate(firstLine + "\n" + secondLine, DESCRIPTION_LIMIT);
+    }
+
+    private static int embedColor(RepCategory category) {
+        return category != null && !category.isPositive() ? 0xED4245 : 0x57F287;
+    }
+
+    private static String thumbnailJson(String thumbnailUrl) {
+        if (thumbnailUrl == null || thumbnailUrl.isBlank()) {
+            return "";
+        }
+        return ",\"thumbnail\":{\"url\":\"" + escape(thumbnailUrl) + "\"}";
     }
 
     private static String singleLine(String value, int maxLength, String fallback) {
@@ -127,8 +143,11 @@ public final class DiscordWebhookService implements AutoCloseable {
                 case '\n' -> escaped.append("\\n");
                 case '\t' -> escaped.append("\\t");
                 default -> {
-                    if (character < 0x20) escaped.append(String.format("\\u%04x", (int) character));
-                    else escaped.append(character);
+                    if (character < JSON_CONTROL_CHARACTER_LIMIT) {
+                        escaped.append(String.format("\\u%04x", (int) character));
+                    } else {
+                        escaped.append(character);
+                    }
                 }
             }
         }
