@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -605,19 +606,19 @@ public final class RepService {
     }
 
     public String hashIp(String ipAddress) {
+        return hashIpValue(ipAddress);
+    }
+
+    static String hashIpValue(String ipAddress) {
         if (ipAddress == null || ipAddress.isBlank()) {
             return null;
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(ipAddress.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < 8 && i < bytes.length; i++) {
-                builder.append(String.format("%02x", bytes[i]));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException ignored) {
-            return Integer.toHexString(ipAddress.hashCode());
+            return HexFormat.of().formatHex(bytes, 0, 8);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Required SHA-256 digest is unavailable.", exception);
         }
     }
 
