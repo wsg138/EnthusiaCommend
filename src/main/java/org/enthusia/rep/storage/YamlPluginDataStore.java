@@ -16,17 +16,25 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class YamlPluginDataStore implements PluginDataStore {
     private static final int DATA_VERSION = 6;
 
-    private final CommendPlugin plugin;
     private final File file;
+    private final Logger logger;
 
     public YamlPluginDataStore(CommendPlugin plugin) {
-        this.plugin = plugin;
-        this.file = new File(plugin.getDataFolder(), "data.yml");
+        this(plugin.getDataFolder(), plugin.getLogger());
+    }
+
+    YamlPluginDataStore(File dataFolder, Logger logger) {
+        this.file = new File(Objects.requireNonNull(dataFolder, "dataFolder"), "data.yml");
+        this.logger = Objects.requireNonNull(logger, "logger");
     }
 
     @Override
@@ -36,173 +44,232 @@ public final class YamlPluginDataStore implements PluginDataStore {
         }
 
         YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+        return new PluginDataSnapshot(
+                loadScores(config),
+                loadCommendations(config),
+                loadMappedEntries(config, "removed", RepService.RemovedRep::fromMap),
+                loadStalkEntries(config),
+                loadMappedEntries(config, "reputationChanges", ReputationChangeRecord::fromMap),
+                loadMappedEntries(config, "suspiciousCases", RepService.SuspiciousRepCase::fromMap),
+                loadRemovalCooldowns(config),
+                loadAlertPreferences(config)
+        );
+    }
+
+    private Map<UUID, Integer> loadScores(YamlConfiguration config) {
         Map<UUID, Integer> scores = new LinkedHashMap<>();
-        List<Commendation> commendations = new ArrayList<>();
-        List<RepService.RemovedRep> removedEntries = new ArrayList<>();
-        List<PluginDataSnapshot.StalkEntry> stalkEntries = new ArrayList<>();
-        List<ReputationChangeRecord> reputationChanges = new ArrayList<>();
-        List<RepService.SuspiciousRepCase> suspiciousCases = new ArrayList<>();
-        List<PluginDataSnapshot.RemovalCooldownEntry> removalCooldowns = new ArrayList<>();
-        Map<UUID, Boolean> alertPreferences = new LinkedHashMap<>();
-
         ConfigurationSection players = config.getConfigurationSection("players");
-        if (players != null) {
-            for (String key : players.getKeys(false)) {
-                try {
-                    UUID uuid = UUID.fromString(key);
-                    scores.put(uuid, players.getInt(key + ".score", 0));
-                } catch (IllegalArgumentException ignored) {
-                }
-            }
+        if (players == null) {
+            return scores;
         }
-
-        ConfigurationSection commendationSection = config.getConfigurationSection("commendations");
-        if (commendationSection != null) {
-            for (String key : commendationSection.getKeys(false)) {
-                Commendation commendation = Commendation.fromSection(commendationSection.getConfigurationSection(key));
-                if (commendation != null) {
-                    commendations.add(commendation);
-                }
-            }
-        }
-
-        for (Map<?, ?> rawRemoved : config.getMapList("removed")) {
-            RepService.RemovedRep removed = RepService.RemovedRep.fromMap(rawRemoved);
-            if (removed != null) {
-                removedEntries.add(removed);
-            }
-        }
-
-        for (Map<?, ?> rawChange : config.getMapList("reputationChanges")) {
-            ReputationChangeRecord change = ReputationChangeRecord.fromMap(rawChange);
-            if (change != null) {
-                reputationChanges.add(change);
-            }
-        }
-
-        for (Map<?, ?> rawCase : config.getMapList("suspiciousCases")) {
-            RepService.SuspiciousRepCase caseData = RepService.SuspiciousRepCase.fromMap(rawCase);
-            if (caseData != null) {
-                suspiciousCases.add(caseData);
-            }
-        }
-
-        for (Map<?, ?> rawCooldown : config.getMapList("removalCooldowns")) {
+        for (String key : players.getKeys(false)) {
             try {
-                UUID giverId = UUID.fromString(String.valueOf(rawCooldown.get("giver")));
-                UUID targetId = UUID.fromString(String.valueOf(rawCooldown.get("target")));
-                long removedAt = rawCooldown.get("removedAt") instanceof Number value
-                        ? value.longValue() : Long.parseLong(String.valueOf(rawCooldown.get("removedAt")));
-                removalCooldowns.add(new PluginDataSnapshot.RemovalCooldownEntry(giverId, targetId, removedAt));
-            } catch (Exception ignored) {
+                scores.put(UUID.fromString(key), players.getInt(key + ".score", 0));
+            } catch (IllegalArgumentException ignored) {
             }
         }
+        return scores;
+    }
 
-        ConfigurationSection preferenceSection = config.getConfigurationSection("playerSettings");
-        if (preferenceSection != null) {
-            for (String key : preferenceSection.getKeys(false)) {
-                try {
-                    UUID uuid = UUID.fromString(key);
-                    String path = key + ".repTradingAlertsEnabled";
-                    if (preferenceSection.isSet(path)) {
-                        alertPreferences.put(uuid, preferenceSection.getBoolean(path));
-                    }
-                } catch (IllegalArgumentException ignored) {
-                }
+    private List<Commendation> loadCommendations(YamlConfiguration config) {
+        List<Commendation> commendations = new ArrayList<>();
+        ConfigurationSection section = config.getConfigurationSection("commendations");
+        if (section == null) {
+            return commendations;
+        }
+        for (String key : section.getKeys(false)) {
+            Commendation commendation = Commendation.fromSection(section.getConfigurationSection(key));
+            if (commendation != null) {
+                commendations.add(commendation);
             }
         }
+        return commendations;
+    }
 
-        ConfigurationSection stalkSection = config.getConfigurationSection("stalks");
-        if (stalkSection != null) {
-            for (String key : stalkSection.getKeys(false)) {
-                try {
-                    UUID stalkerId = UUID.fromString(stalkSection.getString(key + ".stalker"));
-                    UUID targetId = UUID.fromString(stalkSection.getString(key + ".target"));
-                    long expiresAt = stalkSection.getLong(key + ".expiresAt");
-                    stalkEntries.add(new PluginDataSnapshot.StalkEntry(stalkerId, targetId, expiresAt));
-                } catch (Exception ignored) {
-                }
+    private <T> List<T> loadMappedEntries(YamlConfiguration config, String path,
+                                          Function<Map<?, ?>, T> parser) {
+        List<T> entries = new ArrayList<>();
+        for (Map<?, ?> rawEntry : config.getMapList(path)) {
+            T entry = parser.apply(rawEntry);
+            if (entry != null) {
+                entries.add(entry);
             }
         }
+        return entries;
+    }
 
-        return new PluginDataSnapshot(scores, commendations, removedEntries, stalkEntries, reputationChanges,
-                suspiciousCases, removalCooldowns, alertPreferences);
+    private List<PluginDataSnapshot.RemovalCooldownEntry> loadRemovalCooldowns(YamlConfiguration config) {
+        List<PluginDataSnapshot.RemovalCooldownEntry> entries = new ArrayList<>();
+        for (Map<?, ?> rawEntry : config.getMapList("removalCooldowns")) {
+            PluginDataSnapshot.RemovalCooldownEntry entry = parseRemovalCooldown(rawEntry);
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+        return entries;
+    }
+
+    private PluginDataSnapshot.RemovalCooldownEntry parseRemovalCooldown(Map<?, ?> rawEntry) {
+        try {
+            UUID giverId = UUID.fromString(String.valueOf(rawEntry.get("giver")));
+            UUID targetId = UUID.fromString(String.valueOf(rawEntry.get("target")));
+            Object rawRemovedAt = rawEntry.get("removedAt");
+            long removedAt = rawRemovedAt instanceof Number value
+                    ? value.longValue()
+                    : Long.parseLong(String.valueOf(rawRemovedAt));
+            return new PluginDataSnapshot.RemovalCooldownEntry(giverId, targetId, removedAt);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Map<UUID, Boolean> loadAlertPreferences(YamlConfiguration config) {
+        Map<UUID, Boolean> preferences = new LinkedHashMap<>();
+        ConfigurationSection section = config.getConfigurationSection("playerSettings");
+        if (section == null) {
+            return preferences;
+        }
+        for (String key : section.getKeys(false)) {
+            loadAlertPreference(section, key, preferences);
+        }
+        return preferences;
+    }
+
+    private void loadAlertPreference(ConfigurationSection section, String key,
+                                     Map<UUID, Boolean> preferences) {
+        try {
+            UUID playerId = UUID.fromString(key);
+            String path = key + ".repTradingAlertsEnabled";
+            if (section.isSet(path)) {
+                preferences.put(playerId, section.getBoolean(path));
+            }
+        } catch (IllegalArgumentException ignored) {
+        }
+    }
+
+    private List<PluginDataSnapshot.StalkEntry> loadStalkEntries(YamlConfiguration config) {
+        List<PluginDataSnapshot.StalkEntry> entries = new ArrayList<>();
+        ConfigurationSection section = config.getConfigurationSection("stalks");
+        if (section == null) {
+            return entries;
+        }
+        for (String key : section.getKeys(false)) {
+            PluginDataSnapshot.StalkEntry entry = parseStalkEntry(section, key);
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+        return entries;
+    }
+
+    private PluginDataSnapshot.StalkEntry parseStalkEntry(ConfigurationSection section, String key) {
+        try {
+            UUID stalkerId = UUID.fromString(section.getString(key + ".stalker"));
+            UUID targetId = UUID.fromString(section.getString(key + ".target"));
+            long expiresAt = section.getLong(key + ".expiresAt");
+            return new PluginDataSnapshot.StalkEntry(stalkerId, targetId, expiresAt);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     @Override
     public boolean save(PluginDataSnapshot snapshot) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", DATA_VERSION);
+        writeScores(config, snapshot.scores());
+        writeCommendations(config, snapshot.commendations());
+        config.set("removed", serialize(snapshot.removedEntries(), RepService.RemovedRep::serialize));
+        config.set("reputationChanges", serialize(
+                snapshot.reputationChanges(), ReputationChangeRecord::serialize));
+        config.set("suspiciousCases", serialize(
+                snapshot.suspiciousCases(), RepService.SuspiciousRepCase::serialize));
+        config.set("removalCooldowns", serializeRemovalCooldowns(snapshot.removalCooldowns()));
+        writeAlertPreferences(config, snapshot.repTradingAlertPreferences());
+        writeStalkEntries(config, snapshot.stalkEntries());
+        return saveConfiguration(config);
+    }
 
-        for (Map.Entry<UUID, Integer> entry : snapshot.scores().entrySet()) {
+    private void writeScores(YamlConfiguration config, Map<UUID, Integer> scores) {
+        for (Map.Entry<UUID, Integer> entry : scores.entrySet()) {
             config.set("players." + entry.getKey() + ".score", entry.getValue());
         }
+    }
 
-        int commendationIndex = 0;
-        for (Commendation commendation : snapshot.commendations()) {
-            config.createSection("commendations." + commendationIndex++, commendation.serialize());
+    private void writeCommendations(YamlConfiguration config, List<Commendation> commendations) {
+        for (int index = 0; index < commendations.size(); index++) {
+            config.createSection("commendations." + index, commendations.get(index).serialize());
         }
+    }
 
-        List<Map<String, Object>> removed = new ArrayList<>();
-        for (RepService.RemovedRep entry : snapshot.removedEntries()) {
-            removed.add(entry.serialize());
-        }
-        config.set("removed", removed);
+    private <T> List<Map<String, Object>> serialize(List<T> entries,
+                                                    Function<T, Map<String, Object>> serializer) {
+        return entries.stream().map(serializer).toList();
+    }
 
-        List<Map<String, Object>> reputationChanges = new ArrayList<>();
-        for (ReputationChangeRecord entry : snapshot.reputationChanges()) {
-            reputationChanges.add(entry.serialize());
-        }
-        config.set("reputationChanges", reputationChanges);
+    private List<Map<String, Object>> serializeRemovalCooldowns(
+            List<PluginDataSnapshot.RemovalCooldownEntry> entries) {
+        return entries.stream().map(this::serializeRemovalCooldown).toList();
+    }
 
-        List<Map<String, Object>> suspiciousCases = new ArrayList<>();
-        for (RepService.SuspiciousRepCase entry : snapshot.suspiciousCases()) {
-            suspiciousCases.add(entry.serialize());
-        }
-        config.set("suspiciousCases", suspiciousCases);
+    private Map<String, Object> serializeRemovalCooldown(PluginDataSnapshot.RemovalCooldownEntry entry) {
+        Map<String, Object> serialized = new LinkedHashMap<>();
+        serialized.put("giver", entry.giverId().toString());
+        serialized.put("target", entry.targetId().toString());
+        serialized.put("removedAt", entry.removedAt());
+        return serialized;
+    }
 
-        List<Map<String, Object>> removalCooldowns = new ArrayList<>();
-        for (PluginDataSnapshot.RemovalCooldownEntry entry : snapshot.removalCooldowns()) {
-            Map<String, Object> serialized = new LinkedHashMap<>();
-            serialized.put("giver", entry.giverId().toString());
-            serialized.put("target", entry.targetId().toString());
-            serialized.put("removedAt", entry.removedAt());
-            removalCooldowns.add(serialized);
-        }
-        config.set("removalCooldowns", removalCooldowns);
-
-        for (Map.Entry<UUID, Boolean> entry : snapshot.repTradingAlertPreferences().entrySet()) {
+    private void writeAlertPreferences(YamlConfiguration config, Map<UUID, Boolean> preferences) {
+        for (Map.Entry<UUID, Boolean> entry : preferences.entrySet()) {
             config.set("playerSettings." + entry.getKey() + ".repTradingAlertsEnabled", entry.getValue());
         }
+    }
 
-        int stalkIndex = 0;
-        for (PluginDataSnapshot.StalkEntry entry : snapshot.stalkEntries()) {
-            String path = "stalks." + stalkIndex++;
+    private void writeStalkEntries(YamlConfiguration config, List<PluginDataSnapshot.StalkEntry> entries) {
+        for (int index = 0; index < entries.size(); index++) {
+            PluginDataSnapshot.StalkEntry entry = entries.get(index);
+            String path = "stalks." + index;
             config.set(path + ".stalker", entry.stalkerId().toString());
             config.set(path + ".target", entry.targetId().toString());
             config.set(path + ".expiresAt", entry.expiresAt());
         }
+    }
 
+    private boolean saveConfiguration(YamlConfiguration config) {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            plugin.getLogger().warning("Could not create plugin data directory.");
+            logger.warning("Could not create plugin data directory.");
             return false;
         }
-        File temporary = new File(file.getParentFile(), file.getName() + ".tmp");
+        File temporary = new File(parent, file.getName() + ".tmp");
         try {
             config.save(temporary);
-            try {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
+            replaceDataFile(temporary);
             return true;
         } catch (IOException exception) {
-            plugin.getLogger().warning("Failed to save data.yml: " + exception.getMessage());
-            if (temporary.exists() && !temporary.delete()) {
-                temporary.deleteOnExit();
-            }
+            logger.log(Level.WARNING, "Failed to save data.yml.", exception);
+            cleanTemporaryFile(temporary);
             return false;
+        }
+    }
+
+    private void replaceDataFile(File temporary) throws IOException {
+        try {
+            Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+            );
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private void cleanTemporaryFile(File temporary) {
+        if (temporary.exists() && !temporary.delete()) {
+            temporary.deleteOnExit();
         }
     }
 }
