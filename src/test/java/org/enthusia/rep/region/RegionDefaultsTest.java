@@ -14,6 +14,7 @@ import java.util.Objects;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RegionDefaultsTest {
@@ -70,6 +71,13 @@ class RegionDefaultsTest {
         assertTrue(edited.containsHorizontally(WORLD, -10, -20));
         assertTrue(edited.containsHorizontally(WORLD, 10, 20));
         assertFalse(edited.containsHorizontally(WORLD, 11, 20));
+    }
+
+    @Test
+    void malformedCoordinatesDoNotCreateRegions() {
+        assertNull(RegionManager.parseRegion(WORLD, "1,2", "3,4,5"));
+        assertNull(RegionManager.parseRegion(WORLD, "1,two,3", "3,4,5"));
+        assertNull(RegionManager.parseRegion(WORLD, null, "3,4,5"));
     }
 
     private void assertHorizontalInclusive(CuboidRegion region, int minX, int maxX, int minZ, int maxZ) {
