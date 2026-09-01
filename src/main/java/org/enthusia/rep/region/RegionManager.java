@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public final class RegionManager {
@@ -64,23 +65,29 @@ public final class RegionManager {
         if (worldName == null || worldName.isBlank() || minimum == null || maximum == null) {
             return null;
         }
-        int[] min = parseCoord(String.valueOf(minimum));
-        int[] max = parseCoord(String.valueOf(maximum));
-        if (min == null || max == null) {
+        Optional<int[]> minimumCoordinates = parseCoord(String.valueOf(minimum));
+        Optional<int[]> maximumCoordinates = parseCoord(String.valueOf(maximum));
+        if (minimumCoordinates.isEmpty() || maximumCoordinates.isEmpty()) {
             return null;
         }
+        int[] min = minimumCoordinates.orElseThrow();
+        int[] max = maximumCoordinates.orElseThrow();
         return new CuboidRegion(worldName,
                 Math.min(min[0], max[0]), Math.min(min[1], max[1]), Math.min(min[2], max[2]),
                 Math.max(min[0], max[0]), Math.max(min[1], max[1]), Math.max(min[2], max[2]));
     }
 
-    private static int[] parseCoord(String value) {
+    private static Optional<int[]> parseCoord(String value) {
         String[] parts = value.split(",");
-        if (parts.length != COORDINATE_COMPONENTS) return null;
+        if (parts.length != COORDINATE_COMPONENTS) return Optional.empty();
         try {
-            return new int[] {Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim()), Integer.parseInt(parts[2].trim())};
+            return Optional.of(new int[] {
+                    Integer.parseInt(parts[0].trim()),
+                    Integer.parseInt(parts[1].trim()),
+                    Integer.parseInt(parts[2].trim())
+            });
         } catch (NumberFormatException ignored) {
-            return null;
+            return Optional.empty();
         }
     }
 

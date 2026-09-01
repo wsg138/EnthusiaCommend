@@ -3,7 +3,6 @@ package org.enthusia.rep.analytics;
 import org.enthusia.rep.rep.RepCategory;
 import org.junit.jupiter.api.Test;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -14,16 +13,17 @@ class ReputationChangeRecordTest {
     @Test
     void loadsLegacyRecordWithoutOptionalMetadata() {
         UUID targetId = UUID.randomUUID();
-        Map<String, Object> stored = new LinkedHashMap<>();
-        stored.put("id", "legacy-entry");
-        stored.put("timestamp", 1234L);
-        stored.put("target", targetId.toString());
-        stored.put("amount", "1");
-        stored.put("action", ReputationChangeAction.ADD.name());
-        stored.put("source", ReputationChangeSource.PLAYER_ACTION.name());
-        stored.put("reason", "Helpful player");
-        stored.put("oldTotal", "4");
-        stored.put("newTotal", 5);
+        Map<String, Object> stored = Map.of(
+                "id", "legacy-entry",
+                "timestamp", 1234L,
+                "target", targetId.toString(),
+                "amount", "1",
+                "action", ReputationChangeAction.ADD.name(),
+                "source", ReputationChangeSource.PLAYER_ACTION.name(),
+                "reason", "Helpful player",
+                "oldTotal", "4",
+                "newTotal", 5
+        );
 
         ReputationChangeRecord record = ReputationChangeRecord.fromMap(stored);
 
