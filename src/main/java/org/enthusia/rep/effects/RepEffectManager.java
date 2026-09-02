@@ -1,5 +1,6 @@
 package org.enthusia.rep.effects;
 
+import com.destroystokyo.paper.event.player.PlayerElytraBoostEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -11,7 +12,6 @@ import org.bukkit.entity.Firework;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -22,7 +22,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.FireworkMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.potion.PotionEffect;
@@ -59,7 +58,6 @@ public final class RepEffectManager implements Listener {
     private final Map<UUID, GlowState> glowStates = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastPearlMessageAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastWindMessageAt = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastRocketUseAt = new ConcurrentHashMap<>();
 
     public RepEffectManager(CommendPlugin plugin, RepConfig config, RegionManager regionManager,
                             RepService repService, WarzoneDuelsHook warzoneDuelsHook) {
@@ -87,7 +85,6 @@ public final class RepEffectManager implements Listener {
         glowStates.clear();
         lastPearlMessageAt.clear();
         lastWindMessageAt.clear();
-        lastRocketUseAt.clear();
         if (protocolGlowService != null) protocolGlowService.clearAll();
     }
 
@@ -172,7 +169,6 @@ public final class RepEffectManager implements Listener {
         clearPlayer(player);
         lastPearlMessageAt.remove(player.getUniqueId());
         lastWindMessageAt.remove(player.getUniqueId());
-        lastRocketUseAt.remove(player.getUniqueId());
         currentEffects.remove(player.getUniqueId());
         if (protocolGlowService != null) protocolGlowService.clearViewer(player);
     }
@@ -237,9 +233,6 @@ public final class RepEffectManager implements Listener {
                         lastWindMessageAt, "You can't use another wind charge for ");
             }
         }
-        if (item.getType() == Material.FIREWORK_ROCKET && player.isGliding()) {
-            lastRocketUseAt.put(player.getUniqueId(), System.currentTimeMillis());
-        }
     }
 
     private void handleCooldownItem(PlayerInteractEvent event, Player player, Material material, int cooldownSeconds,
@@ -260,33 +253,24 @@ public final class RepEffectManager implements Listener {
         Bukkit.getScheduler().runTask(plugin, () -> player.setCooldown(material, cooldownSeconds * 20));
     }
 
-    @EventHandler
-    public void onEntitySpawn(EntitySpawnEvent event) {
-        if (!(event.getEntity() instanceof Firework firework)) return;
-        long now = System.currentTimeMillis();
-        Player closestPlayer = null;
-        double closestDistanceSquared = 0.0D;
-        int durationPercent = 0;
-        for (Player player : firework.getWorld().getPlayers()) {
-            Long lastUse = lastRocketUseAt.get(player.getUniqueId());
-            if (lastUse == null || now - lastUse > 500L || !player.isGliding()) continue;
-            RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
-            if (warzoneDuelsHook.isDuelExempt(player) || effects.fireworkDurationPercent() >= 0) continue;
-            double distanceSquared = player.getLocation().distanceSquared(firework.getLocation());
-            if (closestPlayer == null || distanceSquared < closestDistanceSquared) {
-                closestPlayer = player;
-                closestDistanceSquared = distanceSquared;
-                durationPercent = effects.fireworkDurationPercent();
-            }
-        }
-        if (closestPlayer == null) return;
-        FireworkMeta meta = firework.getFireworkMeta();
-        int baseTicks = 20 * (meta.getPower() + 1);
+    @EventHandler(ignoreCancelled = true)
+    public void onElytraBoost(PlayerElytraBoostEvent event) {
+        Player player = event.getPlayer();
+        RepAppliedEffects effects = getCurrentEffects(player.getUniqueId());
+        int durationPercent = effects.fireworkDurationPercent();
+        if (warzoneDuelsHook.isDuelExempt(player) || durationPercent >= 0) return;
+
+        Firework firework = event.getFirework();
+        firework.setTicksToDetonate(adjustedFireworkDetonationTick(
+                firework.getTicksFlown(), firework.getTicksToDetonate(), durationPercent));
+    }
+
+    static int adjustedFireworkDetonationTick(int ticksFlown, int ticksToDetonate, int durationPercent) {
+        int elapsedTicks = Math.max(0, ticksFlown);
+        long remainingTicks = Math.max(1L, (long) ticksToDetonate - elapsedTicks);
         double factor = Math.max(0.1D, 1.0D + durationPercent / 100.0D);
-        long lifetimeTicks = Math.max(1L, Math.round(baseTicks * factor));
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!firework.isDead()) firework.detonate();
-        }, lifetimeTicks);
+        long adjustedRemainingTicks = Math.max(1L, Math.round(remainingTicks * factor));
+        return (int) Math.min(Integer.MAX_VALUE, elapsedTicks + adjustedRemainingTicks);
     }
 
     @EventHandler
