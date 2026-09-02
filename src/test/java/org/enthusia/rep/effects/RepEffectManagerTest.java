@@ -28,6 +28,19 @@ class RepEffectManagerTest {
         assertFalse(isWarzoneCooldownEligible(marketGameplayZone, Material.FIREWORK_ROCKET));
     }
 
+    @Test
+    void fireworkPenaltyScalesOnlyTheRemainingLifetime() {
+        assertEquals(60, RepEffectManager.adjustedFireworkDetonationTick(0, 80, -25));
+        assertEquals(65, RepEffectManager.adjustedFireworkDetonationTick(20, 80, -25));
+        assertEquals(26, RepEffectManager.adjustedFireworkDetonationTick(20, 80, -100));
+    }
+
+    @Test
+    void fireworkPenaltyAlwaysLeavesAtLeastOneFutureTick() {
+        assertEquals(21, RepEffectManager.adjustedFireworkDetonationTick(20, 20, -100));
+        assertEquals(1, RepEffectManager.adjustedFireworkDetonationTick(-5, 0, -1_000));
+    }
+
     private boolean isWarzoneCooldownEligible(RegionManager.LogicalZone zone, Material material) {
         return zone == RegionManager.LogicalZone.WARZONE
                 && (material == Material.ENDER_PEARL || material == Material.WIND_CHARGE);
