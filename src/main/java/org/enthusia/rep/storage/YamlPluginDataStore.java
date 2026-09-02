@@ -17,10 +17,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public final class YamlPluginDataStore implements PluginDataStore {
     private static final int DATA_VERSION = 6;
@@ -124,26 +126,30 @@ public final class YamlPluginDataStore implements PluginDataStore {
     }
 
     private Map<UUID, Boolean> loadAlertPreferences(YamlConfiguration config) {
-        Map<UUID, Boolean> preferences = new LinkedHashMap<>();
         ConfigurationSection section = config.getConfigurationSection("playerSettings");
         if (section == null) {
-            return preferences;
+            return Map.of();
         }
-        for (String key : section.getKeys(false)) {
-            loadAlertPreference(section, key, preferences);
-        }
-        return preferences;
+        return section.getKeys(false).stream()
+                .map(key -> loadAlertPreference(section, key))
+                .flatMap(Optional::stream)
+                .collect(Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (previous, replacement) -> replacement
+                ));
     }
 
-    private void loadAlertPreference(ConfigurationSection section, String key,
-                                     Map<UUID, Boolean> preferences) {
+    private Optional<Map.Entry<UUID, Boolean>> loadAlertPreference(ConfigurationSection section, String key) {
         try {
             UUID playerId = UUID.fromString(key);
             String path = key + ".repTradingAlertsEnabled";
-            if (section.isSet(path)) {
-                preferences.put(playerId, section.getBoolean(path));
+            if (!section.isSet(path)) {
+                return Optional.empty();
             }
+            return Optional.of(Map.entry(playerId, section.getBoolean(path)));
         } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
         }
     }
 
