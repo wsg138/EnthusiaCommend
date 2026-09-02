@@ -302,11 +302,21 @@ public final class CommendPlugin extends JavaPlugin {
     }
 
     private void handleAuditRecord(RepService.AuditRecord record) {
-        if (record == null || discordWebhookService == null || !discordWebhookService.isEnabled()) return;
+        if (!canSendAuditRecord(record)) return;
         if (!Bukkit.isPrimaryThread()) {
             Bukkit.getScheduler().runTask(this, () -> handleAuditRecord(record));
             return;
         }
+        sendAuditRecord(record);
+    }
+
+    private boolean canSendAuditRecord(RepService.AuditRecord record) {
+        return record != null
+                && discordWebhookService != null
+                && discordWebhookService.isEnabled();
+    }
+
+    private void sendAuditRecord(RepService.AuditRecord record) {
         var commendation = record.commendation();
         String giverName = repService.nameOf(commendation.getGiver());
         String targetName = repService.nameOf(commendation.getTarget());
@@ -316,14 +326,8 @@ public final class CommendPlugin extends JavaPlugin {
             case REMOVED -> DiscordWebhookService.Action.REMOVED;
             case RESTORED -> DiscordWebhookService.Action.RESTORED;
         };
-        String actorName = record.actorName();
-        if (actorName == null || actorName.isBlank()) {
-            actorName = action == DiscordWebhookService.Action.CREATED
-                    || action == DiscordWebhookService.Action.UPDATED ? giverName : "Administrator";
-        }
-        java.util.UUID thumbnailId = action == DiscordWebhookService.Action.CREATED
-                || action == DiscordWebhookService.Action.UPDATED
-                ? commendation.getGiver() : record.actorId();
+        String actorName = auditActorName(record, action, giverName);
+        java.util.UUID thumbnailId = auditThumbnailId(record, action, commendation.getGiver());
         String thumbnailUrl = thumbnailId == null ? null : MinecraftHeadUrl.resolve(thumbnailId, actorName);
         discordWebhookService.log(new DiscordWebhookService.LogEntry(
                 action,
@@ -335,6 +339,26 @@ public final class CommendPlugin extends JavaPlugin {
                 Instant.ofEpochMilli(record.timestamp()),
                 thumbnailUrl
         ));
+    }
+
+    private String auditActorName(RepService.AuditRecord record, DiscordWebhookService.Action action,
+                                  String giverName) {
+        String actorName = record.actorName();
+        if (actorName != null && !actorName.isBlank()) {
+            return actorName;
+        }
+        return isPlayerAuthoredAudit(action) ? giverName : "Administrator";
+    }
+
+    private java.util.UUID auditThumbnailId(RepService.AuditRecord record,
+                                            DiscordWebhookService.Action action,
+                                            java.util.UUID giverId) {
+        return isPlayerAuthoredAudit(action) ? giverId : record.actorId();
+    }
+
+    private boolean isPlayerAuthoredAudit(DiscordWebhookService.Action action) {
+        return action == DiscordWebhookService.Action.CREATED
+                || action == DiscordWebhookService.Action.UPDATED;
     }
 
     private void reloadDiscordWebhook() {

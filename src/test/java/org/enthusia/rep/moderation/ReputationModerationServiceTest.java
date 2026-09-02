@@ -162,8 +162,7 @@ class ReputationModerationServiceTest {
         ReputationModerationService service = new ReputationModerationService(
                 clock, ignored -> state.get(), temporaryDirectory.resolve("concurrent-state.yml"));
         CyclicBarrier start = new CyclicBarrier(2);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<ReputationMutationResult.Status> first = executor.submit(() -> {
                 start.await();
                 return service.applyBlacklist(
@@ -183,8 +182,6 @@ class ReputationModerationServiceTest {
                     .filter(status -> status == ReputationMutationResult.Status.STALE_BLACKLIST)
                     .count());
             assertEquals(1L, service.getBlacklist(PLAYER).orElseThrow().revision());
-        } finally {
-            executor.shutdownNow();
         }
     }
 

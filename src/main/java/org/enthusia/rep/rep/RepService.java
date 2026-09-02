@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -443,30 +444,74 @@ public final class RepService {
     }
 
     public void removeCommendation(UUID giverId, UUID targetId) {
-        removeCommendationInternal(giverId, targetId, false, false, null);
+        removeCommendationInternal(giverId, targetId, RemovalRequest.player(giverId, false));
     }
 
     public void removeCommendationWithCooldown(UUID giverId, UUID targetId) {
-        removeCommendationInternal(giverId, targetId, true, false, null);
+        removeCommendationInternal(giverId, targetId, RemovalRequest.player(giverId, true));
     }
 
     public RemovedRep removeCommendationLogged(UUID removerId, UUID giverId, UUID targetId, boolean applyCooldown) {
-        return removeCommendationInternal(giverId, targetId, applyCooldown, true, removerId);
+        return removeCommendationInternal(
+                giverId,
+                targetId,
+                RemovalRequest.staffGui(removerId, applyCooldown)
+        );
     }
 
-    private RemovedRep removeCommendationInternal(UUID giverId, UUID targetId, boolean applyCooldown,
-                                                   boolean logRemoval, UUID removerId) {
-        Commendation existing = getCommendation(giverId, targetId);
+    public RemovedRep removeCommendationByStaffCommand(
+            CommandSender actor,
+            UUID giverId,
+            UUID targetId,
+            boolean applyCooldown
+    ) {
+        return removeCommendationInternal(
+                giverId,
+                targetId,
+                RemovalRequest.staffCommand(actor, applyCooldown)
+        );
+    }
+
+    private RemovedRep removeCommendationInternal(UUID giverId, UUID targetId, RemovalRequest request) {
+        Commendation existing = removeFromIndexes(giverId, targetId);
         if (existing == null) {
             return null;
         }
 
+        long removedAt = System.currentTimeMillis();
+        int oldScore = getScore(targetId);
+        int delta = -existing.getScoreValue();
+        int newScore = oldScore + delta;
+        applyScore(targetId, newScore, true);
+        updateRemovalCooldown(giverId, targetId, removedAt, request.applyCooldown());
+        RemovedRep removedRep = appendRemovalLog(existing, removedAt, request);
+        recordChange(targetId, request.actorId(), delta, ReputationChangeAction.REMOVE, request.source(),
+                existing.getCategory(), existing.getReasonText(), oldScore, newScore);
+        rebuildAntiAbuseIndex();
+        dirtyMarker.run();
+        auditConsumer.accept(new AuditRecord(
+                AuditAction.REMOVED,
+                cloneCommendation(existing),
+                delta,
+                newScore,
+                removedAt,
+                request.actorId(),
+                resolveRemovalActorName(request)
+        ));
+        return removedRep;
+    }
+
+    private Commendation removeFromIndexes(UUID giverId, UUID targetId) {
         Map<UUID, Commendation> byGiver = commendationsByGiver.get(giverId);
-        if (byGiver != null) {
-            byGiver.remove(targetId);
-            if (byGiver.isEmpty()) {
-                commendationsByGiver.remove(giverId);
-            }
+        if (byGiver == null) {
+            return null;
+        }
+        Commendation existing = byGiver.remove(targetId);
+        if (existing == null) {
+            return null;
+        }
+        if (byGiver.isEmpty()) {
+            commendationsByGiver.remove(giverId, byGiver);
         }
 
         List<Commendation> byTarget = commendationsByTarget.get(targetId);
@@ -474,38 +519,43 @@ public final class RepService {
             synchronized (byTarget) {
                 byTarget.removeIf(commendation -> commendation.getGiver().equals(giverId));
                 if (byTarget.isEmpty()) {
-                    commendationsByTarget.remove(targetId);
+                    commendationsByTarget.remove(targetId, byTarget);
                 }
             }
         }
+        return existing;
+    }
 
-        int oldScore = getScore(targetId);
-        int delta = -existing.getScoreValue();
-        applyScore(targetId, oldScore + delta, true);
+    private void updateRemovalCooldown(UUID giverId, UUID targetId, long removedAt, boolean applyCooldown) {
+        RepPair pair = key(giverId, targetId);
         if (applyCooldown) {
-            removalCooldowns.put(key(giverId, targetId), System.currentTimeMillis());
+            removalCooldowns.put(pair, removedAt);
         } else {
-            removalCooldowns.remove(key(giverId, targetId));
+            removalCooldowns.remove(pair);
         }
+    }
 
-        RemovedRep removedRep = null;
-        if (logRemoval) {
-            removedRep = new RemovedRep(nextRemovalId(), cloneCommendation(existing), System.currentTimeMillis(), removerId);
-            synchronized (removedEntries) {
-                removedEntries.add(removedRep);
-            }
+    private RemovedRep appendRemovalLog(Commendation existing, long removedAt, RemovalRequest request) {
+        if (!request.logRemoval()) {
+            return null;
         }
-
-        ReputationChangeSource source = logRemoval ? ReputationChangeSource.STAFF_GUI : ReputationChangeSource.PLAYER_ACTION;
-        UUID actorId = logRemoval ? removerId : giverId;
-        recordChange(targetId, actorId, delta, ReputationChangeAction.REMOVE, source,
-                existing.getCategory(), existing.getReasonText(), oldScore, oldScore + delta);
-        rebuildAntiAbuseIndex();
-        dirtyMarker.run();
-        String actorName = actorId == null ? (logRemoval ? "Console" : "System") : nameOf(actorId);
-        auditConsumer.accept(new AuditRecord(AuditAction.REMOVED, cloneCommendation(existing), delta,
-                getScore(targetId), System.currentTimeMillis(), actorId, actorName));
+        RemovedRep removedRep = new RemovedRep(
+                nextRemovalId(),
+                cloneCommendation(existing),
+                removedAt,
+                request.actorId()
+        );
+        synchronized (removedEntries) {
+            removedEntries.add(removedRep);
+        }
         return removedRep;
+    }
+
+    private String resolveRemovalActorName(RemovalRequest request) {
+        if (request.actorName() != null) {
+            return request.actorName();
+        }
+        return request.actorId() == null ? "System" : nameOf(request.actorId());
     }
 
     public boolean canEdit(UUID giverId, UUID targetId) {
@@ -533,15 +583,19 @@ public final class RepService {
     public void resetAll(UUID targetId) {
         List<Commendation> current = new ArrayList<>(getCommendationsAbout(targetId));
         for (Commendation commendation : current) {
-            removeCommendationLogged(null, commendation.getGiver(), targetId, false);
+            removeCommendationInternal(
+                    commendation.getGiver(),
+                    targetId,
+                    RemovalRequest.system()
+            );
         }
     }
 
     public void resetAllByStaff(UUID targetId, CommandSender actor) {
-        UUID removerId = actor instanceof Player player ? player.getUniqueId() : null;
+        RemovalRequest request = RemovalRequest.staffCommand(actor, false);
         List<Commendation> current = new ArrayList<>(getCommendationsAbout(targetId));
         for (Commendation commendation : current) {
-            removeCommendationLogged(removerId, commendation.getGiver(), targetId, false);
+            removeCommendationInternal(commendation.getGiver(), targetId, request);
         }
         int residualScore = getScore(targetId);
         if (residualScore != 0) {
@@ -552,19 +606,19 @@ public final class RepService {
     }
 
     public String hashIp(String ipAddress) {
+        return hashIpValue(ipAddress);
+    }
+
+    static String hashIpValue(String ipAddress) {
         if (ipAddress == null || ipAddress.isBlank()) {
             return null;
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(ipAddress.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < 8 && i < bytes.length; i++) {
-                builder.append(String.format("%02x", bytes[i]));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException ignored) {
-            return Integer.toHexString(ipAddress.hashCode());
+            return HexFormat.of().formatHex(bytes, 0, 8);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Required SHA-256 digest is unavailable.", exception);
         }
     }
 
@@ -818,6 +872,56 @@ public final class RepService {
     }
 
     private record RepPair(UUID giverId, UUID targetId) {
+    }
+
+    private record RemovalRequest(
+            boolean applyCooldown,
+            boolean logRemoval,
+            UUID actorId,
+            String actorName,
+            ReputationChangeSource source
+    ) {
+        private static RemovalRequest player(UUID giverId, boolean applyCooldown) {
+            return new RemovalRequest(
+                    applyCooldown,
+                    false,
+                    giverId,
+                    null,
+                    ReputationChangeSource.PLAYER_ACTION
+            );
+        }
+
+        private static RemovalRequest staffGui(UUID removerId, boolean applyCooldown) {
+            return new RemovalRequest(
+                    applyCooldown,
+                    true,
+                    removerId,
+                    removerId == null ? "Console" : null,
+                    ReputationChangeSource.STAFF_GUI
+            );
+        }
+
+        private static RemovalRequest staffCommand(CommandSender actor, boolean applyCooldown) {
+            UUID actorId = actor instanceof Player player ? player.getUniqueId() : null;
+            String actorName = actor == null ? "Console" : actor.getName();
+            return new RemovalRequest(
+                    applyCooldown,
+                    true,
+                    actorId,
+                    actorName,
+                    ReputationChangeSource.STAFF_COMMAND
+            );
+        }
+
+        private static RemovalRequest system() {
+            return new RemovalRequest(
+                    false,
+                    true,
+                    null,
+                    "System",
+                    ReputationChangeSource.SYSTEM
+            );
+        }
     }
 
     private record AltRepRecord(UUID giverId, UUID targetId, boolean positive, long timestamp, String ipHash) {

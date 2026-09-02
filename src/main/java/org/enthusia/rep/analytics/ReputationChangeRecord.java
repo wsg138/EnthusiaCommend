@@ -48,27 +48,62 @@ public record ReputationChangeRecord(
     }
 
     public static ReputationChangeRecord fromMap(Map<?, ?> raw) {
+        if (raw == null) {
+            return null;
+        }
         try {
             String id = Objects.toString(raw.get("id"), UUID.randomUUID().toString());
-            long timestamp = raw.get("timestamp") instanceof Number value ? value.longValue() : Instant.now().toEpochMilli();
-            UUID targetId = UUID.fromString(String.valueOf(raw.get("target")));
-            UUID actorId = null;
-            if (raw.get("actor") != null) {
-                actorId = UUID.fromString(String.valueOf(raw.get("actor")));
-            }
-            String actorName = raw.get("actorName") != null ? String.valueOf(raw.get("actorName")) : null;
-            int amount = raw.get("amount") instanceof Number value ? value.intValue() : Integer.parseInt(String.valueOf(raw.get("amount")));
-            ReputationChangeAction action = ReputationChangeAction.valueOf(String.valueOf(raw.get("action")));
-            ReputationChangeSource source = ReputationChangeSource.valueOf(String.valueOf(raw.get("source")));
-            Object rawOutcome = raw.get("outcome");
-            ReputationChangeOutcome outcome = ReputationChangeOutcome.valueOf(rawOutcome != null ? String.valueOf(rawOutcome) : ReputationChangeOutcome.SUCCEEDED.name());
+            long timestamp = longValueOrDefault(raw.get("timestamp"), Instant.now().toEpochMilli());
+            UUID targetId = requiredUuid(raw.get("target"));
+            UUID actorId = optionalUuid(raw.get("actor"));
+            String actorName = optionalText(raw.get("actorName"));
+            int amount = requiredInt(raw.get("amount"));
+            ReputationChangeAction action = requiredEnum(ReputationChangeAction.class, raw.get("action"));
+            ReputationChangeSource source = requiredEnum(ReputationChangeSource.class, raw.get("source"));
+            ReputationChangeOutcome outcome = enumOrDefault(
+                    ReputationChangeOutcome.class,
+                    raw.get("outcome"),
+                    ReputationChangeOutcome.SUCCEEDED
+            );
             String reason = Objects.toString(raw.get("reason"), "");
-            RepCategory category = raw.get("category") != null ? RepCategory.valueOf(String.valueOf(raw.get("category"))) : null;
-            int oldTotal = raw.get("oldTotal") instanceof Number value ? value.intValue() : Integer.parseInt(String.valueOf(raw.get("oldTotal")));
-            int newTotal = raw.get("newTotal") instanceof Number value ? value.intValue() : Integer.parseInt(String.valueOf(raw.get("newTotal")));
+            RepCategory category = optionalEnum(RepCategory.class, raw.get("category"));
+            int oldTotal = requiredInt(raw.get("oldTotal"));
+            int newTotal = requiredInt(raw.get("newTotal"));
             return new ReputationChangeRecord(id, timestamp, targetId, actorId, actorName, amount, action, source, outcome, reason, category, oldTotal, newTotal);
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static long longValueOrDefault(Object value, long fallback) {
+        return value instanceof Number number ? number.longValue() : fallback;
+    }
+
+    private static int requiredInt(Object value) {
+        return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
+    }
+
+    private static UUID requiredUuid(Object value) {
+        return UUID.fromString(String.valueOf(value));
+    }
+
+    private static UUID optionalUuid(Object value) {
+        return value == null ? null : requiredUuid(value);
+    }
+
+    private static String optionalText(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static <E extends Enum<E>> E requiredEnum(Class<E> type, Object value) {
+        return Enum.valueOf(type, String.valueOf(value));
+    }
+
+    private static <E extends Enum<E>> E optionalEnum(Class<E> type, Object value) {
+        return value == null ? null : requiredEnum(type, value);
+    }
+
+    private static <E extends Enum<E>> E enumOrDefault(Class<E> type, Object value, E fallback) {
+        return value == null ? fallback : requiredEnum(type, value);
     }
 }

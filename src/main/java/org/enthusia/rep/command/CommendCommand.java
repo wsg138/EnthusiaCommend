@@ -406,9 +406,8 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                 return;
             }
         }
-        UUID removerId = sender instanceof Player player ? player.getUniqueId() : null;
-        RepService.RemovedRep removed = repService.removeCommendationLogged(
-                removerId, giver.getUniqueId(), target.getUniqueId(), false);
+        RepService.RemovedRep removed = repService.removeCommendationByStaffCommand(
+                sender, giver.getUniqueId(), target.getUniqueId(), false);
         if (removed == null) {
             sender.sendMessage(ChatColor.RED + "The entry could not be removed.");
             return;
