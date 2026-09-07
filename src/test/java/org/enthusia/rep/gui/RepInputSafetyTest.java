@@ -42,11 +42,11 @@ import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -56,13 +56,12 @@ class RepInputSafetyTest {
     private final UUID playerId = UUID.randomUUID();
     private final UUID targetId = UUID.randomUUID();
     private final List<Runnable> tasks = new ArrayList<>();
-    private final Map<Integer, ItemStack> anvilContents = new HashMap<>();
-    private final Map<Integer, ItemStack> playerContents = new HashMap<>();
+    private final Map<Integer, ItemStack> anvilContents = new ConcurrentHashMap<>();
+    private final Map<Integer, ItemStack> playerContents = new ConcurrentHashMap<>();
     private MockedStatic<Bukkit> bukkit;
     private MockedConstruction<ItemStack> constructedItems;
     private RepGuiManager manager;
     private Player player;
-    private AnvilInventory anvil;
     private AnvilView view;
     private Inventory confirmation;
 
@@ -94,7 +93,7 @@ class RepInputSafetyTest {
         PlayerInventory inventory = mock(PlayerInventory.class);
         when(player.getInventory()).thenReturn(inventory);
         backInventory(inventory, playerContents, 41);
-        anvil = mock(AnvilInventory.class);
+        AnvilInventory anvil = mock(AnvilInventory.class);
         backInventory(anvil, anvilContents, 3);
         view = mock(AnvilView.class);
         when(view.getPlayer()).thenReturn(player);
@@ -118,7 +117,7 @@ class RepInputSafetyTest {
     void closingAnvilRemovesGuiItemsBeforeVanillaReturnsOrDropsThem(boolean full) throws Exception {
         seedAnvil();
         if (full) fillPlayerInventory();
-        Map<Integer, ItemStack> before = new HashMap<>(playerContents);
+        Map<Integer, ItemStack> before = Map.copyOf(playerContents);
         manager.onInventoryClose(new InventoryCloseEvent(view));
         assertNull(anvilContents.get(0), "Input must be gone before vanilla handles overflow");
         assertNull(anvilContents.get(2));
