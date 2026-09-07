@@ -16,13 +16,16 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.view.AnvilView;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -38,10 +41,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,14 +56,14 @@ class RepInputSafetyTest {
     private final UUID playerId = UUID.randomUUID();
     private final UUID targetId = UUID.randomUUID();
     private final List<Runnable> tasks = new ArrayList<>();
-    private final ItemStack[] anvilContents = new ItemStack[3];
-    private final ItemStack[] playerContents = new ItemStack[41];
+    private final Map<Integer, ItemStack> anvilContents = new HashMap<>();
+    private final Map<Integer, ItemStack> playerContents = new HashMap<>();
     private MockedStatic<Bukkit> bukkit;
     private MockedConstruction<ItemStack> constructedItems;
     private RepGuiManager manager;
     private Player player;
-    private Inventory anvil;
-    private InventoryView view;
+    private AnvilInventory anvil;
+    private AnvilView view;
     private Inventory confirmation;
 
     @BeforeEach
@@ -92,14 +93,15 @@ class RepInputSafetyTest {
         bukkit.when(() -> Bukkit.getPlayer(playerId)).thenReturn(player);
         PlayerInventory inventory = mock(PlayerInventory.class);
         when(player.getInventory()).thenReturn(inventory);
-        backInventory(inventory, playerContents);
-        anvil = mock(Inventory.class);
-        backInventory(anvil, anvilContents);
-        view = mock(InventoryView.class);
+        backInventory(inventory, playerContents, 41);
+        anvil = mock(AnvilInventory.class);
+        backInventory(anvil, anvilContents, 3);
+        view = mock(AnvilView.class);
         when(view.getPlayer()).thenReturn(player);
         when(view.getTopInventory()).thenReturn(anvil);
         when(view.getBottomInventory()).thenReturn(inventory);
         when(player.getOpenInventory()).thenReturn(view);
+        when(player.openAnvil(isNull(), eq(true))).thenReturn(view);
         confirmation = mock(Inventory.class);
         bukkit.when(() -> Bukkit.createInventory(any(InventoryHolder.class), eq(27), anyString()))
                 .thenReturn(confirmation);
@@ -115,24 +117,24 @@ class RepInputSafetyTest {
     @ValueSource(booleans = {false, true})
     void closingAnvilRemovesGuiItemsBeforeVanillaReturnsOrDropsThem(boolean full) throws Exception {
         seedAnvil();
-        if (full) Arrays.fill(playerContents, item(false));
-        ItemStack[] before = playerContents.clone();
+        if (full) fillPlayerInventory();
+        Map<Integer, ItemStack> before = new HashMap<>(playerContents);
         manager.onInventoryClose(new InventoryCloseEvent(view));
-        assertNull(anvilContents[0], "Input must be gone before vanilla handles overflow");
-        assertNull(anvilContents[2]);
-        assertArrayEquals(before, playerContents, "Real player items must be preserved");
-        assertTrue(state("pendingAnvils").isEmpty());
+        assertNull(anvilContents.get(0), "Input must be gone before vanilla handles overflow");
+        assertNull(anvilContents.get(2));
+        assertEquals(before, playerContents, "Real player items must be preserved");
+        assertFalse(anvilInputActive());
         assertTrue(tasks.isEmpty(), "Cleanup must not depend on a later tick");
     }
 
     @Test
     void submittingWithFullInventoryDefersCloseAndLeavesNothingToDrop() throws Exception {
         seedAnvil();
-        Arrays.fill(playerContents, item(false));
-        state("liveAnvilText").put(playerId, "Helpful player");
+        fillPlayerInventory();
+        when(view.getRenameText()).thenReturn("Helpful player");
         doAnswer(call -> {
-            assertNull(anvilContents[0], "Input must be removed before closeInventory");
-            assertNull(anvilContents[2]);
+            assertNull(anvilContents.get(0), "Input must be removed before closeInventory");
+            assertNull(anvilContents.get(2));
             manager.onInventoryClose(new InventoryCloseEvent(view));
             return null;
         }).when(player).closeInventory();
@@ -144,13 +146,13 @@ class RepInputSafetyTest {
         runTasks();
         verify(player, times(1)).closeInventory();
         verify(player, times(1)).openInventory(confirmation);
-        assertTrue(state("pendingAnvils").isEmpty());
+        assertFalse(anvilInputActive());
     }
 
     @Test
     void cancellingBeforeScheduledSubmitDoesNotReopenConfirmation() throws Exception {
         seedAnvil();
-        state("liveAnvilText").put(playerId, "Helpful player");
+        when(view.getRenameText()).thenReturn("Helpful player");
         manager.onInventoryClick(click(2, ClickType.LEFT));
         manager.onInventoryClose(new InventoryCloseEvent(view));
         runTasks();
@@ -161,28 +163,28 @@ class RepInputSafetyTest {
     void quitAndShutdownClearAnvilBeforeDiscardingSession() throws Exception {
         seedAnvil();
         manager.onQuit(new PlayerQuitEvent(player, Component.empty()));
-        assertNull(anvilContents[0]);
-        assertNull(anvilContents[2]);
+        assertNull(anvilContents.get(0));
+        assertNull(anvilContents.get(2));
         seedAnvil();
         manager.shutdown();
-        assertNull(anvilContents[0]);
-        assertNull(anvilContents[2]);
-        assertTrue(state("pendingAnvils").isEmpty());
+        assertNull(anvilContents.get(0));
+        assertNull(anvilContents.get(2));
+        assertFalse(anvilInputActive());
     }
 
     @Test
     void cleanupPreservesUntaggedItemsAndDoesNotClaimAnotherAnvil() throws Exception {
         seedAnvil();
         ItemStack realItem = item(false);
-        anvilContents[1] = realItem;
+        anvilContents.put(1, realItem);
         InventoryView otherView = mock(InventoryView.class);
         when(otherView.getPlayer()).thenReturn(player);
         Inventory otherAnvil = mock(Inventory.class);
         when(otherView.getTopInventory()).thenReturn(otherAnvil);
         manager.onInventoryClose(new InventoryCloseEvent(otherView));
-        assertFalse(state("pendingAnvils").isEmpty());
+        assertTrue(anvilInputActive());
         manager.onInventoryClose(new InventoryCloseEvent(view));
-        assertSame(realItem, anvilContents[1]);
+        assertSame(realItem, anvilContents.get(1));
         verify(otherAnvil, never()).clear(anyInt());
     }
 
@@ -194,7 +196,7 @@ class RepInputSafetyTest {
         manager.onInventoryClick(click);
         assertTrue(click.isCancelled());
         verify(player, never()).closeInventory();
-        assertTrue(state("pendingDrafts").isEmpty());
+        verify(player, never()).openInventory(confirmation);
     }
 
     @Test
@@ -204,7 +206,7 @@ class RepInputSafetyTest {
         manager.onChat(legacy);
         assertTrue(legacy.isCancelled());
         assertTrue(legacy.getRecipients().isEmpty());
-        assertFalse(state("pendingChatInputs").isEmpty(), "Legacy suppression must not consume the modern input");
+        assertTrue(chatInputActive(), "Legacy suppression must not consume the modern input");
         legacy.setCancelled(false);
         legacy.getRecipients().add(player);
         manager.protectLegacyChat(legacy);
@@ -222,7 +224,6 @@ class RepInputSafetyTest {
         assertTrue(modern.viewers().isEmpty());
         assertEquals(1, tasks.size());
         runTasks();
-        assertEquals(1, state("pendingDrafts").size());
         verify(player, times(1)).openInventory(confirmation);
         AsyncChatEvent normal = chat("Ordinary chat afterwards");
         manager.onPaperChat(normal);
@@ -238,11 +239,11 @@ class RepInputSafetyTest {
         manager.onPaperChat(blank);
         assertTrue(blank.isCancelled());
         runTasks();
-        assertFalse(state("pendingChatInputs").isEmpty());
-        assertTrue(state("pendingDrafts").isEmpty());
+        assertTrue(chatInputActive());
+        verify(player, never()).openInventory(confirmation);
         manager.onPaperChat(chat("A useful reason"));
         runTasks();
-        assertEquals(1, state("pendingDrafts").size());
+        verify(player, times(1)).openInventory(confirmation);
     }
 
     @Test
@@ -274,17 +275,14 @@ class RepInputSafetyTest {
                 mock(net.kyori.adventure.chat.SignedMessage.class));
     }
 
-    private void seedChat() throws Exception {
-        state("pendingChatInputs").put(playerId, record("PendingTextInput",
-                new Class<?>[]{UUID.class, RepCategory.class, int.class}, targetId, RepCategory.HELPED_ME, 0));
+    private void seedChat() {
+        manager.beginChatInput(player, targetId, RepCategory.HELPED_ME, 0);
     }
 
-    private void seedAnvil() throws Exception {
-        state("pendingAnvils").put(playerId, record("AnvilSession",
-                new Class<?>[]{UUID.class, RepCategory.class, int.class, Inventory.class},
-                targetId, RepCategory.HELPED_ME, 0, anvil));
-        anvilContents[0] = item(true);
-        anvilContents[2] = item(true);
+    private void seedAnvil() {
+        manager.openAnvilInput(player, targetId, RepCategory.HELPED_ME, 0);
+        anvilContents.put(0, item(true));
+        anvilContents.put(2, item(true));
     }
 
     private InventoryClickEvent click(int slot, ClickType type) {
@@ -303,10 +301,10 @@ class RepInputSafetyTest {
         return item;
     }
 
-    private void backInventory(Inventory inventory, ItemStack[] items) {
-        when(inventory.getSize()).thenReturn(items.length);
-        when(inventory.getItem(anyInt())).thenAnswer(call -> items[call.getArgument(0, Integer.class)]);
-        doAnswer(call -> { items[call.getArgument(0, Integer.class)] = null; return null; })
+    private void backInventory(Inventory inventory, Map<Integer, ItemStack> items, int size) {
+        when(inventory.getSize()).thenReturn(size);
+        when(inventory.getItem(anyInt())).thenAnswer(call -> items.get(call.getArgument(0, Integer.class)));
+        doAnswer(call -> items.remove(call.getArgument(0, Integer.class)))
                 .when(inventory).clear(anyInt());
     }
 
@@ -316,17 +314,22 @@ class RepInputSafetyTest {
         queued.forEach(Runnable::run);
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<UUID, Object> state(String name) throws Exception {
-        Field field = RepGuiManager.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return (Map<UUID, Object>) field.get(manager);
+    private boolean chatInputActive() {
+        PlayerCommandPreprocessEvent command = new PlayerCommandPreprocessEvent(player, "/rep", new HashSet<>());
+        manager.onCommandPreprocess(command);
+        return command.isCancelled();
     }
 
-    private Object record(String name, Class<?>[] types, Object... values) throws Exception {
-        Class<?> type = Class.forName(RepGuiManager.class.getName() + "$" + name);
-        Constructor<?> constructor = type.getDeclaredConstructor(types);
-        constructor.setAccessible(true);
-        return constructor.newInstance(values);
+    private boolean anvilInputActive() {
+        InventoryClickEvent event = click(0, ClickType.LEFT);
+        manager.onInventoryClick(event);
+        return event.isCancelled();
+    }
+
+    private void fillPlayerInventory() {
+        ItemStack realItem = item(false);
+        for (int slot = 0; slot < 41; slot++) {
+            playerContents.put(slot, realItem);
+        }
     }
 }

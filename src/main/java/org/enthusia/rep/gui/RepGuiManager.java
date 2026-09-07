@@ -324,7 +324,13 @@ public final class RepGuiManager implements Listener {
             handleInputChoiceClick(player, inputChoice, event.getRawSlot());
         } else if (holder instanceof ConfirmReasonHolder confirmReason) {
             handleConfirmReasonClick(player, confirmReason, event.getRawSlot());
-        } else if (holder instanceof ConfirmRemovalHolder removal) {
+        } else {
+            handleModerationMenuClick(player, holder, event);
+        }
+    }
+
+    private void handleModerationMenuClick(Player player, InventoryHolder holder, InventoryClickEvent event) {
+        if (holder instanceof ConfirmRemovalHolder removal) {
             handleRemovalClick(player, removal, event.getRawSlot());
         } else if (holder instanceof RemovedLogHolder removed) {
             handleRemovedLogClick(player, removed, event.getRawSlot(), event.getCurrentItem());
@@ -834,7 +840,7 @@ public final class RepGuiManager implements Listener {
         viewer.openInventory(inventory);
     }
 
-    private void beginChatInput(Player player, UUID targetId, RepCategory category, int returnPage) {
+    void beginChatInput(Player player, UUID targetId, RepCategory category, int returnPage) {
         UUID playerId = player.getUniqueId();
         cancelChatTimeout(playerId);
         pendingChatInputs.put(playerId, new PendingTextInput(targetId, category, returnPage));
@@ -860,7 +866,7 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    private void openAnvilInput(Player player, UUID targetId, RepCategory category, int returnPage) {
+    void openAnvilInput(Player player, UUID targetId, RepCategory category, int returnPage) {
         org.bukkit.inventory.InventoryView view = player.openAnvil(null, true);
         if (view == null) {
             player.sendMessage(ChatColor.RED + "Unable to open the anvil. Please try again.");
