@@ -1,5 +1,7 @@
 package org.enthusia.rep.gui;
 
+import io.papermc.paper.event.player.AsyncChatEvent;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
@@ -11,6 +13,7 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -80,6 +83,8 @@ public final class RepGuiManager implements Listener {
     private final NamespacedKey anvilGuiItemKey;
 
     private final Map<UUID, PendingTextInput> pendingChatInputs = new ConcurrentHashMap<>();
+    private final java.util.Set<Event> capturedChatEvents = java.util.Collections.synchronizedSet(
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>()));
     private final Map<UUID, Integer> pendingChatTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AnvilSession> pendingAnvils = new ConcurrentHashMap<>();
     private final Map<UUID, DraftReason> pendingDrafts = new ConcurrentHashMap<>();
@@ -101,6 +106,7 @@ public final class RepGuiManager implements Listener {
             Bukkit.getScheduler().cancelTask(taskId);
         }
         pendingChatInputs.clear();
+        capturedChatEvents.clear();
         pendingChatTimeoutTasks.clear();
         pendingAnvils.clear();
         pendingDrafts.clear();
@@ -115,6 +121,7 @@ public final class RepGuiManager implements Listener {
         for (UUID playerId : playerIds) {
             Player player = Bukkit.getPlayer(playerId);
             if (player != null) {
+                clearAnvilGuiItems(pendingAnvils.get(playerId).inventory());
                 if (message != null && !message.isBlank()) {
                     player.sendMessage(message);
                 }
@@ -299,6 +306,14 @@ public final class RepGuiManager implements Listener {
             return;
         }
 
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline() && topInventory.equals(player.getOpenInventory().getTopInventory())) {
+                handleMenuClick(player, holder, event);
+            }
+        });
+    }
+
+    private void handleMenuClick(Player player, InventoryHolder holder, InventoryClickEvent event) {
         if (holder instanceof ProfileHolder profile) {
             handleProfileClick(player, profile, event);
         } else if (holder instanceof ProfileFilterHolder filter) {
@@ -309,7 +324,13 @@ public final class RepGuiManager implements Listener {
             handleInputChoiceClick(player, inputChoice, event.getRawSlot());
         } else if (holder instanceof ConfirmReasonHolder confirmReason) {
             handleConfirmReasonClick(player, confirmReason, event.getRawSlot());
-        } else if (holder instanceof ConfirmRemovalHolder removal) {
+        } else {
+            handleModerationMenuClick(player, holder, event);
+        }
+    }
+
+    private void handleModerationMenuClick(Player player, InventoryHolder holder, InventoryClickEvent event) {
+        if (holder instanceof ConfirmRemovalHolder removal) {
             handleRemovalClick(player, removal, event.getRawSlot());
         } else if (holder instanceof RemovedLogHolder removed) {
             handleRemovedLogClick(player, removed, event.getRawSlot(), event.getCurrentItem());
@@ -359,7 +380,7 @@ public final class RepGuiManager implements Listener {
             return;
         }
         AnvilSession session = pendingAnvils.get(player.getUniqueId());
-        if (session == null || event.getInventory().getType() != org.bukkit.event.inventory.InventoryType.ANVIL) {
+        if (session == null || !isActiveAnvilSession(player, event.getView())) {
             return;
         }
         String text = event.getView() instanceof AnvilView anvilView ? anvilView.getRenameText() : event.getInventory().getRenameText();
@@ -378,48 +399,79 @@ public final class RepGuiManager implements Listener {
         if (!(event.getPlayer() instanceof Player player)) {
             return;
         }
-        if (pendingAnvils.containsKey(player.getUniqueId()) && event.getInventory().getType() == org.bukkit.event.inventory.InventoryType.ANVIL) {
+        if (isActiveAnvilSession(player, event.getView())) {
             UUID playerId = player.getUniqueId();
-            if (transitioningAnvil.remove(playerId)) {
-                purgeAnvilGuiItems(player);
-                return;
-            }
+            // Vanilla returns the input slots AFTER this event, dropping overflow in the world.
+            // Remove our temporary items now; a next-tick player-inventory purge is too late.
+            clearAnvilGuiItems(event.getInventory());
+            transitioningAnvil.remove(playerId);
             pendingAnvils.remove(playerId);
             liveAnvilText.remove(playerId);
-            Bukkit.getScheduler().runTask(plugin, () -> purgeAnvilGuiItems(player));
+            purgeAnvilGuiItems(player);
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onChat(AsyncPlayerChatEvent event) {
+        // Paper fires the legacy event before AsyncChatEvent. Suppress it early for
+        // legacy chat plugins, but let the modern event consume the input exactly once.
+        if (pendingChatInputs.containsKey(event.getPlayer().getUniqueId())) {
+            capturedChatEvents.add(event);
+            event.setCancelled(true);
+            event.getRecipients().clear();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void protectLegacyChat(AsyncPlayerChatEvent event) {
+        if (capturedChatEvents.remove(event)) {
+            event.setCancelled(true);
+            event.getRecipients().clear();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPaperChat(AsyncChatEvent event) {
         Player player = event.getPlayer();
         PendingTextInput pending = pendingChatInputs.remove(player.getUniqueId());
         if (pending == null) {
             return;
         }
-
+        capturedChatEvents.add(event);
         event.setCancelled(true);
-        cancelChatTimeout(player.getUniqueId());
+        event.viewers().clear();
+        String message = PlainTextComponentSerializer.plainText().serialize(event.originalMessage()).trim();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            cancelChatTimeout(player.getUniqueId());
+            if (player.isOnline()) {
+                handleChatInput(player, pending, message);
+            }
+        });
+    }
 
-        String message = event.getMessage().trim();
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void protectPaperChat(AsyncChatEvent event) {
+        if (capturedChatEvents.remove(event)) {
+            event.setCancelled(true);
+            event.viewers().clear();
+        }
+    }
+
+    private void handleChatInput(Player player, PendingTextInput pending, String message) {
         if (message.equalsIgnoreCase("cancel") || message.equalsIgnoreCase("stop")) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                player.sendMessage(ChatColor.YELLOW + "Rep message entry cancelled.");
-                openProfile(player, Bukkit.getOfflinePlayer(pending.targetId()), pending.returnPage());
-            });
+            player.sendMessage(ChatColor.YELLOW + "Rep message entry cancelled.");
+            openProfile(player, Bukkit.getOfflinePlayer(pending.targetId()), pending.returnPage());
             return;
         }
 
         String normalized = normalizeReason(message);
         if (normalized.isEmpty()) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                player.sendMessage(ChatColor.RED + "Your message was empty. Type it again or type cancel.");
-                beginChatInput(player, pending.targetId(), pending.category(), pending.returnPage());
-            });
+            player.sendMessage(ChatColor.RED + "Your message was empty. Type it again or type cancel.");
+            beginChatInput(player, pending.targetId(), pending.category(), pending.returnPage());
             return;
         }
 
-        Bukkit.getScheduler().runTask(plugin, () -> openConfirmReason(player, pending.targetId(), pending.category(), pending.returnPage(), normalized));
+        openConfirmReason(player, pending.targetId(), pending.category(), pending.returnPage(), normalized);
     }
 
     @EventHandler
@@ -427,7 +479,11 @@ public final class RepGuiManager implements Listener {
         UUID playerId = event.getPlayer().getUniqueId();
         pendingChatInputs.remove(playerId);
         cancelChatTimeout(playerId);
-        pendingAnvils.remove(playerId);
+        AnvilSession anvil = pendingAnvils.remove(playerId);
+        if (anvil != null) {
+            clearAnvilGuiItems(anvil.inventory());
+            purgeAnvilGuiItems(event.getPlayer());
+        }
         pendingDrafts.remove(playerId);
         returnFromBook.remove(playerId);
         liveAnvilText.remove(playerId);
@@ -701,13 +757,20 @@ public final class RepGuiManager implements Listener {
     }
 
     private void completeAnvilReasonEntry(Player player, AnvilSession anvil, String text) {
-        transitioningAnvil.add(player.getUniqueId());
-        pendingAnvils.remove(player.getUniqueId());
-        liveAnvilText.remove(player.getUniqueId());
-        player.closeInventory();
-        Bukkit.getScheduler().runTask(plugin, () -> purgeAnvilGuiItems(player));
-        Bukkit.getScheduler().runTask(plugin,
-                () -> openConfirmReason(player, anvil.targetId(), anvil.category(), anvil.returnPage(), text));
+        UUID playerId = player.getUniqueId();
+        if (!transitioningAnvil.add(playerId)) {
+            return;
+        }
+        // InventoryClickEvent must finish before closing/replacing its inventory.
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (pendingAnvils.get(playerId) != anvil
+                    || !player.isOnline() || !isActiveAnvilSession(player, player.getOpenInventory())) {
+                return;
+            }
+            clearAnvilGuiItems(anvil.inventory());
+            player.closeInventory();
+            openConfirmReason(player, anvil.targetId(), anvil.category(), anvil.returnPage(), text);
+        });
     }
 
     private void openProfileFilterMenu(Player viewer, UUID targetId, boolean positive, int returnPage,
@@ -777,7 +840,7 @@ public final class RepGuiManager implements Listener {
         viewer.openInventory(inventory);
     }
 
-    private void beginChatInput(Player player, UUID targetId, RepCategory category, int returnPage) {
+    void beginChatInput(Player player, UUID targetId, RepCategory category, int returnPage) {
         UUID playerId = player.getUniqueId();
         cancelChatTimeout(playerId);
         pendingChatInputs.put(playerId, new PendingTextInput(targetId, category, returnPage));
@@ -803,14 +866,18 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    private void openAnvilInput(Player player, UUID targetId, RepCategory category, int returnPage) {
-        pendingAnvils.put(player.getUniqueId(), new AnvilSession(targetId, category, returnPage));
-        liveAnvilText.put(player.getUniqueId(), "");
+    void openAnvilInput(Player player, UUID targetId, RepCategory category, int returnPage) {
         org.bukkit.inventory.InventoryView view = player.openAnvil(null, true);
+        if (view == null) {
+            player.sendMessage(ChatColor.RED + "Unable to open the anvil. Please try again.");
+            return;
+        }
+        Inventory inventory = view.getTopInventory();
+        pendingAnvils.put(player.getUniqueId(), new AnvilSession(targetId, category, returnPage, inventory));
+        liveAnvilText.put(player.getUniqueId(), "");
         if (view instanceof AnvilView anvilView) {
             resetAnvilView(anvilView);
         }
-        Inventory inventory = view.getTopInventory();
         inventory.setItem(0, anvilGuiItem(materialFor(category.isPositive()), ChatColor.WHITE + "Type here", List.of()));
         if (inventory instanceof AnvilInventory anvilInventory) {
             resetAnvilCosts(anvilInventory);
@@ -1195,7 +1262,10 @@ public final class RepGuiManager implements Listener {
         if (isAnvilGuiItem(player.getItemOnCursor())) {
             player.setItemOnCursor(null);
         }
-        Inventory inventory = player.getInventory();
+        clearAnvilGuiItems(player.getInventory());
+    }
+
+    private void clearAnvilGuiItems(Inventory inventory) {
         for (int i = 0; i < inventory.getSize(); i++) {
             if (isAnvilGuiItem(inventory.getItem(i))) {
                 inventory.clear(i);
@@ -1394,10 +1464,11 @@ public final class RepGuiManager implements Listener {
     }
 
     private boolean isActiveAnvilSession(Player player, org.bukkit.inventory.InventoryView view) {
-        return pendingAnvils.containsKey(player.getUniqueId())
+        AnvilSession session = pendingAnvils.get(player.getUniqueId());
+        return session != null
                 && view != null
                 && view.getTopInventory() != null
-                && view.getTopInventory().getType() == org.bukkit.event.inventory.InventoryType.ANVIL;
+                && session.inventory().equals(view.getTopInventory());
     }
 
     private Material materialFor(boolean positive) {
@@ -1490,6 +1561,6 @@ public final class RepGuiManager implements Listener {
     private record ProfileContext(UUID targetId, int page) {
     }
 
-    private record AnvilSession(UUID targetId, RepCategory category, int returnPage) {
+    private record AnvilSession(UUID targetId, RepCategory category, int returnPage, Inventory inventory) {
     }
 }
