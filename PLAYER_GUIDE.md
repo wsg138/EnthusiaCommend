@@ -2,7 +2,7 @@
 
 This file documents the current player-facing reputation system on Enthusia SMP. The main [`README.md`](README.md) remains the deeper technical/admin reference.
 
-The values below were rechecked against the live production configuration and the current 2.13.1 source on August 23, 2026.
+These are the shipped defaults for 2.14.0. Server administrators can change the thresholds, effects, and time windows; this is not a claim about an already deployed server configuration.
 
 ## Reputation basics
 
@@ -11,8 +11,8 @@ Every reputation entry has a category and an optional written reason.
 - A **positive** reputation entry is worth **+1**.
 - A **negative** reputation entry is worth **-2**.
 - You cannot give reputation to yourself.
-- The current production minimum active-playtime requirement to give reputation is **0 hours**.
-- The same giver/target reputation entry is subject to a **24-hour edit/change cooldown**.
+- The default minimum active-playtime requirement is **12 hours**, configurable by the server.
+- The same giver/target reputation entry is subject to a **24-hour edit/change cooldown**. Removing it also starts a separate **24-hour cooldown**, including staff removals; this is configurable.
 - Reasons can be up to **256 characters** and the current GUI uses an anvil-style text input with a 60-second input timeout.
 
 ## Reputation categories
@@ -35,9 +35,8 @@ Every reputation entry has a category and an optional written reason.
 | **Spawn Killed** | Killed players unfairly around spawn |
 | **Griefed** | Damaged/destroyed another player's build |
 | **Trapped** | Used a trap unfairly against another player |
-| **Scam Stall** | Ran a misleading/dishonest market stall |
 
-Older generic positive/negative categories can still exist in migrated historical data, but they are not selectable for new reputation entries.
+Legacy generic categories and Scam Stall are not selectable. Old Scam Stall entries migrate to Scammed without changing their score or written reason.
 
 ## Commands and GUI
 
@@ -52,7 +51,7 @@ opens your own reputation profile.
 /rep <player>
 ```
 
-opens another player's profile. Profiles show overall reputation, positive/negative entry counts, individual reviews, category filters, category-specific totals, and pagination.
+opens another player's profile on the positive page. The Positive/Negative buttons switch between separate pages, with the newest created or edited entries first. Categories filters the selected side; Back returns to that side, and All reps combines both sides. Clicking a written reason opens a book reader; closing it returns to the same player, filter, and page. Category-selection menus also have Back buttons.
 
 Other player commands:
 
@@ -61,6 +60,9 @@ Other player commands:
 /rep bottom
 /rep reviews [player]
 /rep give <player> <category> <reason>
+/rep positive [player]
+/rep negative [player]
+/rep recent <player|all> [day|week] [all|positive|negative|category] [page]
 /rep stalk <player> [days]
 /rep stalk list
 /rep stalk cancel <player>
@@ -68,45 +70,39 @@ Other player commands:
 
 ## Reputation effects
 
-The current 2.13.1 code deliberately disables all reputation movement-speed modifiers. Legacy movement-speed keys still exist in the production config for compatibility, but they are inert and are **not active gameplay effects**.
+Only teleport cooldown changes, warzone glow, and stalking are enabled by default. Cashback has been removed. Administrators can add or remove rules for overall reputation and for each category independently.
 
-### Positive reputation
+### Teleport cooldown
 
-| Reputation | Active effects |
-| ---: | --- |
-| **+5** | No active gameplay effect |
-| **+10** | +5% beneficial potion duration |
-| **+15** | +10% beneficial potion duration |
+These multipliers require the EnthusiaTeleport integration. They change cooldown, with no default warmup change.
 
-The config/data model still contains cashback values at +10 and +15, but the current code does not contain an economy transaction hook that actually awards reputation cashback, so cashback should not be advertised as a current benefit.
+| Score threshold | Cooldown multiplier |
+| ---: | ---: |
+| +5 | 83.33% |
+| +10 | 75% |
+| +15 | 66.67% |
+| +20 | 50% |
+| -10 | 140% |
+| -15 | 160% |
+| -25 | 200% |
 
-### Negative reputation
+The strongest penalty wins over a reward, and multipliers do not stack. Each category evaluates these thresholds independently using its own score. For example, an overall score of +30 with -10 Spawn Killed still causes glow and a 140% teleport cooldown.
 
-These effects are cumulative as the score becomes more negative.
+### Glow and stalking
 
-| Reputation | Active effects added at this threshold |
-| ---: | --- |
-| **-5** | No active gameplay effect |
-| **-6** | 3s Ender Pearl cooldown; -5% Elytra-rocket duration |
-| **-7** | 2s Wind Charge cooldown; Elytra-rocket penalty increases to -10% |
-| **-10** | Glowing |
-| **-12** | Becomes stalkable; -10% beneficial potion duration |
-| **-15** | Ender Pearl cooldown increases to 7s; Wind Charge cooldown to 5s; Elytra-rocket penalty to -15% |
-| **-20** | Ender Pearl cooldown increases to 10s; Wind Charge cooldown to 10s; potion penalty to -15%; Elytra-rocket penalty to -25%; red glow |
+At -10 in overall reputation or any negative category, glow activates in the configured Warzone outside Spawn. At -20 it becomes red when ProtocolLib is available. WarzoneDuels exemptions remain in place for glow. At -12 overall or in any negative category, the player becomes eligible for stalking. Administrators can change these rules per category.
 
-There is **no 5-second Pearl tier at -10** in the current code. The Pearl penalty remains 3 seconds from -6 through -14, then becomes 7 seconds at -15 and 10 seconds at -20.
+### Tarnished
 
-### Where the effects apply
+A positive-reputation player who receives a new negative entry, or whose existing positive entry is changed to negative, is marked **Tarnished**. Their reputation color changes from green to orange for 24 hours while their total remains positive. Negative and zero totals retain their normal red/yellow colors. Editing the text of an existing negative entry does not extend the timer. Duration, label, and color are configurable, and the timer survives restarts.
 
-- **Glow penalties** apply in the configured Spawn/Warzone effect areas.
-- **Potion-duration modifiers** apply in Spawn or the Warzone.
-- **Ender Pearl and Wind Charge cooldown penalties** apply specifically in the Warzone.
-- Negative Elytra-firework duration changes apply while gliding and are suppressed for WarzoneDuels participants.
-- WarzoneDuels participants are generally exempt from reputation gameplay modifiers so reputation does not distort duel rules.
+### Recent reputation
+
+For example, `/rep recent Alex week negative` lists Alex's negative entries created or edited in the configured week window. `/rep recent all day WAS_KIND` lists that category across all players. Day/week default to 24/168 hours. Results are newest first and paginated; the profile book reader provides the full reason when a chat preview is shortened. Existing `/rep reviews` and category filters remain available.
 
 ## Stalking low-reputation players
 
-At **-12 reputation or lower**, a player becomes eligible for reputation stalking.
+At **-12 overall reputation or in any negative category**, a player becomes eligible for reputation stalking by default.
 
 ```text
 /rep stalk <player> [days]
@@ -114,7 +110,7 @@ At **-12 reputation or lower**, a player becomes eligible for reputation stalkin
 
 Current rules:
 
-- target must have reputation **-12 or lower**;
+- target must meet an enabled overall or category stalking rule;
 - cost is **100 currency per day**;
 - minimum purchase is 1 day;
 - maximum purchase is **7 days**.
@@ -125,7 +121,7 @@ Use `/rep stalk list` to view active subscriptions and `/rep stalk cancel <playe
 
 ## Rep abuse handling
 
-The plugin detects patterns such as reciprocal reputation trading, clustered down-reputation, and same-IP activity for staff review. These create moderation signals/history; they are not automatic punishments.
+By default, the plugin blocks reputation between accounts with a shared recorded IP address. It also blocks an alternate account on the same recorded address from repping a player already repped by another account, even after removal or restart. Both players must have a recorded login address before voting is permitted after an upgrade. The setting is configurable. Reciprocal trading and clustered down-reputation still generate staff review alerts.
 
 ## Public wiki guidance
 

@@ -23,7 +23,8 @@ public final class RepConfig {
     private final int analyticsMaxRecords;
     private final String discordWebhookUrl;
     private final boolean repTradingAlertsEnabledByDefault;
-    private final EffectThresholds effectThresholds;
+    private final RepEffectRules effectRules;
+    private final FileConfiguration settings;
 
     public RepConfig(FileConfiguration config) {
         this.minActivePlaytimeHours = Math.max(0, config.getInt("rep.minActivePlaytimeHours", 12));
@@ -42,7 +43,8 @@ public final class RepConfig {
         this.analyticsMaxRecords = Math.max(100, config.getInt("analytics.maxRecords", 5000));
         this.discordWebhookUrl = config.getString("discord.webhookUrl", "").trim();
         this.repTradingAlertsEnabledByDefault = config.getBoolean("rep-trading-alerts.enabled-by-default", true);
-        this.effectThresholds = new EffectThresholds(config);
+        this.effectRules = new RepEffectRules(config);
+        this.settings = config;
     }
 
     public int getMinActivePlaytimeHours() { return minActivePlaytimeHours; }
@@ -62,7 +64,19 @@ public final class RepConfig {
     public int getAnalyticsMaxRecords() { return analyticsMaxRecords; }
     public String getDiscordWebhookUrl() { return discordWebhookUrl; }
     public boolean areRepTradingAlertsEnabledByDefault() { return repTradingAlertsEnabledByDefault; }
-    public EffectThresholds getEffectThresholds() { return effectThresholds; }
+    public long getRemovalCooldownMillis() { return Math.max(0L, settings.getLong("rep.removalCooldownHours", 24)) * 3_600_000L; }
+    public boolean isIpProtectionEnabled() { return settings.getBoolean("rep.ipProtection.enabled", true); }
+    public boolean requiresKnownAddresses() { return settings.getBoolean("rep.ipProtection.requireKnownAddresses", true); }
+    public long getTarnishedMillis() { return Math.max(0L, settings.getLong("rep.tarnished.hours", 24)) * 3_600_000L; }
+    public String getTarnishedLabel() { return settings.getString("rep.tarnished.label", "Tarnished"); }
+    public ChatColor getTarnishedColor() {
+        try { return ChatColor.valueOf(settings.getString("rep.tarnished.color", "GOLD").toUpperCase(Locale.ROOT)); }
+        catch (IllegalArgumentException ex) { return ChatColor.GOLD; }
+    }
+    public int getRecentPageSize() { return Math.max(1, Math.min(50, settings.getInt("rep.recent.pageSize", 10))); }
+    public long getRecentWindowMillis(String window) {
+        return Math.max(1L, settings.getLong("rep.recent." + window + "Hours", window.equals("week") ? 168 : 24)) * 3_600_000L;
+    }
 
     public ChatColor colorForScore(int score) {
         if (score > 0) return ChatColor.GREEN;
@@ -74,26 +88,16 @@ public final class RepConfig {
         return colorForScore(score).toString() + score;
     }
 
-    /** Movement-speed reputation modifiers are intentionally disabled. */
     public RepAppliedEffects resolveEffects(int score) {
-        EffectAccumulator effects = new EffectAccumulator();
-        effects.applyCooldownPenalties(score, effectThresholds);
-        effects.applyDurationPenalties(score, effectThresholds);
-        effects.applyRestrictions(score, effectThresholds);
-        effects.applyBenefits(score, effectThresholds);
-        return effects.toAppliedEffects();
+        return resolveEffects(score, java.util.Map.of());
+    }
+
+    public RepAppliedEffects resolveEffects(int score, java.util.Map<org.enthusia.rep.rep.RepCategory, Integer> categories) {
+        return effectRules.resolve(score, categories);
     }
 
     public boolean crossedEffectThreshold(int oldScore, int newScore) {
-        if (oldScore == newScore) return false;
-        for (int threshold : effectThresholds.activeMilestones()) {
-            boolean oldActive = threshold <= 0 ? oldScore <= threshold : oldScore >= threshold;
-            boolean newActive = threshold <= 0 ? newScore <= threshold : newScore >= threshold;
-            if (oldActive != newActive) {
-                return true;
-            }
-        }
-        return false;
+        return !resolveEffects(oldScore).equals(resolveEffects(newScore));
     }
 
     public enum InputMode {
@@ -110,145 +114,4 @@ public final class RepConfig {
         }
     }
 
-    private static final class EffectAccumulator {
-        private int potionDurationPercent;
-        private int fireworkDurationPercent;
-        private int pearlCooldownSeconds;
-        private int windCooldownSeconds;
-        private boolean glow;
-        private ChatColor glowColor;
-        private boolean stalkable;
-        private int cashbackPercent;
-
-        private void applyCooldownPenalties(int score, EffectThresholds thresholds) {
-            if (score <= thresholds.pearlCooldownThreeSecondsAt) pearlCooldownSeconds = 3;
-            if (score <= thresholds.pearlCooldownSevenSecondsAt) pearlCooldownSeconds = 7;
-            if (score <= thresholds.pearlCooldownTenSecondsAt) pearlCooldownSeconds = 10;
-            if (score <= thresholds.windChargeCooldownTwoSecondsAt) windCooldownSeconds = 2;
-            if (score <= thresholds.windChargeCooldownFiveSecondsAt) windCooldownSeconds = 5;
-            if (score <= thresholds.windChargeCooldownTenSecondsAt) windCooldownSeconds = 10;
-        }
-
-        private void applyDurationPenalties(int score, EffectThresholds thresholds) {
-            if (score <= thresholds.fireworkDurationMinusFiveAt) fireworkDurationPercent = -5;
-            if (score <= thresholds.fireworkDurationMinusTenAt) fireworkDurationPercent = -10;
-            if (score <= thresholds.fireworkDurationMinusFifteenAt) fireworkDurationPercent = -15;
-            if (score <= thresholds.fireworkDurationMinusTwentyFiveAt) fireworkDurationPercent = -25;
-            if (score <= thresholds.potionDurationMinusTenAt) potionDurationPercent = -10;
-            if (score <= thresholds.potionDurationMinusFifteenAt) potionDurationPercent = -15;
-        }
-
-        private void applyRestrictions(int score, EffectThresholds thresholds) {
-            if (score <= thresholds.glowAt) glow = true;
-            if (score <= thresholds.stalkableAt) stalkable = true;
-            if (score <= thresholds.redGlowAt) {
-                glow = true;
-                glowColor = ChatColor.RED;
-            }
-        }
-
-        private void applyBenefits(int score, EffectThresholds thresholds) {
-            if (score >= thresholds.potionDurationPlusFiveAt) potionDurationPercent = 5;
-            if (score >= thresholds.cashbackThreePercentAt) cashbackPercent = 3;
-            if (score >= thresholds.potionDurationPlusTenAt) potionDurationPercent = 10;
-            if (score >= thresholds.cashbackFivePercentAt) cashbackPercent = 5;
-        }
-
-        private RepAppliedEffects toAppliedEffects() {
-            return new RepAppliedEffects(
-                    0,
-                    potionDurationPercent,
-                    fireworkDurationPercent,
-                    pearlCooldownSeconds,
-                    windCooldownSeconds,
-                    glow,
-                    glowColor,
-                    stalkable,
-                    cashbackPercent
-            );
-        }
-    }
-
-    public static final class EffectThresholds {
-        // Retained so existing config keys remain loadable, although movement speed is inert.
-        public final int moveSpeedMinusOneAt;
-        public final int pearlCooldownThreeSecondsAt;
-        public final int fireworkDurationMinusFiveAt;
-        public final int moveSpeedMinusThreeAt;
-        public final int windChargeCooldownTwoSecondsAt;
-        public final int fireworkDurationMinusTenAt;
-        public final int moveSpeedMinusFiveAt;
-        public final int glowAt;
-        public final int stalkableAt;
-        public final int potionDurationMinusTenAt;
-        public final int pearlCooldownSevenSecondsAt;
-        public final int windChargeCooldownFiveSecondsAt;
-        public final int fireworkDurationMinusFifteenAt;
-        public final int pearlCooldownTenSecondsAt;
-        public final int windChargeCooldownTenSecondsAt;
-        public final int moveSpeedMinusTenAt;
-        public final int potionDurationMinusFifteenAt;
-        public final int fireworkDurationMinusTwentyFiveAt;
-        public final int redGlowAt;
-        public final int moveSpeedPlusOneAt;
-        public final int moveSpeedPlusThreeAt;
-        public final int potionDurationPlusFiveAt;
-        public final int cashbackThreePercentAt;
-        public final int moveSpeedPlusFiveAt;
-      public final int potionDurationPlusTenAt;
-        public final int cashbackFivePercentAt;
-
-        private EffectThresholds(FileConfiguration config) {
-            this.moveSpeedMinusOneAt = config.getInt("rep.effects.penalties.moveSpeedMinus1PercentAt", -5);
-            this.pearlCooldownThreeSecondsAt = config.getInt("rep.effects.penalties.pearlCooldown3SecondsAt", -6);
-            this.fireworkDurationMinusFiveAt = config.getInt("rep.effects.penalties.fireworkDurationMinus5PercentAt", -6);
-            this.moveSpeedMinusThreeAt = config.getInt("rep.effects.penalties.moveSpeedMinus3PercentAt", -7);
-            this.windChargeCooldownTwoSecondsAt = config.getInt("rep.effects.penalties.windChargeCooldown2SecondsAt", -7);
-            this.fireworkDurationMinusTenAt = config.getInt("rep.effects.penalties.fireworkDurationMinus10PercentAt", -7);
-            this.moveSpeedMinusFiveAt = config.getInt("rep.effects.penalties.moveSpeedMinus5PercentAt", -10);
-            this.glowAt = config.getInt("rep.effects.penalties.glowAt", -10);
-            this.stalkableAt = config.getInt("rep.effects.penalties.stalkableAt", -12);
-            this.potionDurationMinusTenAt = config.getInt("rep.effects.penalties.potionDurationMinus10PercentAt", -12);
-            this.pearlCooldownSevenSecondsAt = config.getInt("rep.effects.penalties.pearlCooldown7SecondsAt", -15);
-            this.windChargeCooldownFiveSecondsAt = config.getInt("rep.effects.penalties.windChargeCooldown5SecondsAt", -15);
-            this.fireworkDurationMinusFifteenAt = config.getInt("rep.effects.penalties.fireworkDurationMinus15PercentAt", -15);
-            this.pearlCooldownTenSecondsAt = config.getInt("rep.effects.penalties.pearlCooldown10SecondsAt", -20);
-            this.windChargeCooldownTenSecondsAt = config.getInt("rep.effects.penalties.windChargeCooldown10SecondsAt", -20);
-            this.moveSpeedMinusTenAt = config.getInt("rep.effects.penalties.moveSpeedMinus10PercentAt", -20);
-            this.potionDurationMinusFifteenAt = config.getInt("rep.effects.penalties.potionDurationMinus15PercentAt", -20);
-            this.fireworkDurationMinusTwentyFiveAt = config.getInt("rep.effects.penalties.fireworkDurationMinus25PercentAt", -20);
-            this.redGlowAt = config.getInt("rep.effects.penalties.redGlowAt", -20);
-            this.moveSpeedPlusOneAt = config.getInt("rep.effects.benefits.moveSpeedPlus1PercentAt", 5);
-            this.moveSpeedPlusThreeAt = config.getInt("rep.effects.benefits.moveSpeedPlus3PercentAt", 10);
-            this.potionDurationPlusFiveAt = config.getInt("rep.effects.benefits.potionDurationPlus5PercentAt", 10);
-            this.cashbackThreePercentAt = config.getInt("rep.effects.benefits.cashback3PercentAt", 10);
-            this.moveSpeedPlusFiveAt = config.getInt("rep.effects.benefits.moveSpeedPlus5PercentAt", 15);
-            this.potionDurationPlusTenAt = config.getInt("rep.effects.benefits.potionDurationPlus10PercentAt", 15);
-            this.cashbackFivePercentAt = config.getInt("rep.effects.benefits.cashback5PercentAt", 15);
-        }
-
-        private int[] activeMilestones() {
-            return new int[] {
-                    pearlCooldownThreeSecondsAt,
-                    fireworkDurationMinusFiveAt,
-                    windChargeCooldownTwoSecondsAt,
-                    fireworkDurationMinusTenAt,
-                    glowAt,
-                    stalkableAt,
-                    potionDurationMinusTenAt,
-                    pearlCooldownSevenSecondsAt,
-                    windChargeCooldownFiveSecondsAt,
-                    fireworkDurationMinusFifteenAt,
-                    pearlCooldownTenSecondsAt,
-                    windChargeCooldownTenSecondsAt,
-                    potionDurationMinusFifteenAt,
-                    fireworkDurationMinusTwentyFiveAt,
-                    redGlowAt,
-                    potionDurationPlusFiveAt,
-                    cashbackThreePercentAt,
-                    potionDurationPlusTenAt,
-                    cashbackFivePercentAt
-            };
-        }
-    }
 }

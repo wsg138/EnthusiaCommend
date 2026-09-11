@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 
 public final class RepPlaceholderExpansion extends PlaceholderExpansion {
 
+    private org.enthusia.rep.rep.RepService repService;
     private final Supplier<String> versionSupplier;
     private final Function<UUID, Integer> scoreLookup;
     private final Supplier<RepConfig> configSupplier;
@@ -24,6 +25,7 @@ public final class RepPlaceholderExpansion extends PlaceholderExpansion {
                 playerId -> plugin.getRepService().getScore(playerId),
                 plugin::getRepConfig
         );
+        this.repService = plugin.getRepService();
     }
 
     RepPlaceholderExpansion(
@@ -65,6 +67,21 @@ public final class RepPlaceholderExpansion extends PlaceholderExpansion {
         RepConfig config = configSupplier.get();
         if (score == null || config == null) {
             return "";
+        }
+        if (repService != null && params != null) {
+            UUID id = player.getUniqueId();
+            ChatColor color = repService.colorForPlayer(id);
+            return switch (params.toLowerCase(Locale.ROOT)) {
+                case "score_colored" -> repService.formatColoredScore(id);
+                case "color" -> color.toString();
+                case "color_mm" -> MiniMessageColorTags.opening(color);
+                case "score_mm" -> MiniMessageColorTags.apply(color, Integer.toString(score));
+                case "glowcolor" -> legacyGlowColor(repService.getEffects(id));
+                case "glowcolor_mm" -> MiniMessageColorTags.opening(resolvedGlowColor(repService.getEffects(id)));
+                case "status" -> repService.isTarnished(id) ? config.getTarnishedLabel() : "";
+                case "tarnished" -> Boolean.toString(repService.isTarnished(id));
+                default -> resolvePlaceholder(score, params, config);
+            };
         }
         return resolvePlaceholder(score, params, config);
     }

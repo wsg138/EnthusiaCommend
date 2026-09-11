@@ -14,9 +14,9 @@ public record RepAppliedEffects(
         boolean glow,
         ChatColor glowColor,
         boolean stalkable,
-        int cashbackPercent
+        double teleportCooldownMultiplier
 ) {
-    public static final RepAppliedEffects NONE = new RepAppliedEffects(0, 0, 0, 0, 0, false, null, false, 0);
+    public static final RepAppliedEffects NONE = new RepAppliedEffects(0, 0, 0, 0, 0, false, null, false, 1);
 
     public String describe() {
         List<String> descriptions = new ArrayList<>(8);
@@ -27,7 +27,7 @@ public record RepAppliedEffects(
         addSecondsDescription(descriptions, "Wind charge cooldown", windCooldownSeconds);
         addDescription(descriptions, glow, "Glow: " + (glowColor != null ? glowColor.name() : "WHITE"));
         addDescription(descriptions, stalkable, "Stalkable");
-        addPositivePercentDescription(descriptions, "Cashback", cashbackPercent);
+        if (teleportCooldownMultiplier != 1) descriptions.add("Teleport cooldown: " + Math.round(teleportCooldownMultiplier * 100) + "%");
         if (descriptions.isEmpty()) {
             return "You currently have no rep-based buffs or penalties.";
         }
@@ -43,12 +43,6 @@ public record RepAppliedEffects(
     private static void addSecondsDescription(List<String> descriptions, String label, int value) {
         if (value > 0) {
             descriptions.add(label + ": " + value + "s");
-        }
-    }
-
-    private static void addPositivePercentDescription(List<String> descriptions, String label, int value) {
-        if (value > 0) {
-            descriptions.add(label + ": " + value + "%");
         }
     }
 

@@ -16,7 +16,8 @@ public record PluginDataSnapshot(
         List<ReputationChangeRecord> reputationChanges,
         List<RepService.SuspiciousRepCase> suspiciousCases,
         List<RemovalCooldownEntry> removalCooldowns,
-        Map<UUID, Boolean> repTradingAlertPreferences
+        Map<UUID, Boolean> repTradingAlertPreferences,
+        Map<UUID, org.enthusia.rep.rep.RepIdentityState> identities
 ) {
     public PluginDataSnapshot(
             Map<UUID, Integer> scores,
@@ -43,7 +44,16 @@ public record PluginDataSnapshot(
                 suspiciousCases, removalCooldowns, Map.of());
     }
 
+    public PluginDataSnapshot(Map<UUID, Integer> scores, List<Commendation> commendations,
+            List<RepService.RemovedRep> removedEntries, List<StalkEntry> stalkEntries,
+            List<ReputationChangeRecord> reputationChanges, List<RepService.SuspiciousRepCase> suspiciousCases,
+            List<RemovalCooldownEntry> removalCooldowns, Map<UUID, Boolean> repTradingAlertPreferences) {
+        this(scores, commendations, removedEntries, stalkEntries, reputationChanges, suspiciousCases,
+                removalCooldowns, repTradingAlertPreferences, Map.of());
+    }
+
     public PluginDataSnapshot {
+        identities = identities == null ? Map.of() : Map.copyOf(identities);
         scores = scores == null ? Map.of() : Map.copyOf(scores);
         commendations = commendations == null ? List.of() : List.copyOf(commendations);
         removedEntries = removedEntries == null ? List.of() : List.copyOf(removedEntries);

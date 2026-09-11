@@ -85,7 +85,8 @@ class RepRulesTest {
 
     @Test
     void selectableRegistryProvidesDisplayMetadataWithoutLegacyDuplicates() {
-        assertEquals(10, RepCategory.selectableValues().size());
+        assertEquals(9, RepCategory.selectableValues().size());
+        assertFalse(RepCategory.selectableValues().contains(RepCategory.SCAM_STALL));
         assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_POSITIVE));
         assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_NEGATIVE));
         assertTrue(RepCategory.selectableValues().stream().allMatch(category -> !category.displayName().isBlank()));

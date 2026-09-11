@@ -118,18 +118,20 @@ public final class CommendPlugin extends JavaPlugin {
         );
         for (var player : Bukkit.getOnlinePlayers()) {
             repService.rememberName(player.getUniqueId(), player.getName());
+            repService.rememberAddress(player);
         }
-        this.stalkManager = new StalkManager(this, regionManager, repService, repConfig, this::markDirty);
+        this.stalkManager = new StalkManager(this, regionManager, repService, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
         this.warzoneDuelsHook.refresh();
-        this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService, warzoneDuelsHook);
+        this.effectManager = new RepEffectManager(this, regionManager, repService, warzoneDuelsHook);
         this.teleportIntegration = new TeleportIntegration(this, repService);
         this.repGuiManager = new RepGuiManager(this, repService, effectManager);
         this.repLeaderboardGui = new RepLeaderboardGui(this, repService);
 
         getServer().getPluginManager().registerEvents(stalkManager, this);
         getServer().getPluginManager().registerEvents(repGuiManager, this);
+        repGuiManager.registerReviewBooks();
         getServer().getPluginManager().registerEvents(repLeaderboardGui, this);
         effectManager.register(getServer().getPluginManager());
         teleportIntegration.register();
@@ -181,8 +183,8 @@ public final class CommendPlugin extends JavaPlugin {
         if (analyticsService != null) {
             analyticsService.pruneExpired(true);
         }
-        this.stalkManager.reload(repConfig);
-        this.effectManager.reload(repConfig);
+        this.stalkManager.reload();
+        this.effectManager.reload();
         this.warzoneDuelsHook.refresh();
         this.teleportIntegration.refresh();
         reloadDiscordWebhook();
@@ -283,7 +285,8 @@ public final class CommendPlugin extends JavaPlugin {
                 analyticsService != null ? analyticsService.snapshot() : java.util.List.of(),
                 repSnapshot.suspiciousCases(),
                 repSnapshot.removalCooldowns(),
-                repSnapshot.repTradingAlertPreferences()
+                repSnapshot.repTradingAlertPreferences(),
+                repSnapshot.identities()
         );
     }
 

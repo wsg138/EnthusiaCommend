@@ -52,7 +52,8 @@ class YamlPluginDataStoreTest {
                 List.of(new RepService.SuspiciousRepCase(
                         targetId, "ALT_IP", "case-key", List.of(giverId), 150L, false, "Shared address")),
                 List.of(new PluginDataSnapshot.RemovalCooldownEntry(giverId, targetId, 160L)),
-                Map.of(targetId, false)
+                Map.of(targetId, false),
+                Map.of(giverId, new org.enthusia.rep.rep.RepIdentityState(java.util.Set.of("saved-hash"), java.util.Set.of(targetId), 170L))
         );
         YamlPluginDataStore store = new YamlPluginDataStore(
                 temporaryDirectory.toFile(), testLogger());
@@ -69,6 +70,7 @@ class YamlPluginDataStoreTest {
         assertEquals("case-key", loaded.suspiciousCases().getFirst().key());
         assertEquals("Shared address", loaded.suspiciousCases().getFirst().detail());
         assertEquals(snapshot.removalCooldowns(), loaded.removalCooldowns());
+        assertEquals(snapshot.identities(), loaded.identities());
         assertFalse(loaded.repTradingAlertPreferences().get(targetId));
         assertFalse(Files.exists(temporaryDirectory.resolve("data.yml.tmp")));
     }

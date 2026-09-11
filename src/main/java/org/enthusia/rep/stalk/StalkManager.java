@@ -15,7 +15,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.enthusia.rep.CommendPlugin;
-import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
 import org.enthusia.rep.storage.PluginDataSnapshot;
@@ -31,17 +30,15 @@ public final class StalkManager implements Listener {
     private final RegionManager regionManager;
     private final RepService repService;
     private final Runnable dirtyMarker;
-    private volatile RepConfig config;
 
     private final Map<UUID, Map<UUID, Long>> subscriptionsByTarget = new ConcurrentHashMap<>();
     private final Map<UUID, RegionManager.LogicalZone> lastKnownZones = new ConcurrentHashMap<>();
 
     public StalkManager(CommendPlugin plugin, RegionManager regionManager, RepService repService,
-                        RepConfig config, Runnable dirtyMarker) {
+                        Runnable dirtyMarker) {
         this.plugin = plugin;
         this.regionManager = regionManager;
         this.repService = repService;
-        this.config = config;
         this.dirtyMarker = dirtyMarker;
     }
 
@@ -57,8 +54,7 @@ public final class StalkManager implements Listener {
         initializeOnlinePlayers();
     }
 
-    public void reload(RepConfig config) {
-        this.config = config;
+    public void reload() {
         initializeOnlinePlayers();
     }
 
@@ -97,7 +93,7 @@ public final class StalkManager implements Listener {
     }
 
     public boolean isStalkable(UUID targetId) {
-        return repService.getScore(targetId) <= config.getEffectThresholds().stalkableAt;
+        return repService.getEffects(targetId).stalkable();
     }
 
     public List<StalkSubscription> getSubscriptionsByStalker(UUID stalkerId) {
@@ -183,7 +179,7 @@ public final class StalkManager implements Listener {
 
     private void notifyStalkers(UUID targetId, String message) {
         Map<UUID, Long> entries = subscriptionsByTarget.get(targetId);
-        if (entries == null || entries.isEmpty()) return;
+        if (entries == null || entries.isEmpty() || !isStalkable(targetId)) return;
         long now = System.currentTimeMillis();
         List<UUID> expired = new ArrayList<>();
         for (Map.Entry<UUID, Long> entry : entries.entrySet()) {

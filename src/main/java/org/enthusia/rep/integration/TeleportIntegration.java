@@ -13,16 +13,6 @@ import java.lang.reflect.Method;
 import java.util.UUID;
 
 public final class TeleportIntegration implements Listener {
-    private static final int STRONG_POSITIVE_WARMUP_SCORE = 15;
-    private static final int POSITIVE_WARMUP_SCORE = 5;
-    private static final int SEVERE_NEGATIVE_WARMUP_SCORE = -25;
-    private static final int STRONG_NEGATIVE_WARMUP_SCORE = -15;
-    private static final int NEGATIVE_WARMUP_SCORE = -10;
-    private static final int BEST_COOLDOWN_SCORE = 20;
-    private static final int STRONG_COOLDOWN_SCORE = 15;
-    private static final int MEDIUM_COOLDOWN_SCORE = 10;
-    private static final int POSITIVE_COOLDOWN_SCORE = 5;
-
     private final CommendPlugin plugin;
     private final RepService repService;
 
@@ -54,9 +44,8 @@ public final class TeleportIntegration implements Listener {
         if (!ensureHooked()) {
             return;
         }
-        int score = repService.getScore(playerId);
-        invoke(setWarmupModifierMethod, playerId, computeWarmupModifier(score));
-        invoke(setCooldownModifierMethod, playerId, computeCooldownModifier(score));
+        invoke(setWarmupModifierMethod, playerId, 1.0D);
+        invoke(setCooldownModifierMethod, playerId, repService.getEffects(playerId).teleportCooldownMultiplier());
     }
 
     public void clearPlayer(UUID playerId) {
@@ -151,20 +140,4 @@ public final class TeleportIntegration implements Listener {
         }
     }
 
-    private double computeWarmupModifier(int score) {
-        if (score >= STRONG_POSITIVE_WARMUP_SCORE) return 0.5D;
-        if (score >= POSITIVE_WARMUP_SCORE) return 0.8D;
-        if (score <= SEVERE_NEGATIVE_WARMUP_SCORE) return 2.0D;
-        if (score <= STRONG_NEGATIVE_WARMUP_SCORE) return 1.6D;
-        if (score <= NEGATIVE_WARMUP_SCORE) return 1.4D;
-        return 1.0D;
-    }
-
-    private double computeCooldownModifier(int score) {
-        if (score >= BEST_COOLDOWN_SCORE) return 0.5D;
-        if (score >= STRONG_COOLDOWN_SCORE) return 40.0D / 60.0D;
-        if (score >= MEDIUM_COOLDOWN_SCORE) return 45.0D / 60.0D;
-        if (score >= POSITIVE_COOLDOWN_SCORE) return 50.0D / 60.0D;
-        return 1.0D;
-    }
 }

@@ -27,7 +27,6 @@ import org.bukkit.plugin.PluginManager;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.enthusia.rep.CommendPlugin;
-import org.enthusia.rep.config.RepConfig;
 import org.enthusia.rep.integration.WarzoneDuelsHook;
 import org.enthusia.rep.region.RegionManager;
 import org.enthusia.rep.rep.RepService;
@@ -51,7 +50,6 @@ public final class RepEffectManager implements Listener {
     private final RepService repService;
     private final WarzoneDuelsHook warzoneDuelsHook;
     private final ProtocolGlowService protocolGlowService;
-    private RepConfig config;
 
     private final Map<UUID, RepAppliedEffects> currentEffects = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> appliedMovementPercents = new ConcurrentHashMap<>();
@@ -59,10 +57,9 @@ public final class RepEffectManager implements Listener {
     private final Map<UUID, Long> lastPearlMessageAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastWindMessageAt = new ConcurrentHashMap<>();
 
-    public RepEffectManager(CommendPlugin plugin, RepConfig config, RegionManager regionManager,
+    public RepEffectManager(CommendPlugin plugin, RegionManager regionManager,
                             RepService repService, WarzoneDuelsHook warzoneDuelsHook) {
         this.plugin = plugin;
-        this.config = config;
         this.regionManager = regionManager;
         this.repService = repService;
         this.warzoneDuelsHook = warzoneDuelsHook;
@@ -70,12 +67,12 @@ public final class RepEffectManager implements Listener {
     }
 
     public void register(PluginManager pluginManager) { pluginManager.registerEvents(this, plugin); }
-    public void reload(RepConfig config) { this.config = config; refreshAll(); }
+    public void reload() { refreshAll(); }
     public void refreshAll() { Bukkit.getOnlinePlayers().forEach(player -> applyEffects(player, true)); }
     public void tickEffects() { Bukkit.getOnlinePlayers().forEach(player -> applyEffects(player, false)); }
 
     public RepAppliedEffects getCurrentEffects(UUID playerId) {
-        return currentEffects.getOrDefault(playerId, config.resolveEffects(repService.getScore(playerId)));
+        return currentEffects.getOrDefault(playerId, repService.getEffects(playerId));
     }
 
     public void clearAll() {
@@ -95,12 +92,12 @@ public final class RepEffectManager implements Listener {
 
     private void applyEffects(Player player, boolean force) {
         UUID playerId = player.getUniqueId();
-        RepAppliedEffects desired = config.resolveEffects(repService.getScore(playerId));
+        RepAppliedEffects desired = repService.getEffects(playerId);
         currentEffects.put(playerId, desired);
         boolean duelExempt = warzoneDuelsHook.isDuelExempt(player);
         boolean inEffectZone = !duelExempt && regionManager.isInSpawnOrWarzone(player.getLocation());
         applyMovement(player, inEffectZone ? desired.movementSpeedPercent() : 0, force);
-        applyGlow(player, inEffectZone && desired.glow(), desired.glowColor(), force);
+        applyGlow(player, !duelExempt && regionManager.isInWarzone(player.getLocation()) && !regionManager.isInSpawn(player.getLocation()) && desired.glow(), desired.glowColor(), force);
     }
 
     private void applyMovement(Player player, int desiredPercent, boolean force) {
@@ -175,6 +172,7 @@ public final class RepEffectManager implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
+        repService.rememberAddress(event.getPlayer());
         Bukkit.getScheduler().runTask(plugin, () -> {
             applyEffects(event.getPlayer(), true);
             refreshRedGlowForViewer(event.getPlayer());

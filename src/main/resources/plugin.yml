@@ -1,6 +1,6 @@
 name: EnthusiaCommend
 main: org.enthusia.rep.CommendPlugin
-version: 2.13.2-test1
+version: 2.14.0-test1
 api-version: '1.21'
 author: Enthusia
 depend: [Vault]

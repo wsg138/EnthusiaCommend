@@ -22,7 +22,7 @@ public enum RepCategory {
     SPAWN_KILLED(false, true, "Spawn Killed", "Killed players unfairly around spawn.", Material.IRON_SWORD),
     GRIEFED(false, true, "Griefed", "Damaged or destroyed another player's build.", Material.TNT),
     TRAPPED(false, true, "Trapped", "Used a trap unfairly against another player.", Material.COBWEB),
-    SCAM_STALL(false, true, "Scam Stall", "Ran a misleading or dishonest market stall.", Material.BARREL),
+    SCAM_STALL(false, false, "Scam Stall", "Ran a misleading or dishonest market stall.", Material.BARREL),
     OTHER_NEGATIVE(false, false, "Scammed (migrated)", "Legacy negative reputation migrated to Scammed.", Material.RED_DYE);
 
     private static final List<RepCategory> SELECTABLE = Arrays.stream(values())
@@ -53,7 +53,7 @@ public enum RepCategory {
     public RepCategory migratedCategory() {
         return switch (this) {
             case OTHER_POSITIVE -> WAS_KIND;
-            case OTHER_NEGATIVE -> SCAMMED;
+            case OTHER_NEGATIVE, SCAM_STALL -> SCAMMED;
             default -> this;
         };
     }
