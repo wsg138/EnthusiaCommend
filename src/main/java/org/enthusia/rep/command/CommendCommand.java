@@ -642,13 +642,13 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         List<String> result = new ArrayList<>();
         if (!command.getName().equalsIgnoreCase("rep")) return result;
         if (args.length > 1 && args[0].equalsIgnoreCase("recent")) {
-            if (args.length == 2) { addMatches(result, args[1], List.of("all")); addOnlinePlayers(result, args[1]); }
-            if (args.length == 3) addMatches(result, args[2], List.of("day", "week"));
-            if (args.length == 4) {
+            if (args.length == RecentReputationCommand.TARGET_ARGUMENTS) { addMatches(result, args[1], List.of("all")); addOnlinePlayers(result, args[1]); }
+            if (args.length == RecentReputationCommand.WINDOW_ARGUMENTS) addMatches(result, args[2], List.of("day", "week"));
+            if (args.length == RecentReputationCommand.FILTER_ARGUMENTS) {
                 addMatches(result, args[3], List.of("all", "positive", "negative"));
                 addMatches(result, args[3], SELECTABLE_CATEGORIES);
             }
-            if (args.length == 5) addMatches(result, args[4], List.of("1", "2", "3"));
+            if (args.length == RecentReputationCommand.PAGE_ARGUMENTS) addMatches(result, args[4], List.of("1", "2", "3"));
             return result;
         }
         if (args.length == 2 && List.of("positive", "negative", "reviews").contains(args[0].toLowerCase(Locale.ROOT))) {

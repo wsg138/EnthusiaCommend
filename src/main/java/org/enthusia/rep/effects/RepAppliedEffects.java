@@ -27,7 +27,7 @@ public record RepAppliedEffects(
         addSecondsDescription(descriptions, "Wind charge cooldown", windCooldownSeconds);
         addDescription(descriptions, glow, "Glow: " + (glowColor != null ? glowColor.name() : "WHITE"));
         addDescription(descriptions, stalkable, "Stalkable");
-        if (teleportCooldownMultiplier != 1) descriptions.add("Teleport cooldown: " + Math.round(teleportCooldownMultiplier * 100) + "%");
+        if (teleportCooldownMultiplier != NONE.teleportCooldownMultiplier()) descriptions.add("Teleport cooldown: " + Math.round(teleportCooldownMultiplier * 100) + "%");
         if (descriptions.isEmpty()) {
             return "You currently have no rep-based buffs or penalties.";
         }

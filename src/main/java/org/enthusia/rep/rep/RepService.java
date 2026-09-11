@@ -392,7 +392,7 @@ public final class RepService {
     }
 
     public List<Map.Entry<UUID, Integer>> leaderboardPolarity(boolean positive, boolean lowest) {
-        Map<UUID, Integer> totals = new LinkedHashMap<>();
+        Map<UUID, Integer> totals = new ConcurrentHashMap<>();
         for (UUID target : commendationsByTarget.keySet()) {
             List<Commendation> entries = getCommendationsAbout(target).stream()
                     .filter(entry -> entry.isPositive() == positive).toList();

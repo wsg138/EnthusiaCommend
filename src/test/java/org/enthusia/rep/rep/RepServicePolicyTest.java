@@ -22,6 +22,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RepServicePolicyTest {
+    private static final String TARGET_ADDRESS = "target-ip";
+    private static final String GIVER_ADDRESS = "giver-ip";
+    private static final String SHARED_ADDRESS = "shared";
     private final UUID giver = UUID.randomUUID();
     private final UUID target = UUID.randomUUID();
     private final UUID alternate = UUID.randomUUID();
@@ -61,9 +64,9 @@ class RepServicePolicyTest {
 
     @Test
     void blocksSharedIpTargetWithoutChangingScores() {
-        RepService service = service(initial("shared"));
+        RepService service = service(initial(SHARED_ADDRESS));
         assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
-                vote(service, giver, true, RepCategory.WAS_KIND, "shared").failure());
+                vote(service, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).failure());
         assertEquals(0, service.getScore(target));
         assertTrue(service.getCommendationsAbout(target).isEmpty());
     }
@@ -72,19 +75,19 @@ class RepServicePolicyTest {
     void blocksUnknownAddressesAndSelfReputation() {
         RepService service = service(PluginDataSnapshot.EMPTY);
         assertEquals(RepService.CommendationResult.Failure.ADDRESSES_UNKNOWN,
-                vote(service, giver, true, RepCategory.WAS_KIND, "giver-ip").failure());
+                vote(service, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).failure());
         assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
-                vote(service, target, true, RepCategory.WAS_KIND, "target-ip").failure());
+                vote(service, target, true, RepCategory.WAS_KIND, TARGET_ADDRESS).failure());
     }
 
     @Test
     void alternateVoteBlockedEvenAfterRemovalAndRestart() {
-        RepService original = service(initial("target-ip"));
-        assertTrue(vote(original, giver, true, RepCategory.WAS_KIND, "shared").success());
+        RepService original = service(initial(TARGET_ADDRESS));
+        assertTrue(vote(original, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
         original.removeCommendation(giver, target);
         RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
         assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
-                vote(restored, alternate, false, RepCategory.GRIEFED, "shared").failure());
+                vote(restored, alternate, false, RepCategory.GRIEFED, SHARED_ADDRESS).failure());
         assertEquals(RepService.CommendationResult.Failure.COOLDOWN,
                 vote(restored, giver, true, RepCategory.WAS_KIND, "new-address").failure());
         assertTrue(restored.getRemovalCooldownMillis(giver, target) > 23 * 3_600_000L);
@@ -92,29 +95,29 @@ class RepServicePolicyTest {
 
     @Test
     void staffRemovalAlsoAppliesConfiguredCooldownAndZeroDisablesIt() {
-        RepService service = service(initial("target-ip"));
-        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, "giver-ip").success());
+        RepService service = service(initial(TARGET_ADDRESS));
+        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).success());
         service.removeCommendationLogged(alternate, giver, target, false);
         assertTrue(service.getRemovalCooldownMillis(giver, target) > 0);
         yaml.set("rep.removalCooldownHours", 0);
         service.reload(new RepConfig(yaml));
-        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, "giver-ip").success());
+        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
     }
 
     @Test
     void ipProtectionCanBeDisabledWithoutAllowingSelfRep() {
         yaml.set("rep.ipProtection.enabled", false);
-        RepService service = service(initial("shared"));
-        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, "shared").success());
-        assertTrue(vote(service, alternate, true, RepCategory.WAS_KIND, "shared").success());
-        assertFalse(vote(service, target, true, RepCategory.WAS_KIND, "shared").success());
+        RepService service = service(initial(SHARED_ADDRESS));
+        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+        assertTrue(vote(service, alternate, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+        assertFalse(vote(service, target, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
     }
 
     @Test
     void tarnishedPersistsExpiresAndNeverOverridesNegativeColor() {
-        RepService service = service(initial("target-ip"));
+        RepService service = service(initial(TARGET_ADDRESS));
         service.setScore(target, 10);
-        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, "giver-ip").success());
+        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
         RepService restored = service(service.snapshot(PluginDataSnapshot.EMPTY));
         assertTrue(restored.isTarnished(target));
         assertEquals(ChatColor.GOLD, restored.colorForPlayer(target));
@@ -128,12 +131,12 @@ class RepServicePolicyTest {
 
     @Test
     void editingNegativeReasonDoesNotExtendTarnishAndCategorySwitchRefreshesEffects() {
-        RepService service = service(initial("target-ip"));
+        RepService service = service(initial(TARGET_ADDRESS));
         service.setScore(target, 10);
-        vote(service, giver, false, RepCategory.GRIEFED, "giver-ip");
+        vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS);
         long originalTime = service.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt();
         int before = refreshes.get();
-        assertTrue(vote(service, giver, false, RepCategory.SPAWN_KILLED, "giver-ip").success());
+        assertTrue(vote(service, giver, false, RepCategory.SPAWN_KILLED, GIVER_ADDRESS).success());
         assertEquals(originalTime, service.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt());
         assertEquals(before + 1, refreshes.get());
         assertEquals(-2, service.getCategoryScore(target, RepCategory.SPAWN_KILLED));
@@ -142,19 +145,19 @@ class RepServicePolicyTest {
 
     @Test
     void oldRemovedRecordsSeedAntiAltHistoryAndStallScamMigrates() {
-        Commendation old = new Commendation(giver, target, false, RepCategory.SCAM_STALL, "Old", 1, 1, "shared", -2);
+        Commendation old = new Commendation(giver, target, false, RepCategory.SCAM_STALL, "Old", 1, 1, SHARED_ADDRESS, -2);
         var snapshot = new PluginDataSnapshot(Map.of(), List.of(), List.of(new RepService.RemovedRep("old", old, 2, alternate)),
                 List.of(), List.of(), List.of());
         RepService service = service(snapshot);
         assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
-                vote(service, alternate, true, RepCategory.WAS_KIND, "shared").failure());
+                vote(service, alternate, true, RepCategory.WAS_KIND, SHARED_ADDRESS).failure());
         assertFalse(RepCategory.SCAM_STALL.isSelectable());
         assertEquals(RepCategory.SCAMMED, RepCategory.fromStored("SCAM_STALL", false));
     }
 
     @Test
     void polarityLeaderboardsSumAllCategoriesWithoutNettingTheOtherSide() {
-        RepService service = service(initial("target-ip"));
+        RepService service = service(initial(TARGET_ADDRESS));
         vote(service, giver, true, RepCategory.WAS_KIND, "one");
         vote(service, alternate, false, RepCategory.GRIEFED, "two");
         assertEquals(-1, service.getScore(target));

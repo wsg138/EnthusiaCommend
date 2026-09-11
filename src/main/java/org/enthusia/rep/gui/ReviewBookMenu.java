@@ -14,7 +14,7 @@ import org.bukkit.inventory.MenuType;
 import org.bukkit.inventory.view.LecternView;
 import org.bukkit.plugin.Plugin;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -22,7 +22,7 @@ import java.util.UUID;
 final class ReviewBookMenu implements Listener {
     private final Plugin plugin;
     private final java.util.function.Function<Player, LecternView> viewFactory;
-    private final Map<UUID, Session> sessions = new HashMap<>();
+    private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
 
     ReviewBookMenu(Plugin plugin) {
         this(plugin, player -> MenuType.LECTERN.builder().checkReachable(false).build(player));

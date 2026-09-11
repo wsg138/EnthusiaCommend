@@ -70,6 +70,7 @@ public final class RepGuiManager implements Listener {
     private static final int POSITIVE_REP_SLOT = 48;
     private static final int EFFECTS_OR_REMOVE_SLOT = 49;
     private static final int NEGATIVE_REP_SLOT = 50;
+    private static final int CATEGORY_MENU_SLOT = 8;
     private static final int POSITIVE_FILTER_SLOT = 2;
     private static final int NEGATIVE_FILTER_SLOT = 6;
     private static final int FILTER_BACK_SLOT = 22;
@@ -199,7 +200,7 @@ public final class RepGuiManager implements Listener {
         }
         inventory.setItem(4, head);
         inventory.setItem(0, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back / All reps", List.of("Return from category or view all reps")));
-        inventory.setItem(8, simpleButton(Material.HOPPER, ChatColor.GOLD + "Categories", List.of("Filter this side by category")));
+        inventory.setItem(CATEGORY_MENU_SLOT, simpleButton(Material.HOPPER, ChatColor.GOLD + "Categories", List.of("Filter this side by category")));
         inventory.setItem(POSITIVE_FILTER_SLOT, profileFilterButton(true, selected, allReviews, targetId));
         inventory.setItem(NEGATIVE_FILTER_SLOT, profileFilterButton(false, selected, allReviews, targetId));
 
@@ -546,7 +547,7 @@ public final class RepGuiManager implements Listener {
             openProfileWithFilter(player, profile.targetId(), filter, 0);
             return;
         }
-        if (slot == 8) {
+        if (slot == CATEGORY_MENU_SLOT) {
             openProfileFilterMenu(player, profile.targetId(), !Boolean.FALSE.equals(profile.filter().positive()), profile.page(), profile.filter());
             return;
         }
@@ -1340,7 +1341,7 @@ public final class RepGuiManager implements Listener {
         if (effects.stalkable()) {
             lore.add(ChatColor.WHITE + "Stalkable in warzone");
         }
-        if (effects.teleportCooldownMultiplier() != 1) {
+        if (effects.teleportCooldownMultiplier() != RepAppliedEffects.NONE.teleportCooldownMultiplier()) {
             lore.add(ChatColor.WHITE + "Teleport cooldown: " + ChatColor.YELLOW
                     + Math.round(effects.teleportCooldownMultiplier() * 100) + "%");
         }

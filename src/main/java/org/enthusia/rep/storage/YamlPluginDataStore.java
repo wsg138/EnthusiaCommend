@@ -60,21 +60,24 @@ public final class YamlPluginDataStore implements PluginDataStore {
     }
 
     private Map<UUID, org.enthusia.rep.rep.RepIdentityState> loadIdentities(YamlConfiguration config) {
-        Map<UUID, org.enthusia.rep.rep.RepIdentityState> result = new LinkedHashMap<>();
         ConfigurationSection section = config.getConfigurationSection("identities");
-        if (section == null) return result;
-        for (String id : section.getKeys(false)) {
-            try {
-                java.util.Set<UUID> targets = new java.util.HashSet<>();
-                for (String target : section.getStringList(id + ".givenTargets")) targets.add(UUID.fromString(target));
-                result.put(UUID.fromString(id), new org.enthusia.rep.rep.RepIdentityState(
-                        new java.util.HashSet<>(section.getStringList(id + ".ipHashes")), targets,
-                        section.getLong(id + ".tarnishedAt", 0)));
-            } catch (IllegalArgumentException ex) {
-                logger.warning("Skipping invalid reputation identity: " + id);
-            }
+        if (section == null) return Map.of();
+        return section.getKeys(false).stream().map(id -> loadIdentity(section, id))
+                .flatMap(Optional::stream)
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    private Optional<Map.Entry<UUID, org.enthusia.rep.rep.RepIdentityState>> loadIdentity(ConfigurationSection section, String id) {
+        try {
+            java.util.Set<UUID> targets = section.getStringList(id + ".givenTargets").stream()
+                    .map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
+            return Optional.of(Map.entry(UUID.fromString(id), new org.enthusia.rep.rep.RepIdentityState(
+                    java.util.Set.copyOf(section.getStringList(id + ".ipHashes")), targets,
+                    section.getLong(id + ".tarnishedAt", 0))));
+        } catch (IllegalArgumentException ex) {
+            if (logger.isLoggable(Level.WARNING)) logger.warning("Skipping invalid reputation identity: " + id);
+            return Optional.empty();
         }
-        return result;
     }
 
     private void writeIdentities(YamlConfiguration config, Map<UUID, org.enthusia.rep.rep.RepIdentityState> identities) {

@@ -6,23 +6,24 @@ import org.enthusia.rep.effects.RepAppliedEffects;
 import org.enthusia.rep.rep.RepCategory;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Rules are evaluated independently; the strongest penalty wins over rewards. */
 final class RepEffectRules {
+    private static final String TELEPORT = "teleport";
     private final List<Rule> overall;
     private final java.util.Set<String> disabled;
-    private final Map<RepCategory, List<Rule>> categories = new EnumMap<>(RepCategory.class);
+    private final Map<RepCategory, List<Rule>> categories = new ConcurrentHashMap<>();
 
     RepEffectRules(FileConfiguration config) {
         disabled = java.util.Set.copyOf(config.getStringList("rep.effectRules.disabledEffects"));
         List<Rule> defaults = List.of(
-                new Rule("teleport", -10, 1.4), new Rule("teleport", -15, 1.6),
-                new Rule("teleport", -25, 2), new Rule("teleport", 5, 50.0 / 60),
-                new Rule("teleport", 10, .75), new Rule("teleport", 15, 40.0 / 60),
-                new Rule("teleport", 20, .5),
+                new Rule(TELEPORT, -10, 1.4), new Rule(TELEPORT, -15, 1.6),
+                new Rule(TELEPORT, -25, 2), new Rule(TELEPORT, 5, 50.0 / 60),
+                new Rule(TELEPORT, 10, .75), new Rule(TELEPORT, 15, 40.0 / 60),
+                new Rule(TELEPORT, 20, .5),
                 new Rule("glow", config.getInt("rep.effects.penalties.glowAt", -10), 1),
                 new Rule("redGlow", config.getInt("rep.effects.penalties.redGlowAt", -20), 1),
                 new Rule("stalk", config.getInt("rep.effects.penalties.stalkableAt", -12), 1));
@@ -47,15 +48,15 @@ final class RepEffectRules {
     }
 
     RepAppliedEffects resolve(int score, Map<RepCategory, Integer> scores) {
-        Map<String, Double> effects = new java.util.HashMap<>();
+        Map<String, Double> effects = new ConcurrentHashMap<>();
         apply(overall, score, effects);
         scores.forEach((category, value) -> apply(categories.getOrDefault(category, List.of()), value, effects));
         disabled.forEach(effects::remove);
         return new RepAppliedEffects(integer(effects, "movement"), integer(effects, "potion"),
                 integer(effects, "firework"), integer(effects, "pearl"), integer(effects, "wind"),
                 effects.getOrDefault("glow", 0D) > 0 || effects.getOrDefault("redGlow", 0D) > 0,
-                effects.getOrDefault("redGlow", 0D) > 0 ? ChatColor.RED : null,
-                effects.getOrDefault("stalk", 0D) > 0, effects.getOrDefault("teleport", 1D));
+                effects.getOrDefault("redGlow", 0D) > 0 ? ChatColor.RED : RepAppliedEffects.NONE.glowColor(),
+                effects.getOrDefault("stalk", 0D) > 0, effects.getOrDefault(TELEPORT, 1D));
     }
 
     private static int integer(Map<String, Double> effects, String key) {
@@ -66,14 +67,14 @@ final class RepEffectRules {
         for (Rule rule : rules) {
             if (rule.threshold() > 0 ? score < rule.threshold() : score > rule.threshold()) continue;
             double value = rule.value();
-            if (rule.effect().equals("teleport") && value <= 0) continue;
+            if (rule.effect().equals(TELEPORT) && value <= 0) continue;
             effects.merge(rule.effect(), value, (old, next) -> strongest(rule.effect(), old, next));
         }
     }
 
     private static double strongest(String effect, double old, double next) {
         return switch (effect) {
-            case "teleport" -> old > 1 || next > 1 ? Math.max(old, next) : Math.min(old, next);
+            case TELEPORT -> old > 1 || next > 1 ? Math.max(old, next) : Math.min(old, next);
             case "movement", "potion", "firework" -> old < 0 || next < 0 ? Math.min(old, next) : Math.max(old, next);
             default -> Math.max(old, next);
         };
