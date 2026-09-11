@@ -51,18 +51,14 @@ opens your own reputation profile.
 /rep <player>
 ```
 
-opens another player's profile on the positive page. The Positive/Negative buttons switch between separate pages, with the newest created or edited entries first. Categories filters the selected side; Back returns to that side, and All reps combines both sides. Clicking a written reason opens a book reader; closing it returns to the same player, filter, and page. Category-selection menus also have Back buttons.
+opens another player's profile on the positive page. The Positive/Negative buttons switch between separate pages, with the newest created or edited entries first. Categories filters the selected side; Back returns to that side, and All reps combines both sides. Hover over a review to read its reason. Profiles opened from a leaderboard have a Back to leaderboard button that restores its filter, sort, and page. Category-selection menus also have Back buttons.
 
 Other player commands:
 
 ```text
 /rep top
 /rep bottom
-/rep reviews [player]
 /rep give <player> <category> <reason>
-/rep positive [player]
-/rep negative [player]
-/rep recent <player|all> [day|week] [all|positive|negative|category] [page]
 /rep stalk <player> [days]
 /rep stalk list
 /rep stalk cancel <player>
@@ -98,7 +94,7 @@ A positive-reputation player who receives a new negative entry, or whose existin
 
 ### Recent reputation
 
-For example, `/rep recent Alex week negative` lists Alex's negative entries created or edited in the configured week window. `/rep recent all day WAS_KIND` lists that category across all players. Day/week default to 24/168 hours. Results are newest first and paginated; the profile book reader provides the full reason when a chat preview is shortened. Existing `/rep reviews` and category filters remain available.
+In `/rep top`, click the clock to cycle Score, Most recent, Recent: day, and Recent: week. Recent sorts players by their latest received reputation entry's creation or edit time; day/week restrict that activity to the configured window (24/168 hours by default). Positive, negative, and category filters apply to that activity too. The displayed scores remain category/polarity totals. Click a player to inspect their reviews, then use Back to leaderboard to resume browsing. The same sorting is available in `/rep bottom`.
 
 ## Stalking low-reputation players
 

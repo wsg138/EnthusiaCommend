@@ -18,7 +18,6 @@ rep:
   recent:
     dayHours: 24
     weekHours: 168
-    pageSize: 10
   effectRules:
     # Disable an effect in every scope, e.g. [stalk, redGlow].
     disabledEffects: []

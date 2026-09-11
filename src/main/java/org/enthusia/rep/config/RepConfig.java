@@ -73,7 +73,6 @@ public final class RepConfig {
         try { return ChatColor.valueOf(settings.getString("rep.tarnished.color", "GOLD").toUpperCase(Locale.ROOT)); }
         catch (IllegalArgumentException ex) { return ChatColor.GOLD; }
     }
-    public int getRecentPageSize() { return Math.max(1, Math.min(50, settings.getInt("rep.recent.pageSize", 10))); }
     public long getRecentWindowMillis(String window) {
         return Math.max(1L, settings.getLong("rep.recent." + window + "Hours", window.equals("week") ? 168 : 24)) * 3_600_000L;
     }

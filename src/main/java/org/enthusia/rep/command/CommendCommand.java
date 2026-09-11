@@ -35,8 +35,8 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     private static final int PAGE_SIZE = 10;
     private static final long MILLIS_PER_DAY = 24L * 60L * 60L * 1000L;
     private static final long MILLIS_PER_HOUR = 60L * 60L * 1000L;
-    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "reviews", "stalk", "give", "recent", "positive", "negative");
-    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "reviews", "stalk", "give", "recent", "positive", "negative");
+    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "stalk", "give");
+    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "stalk", "give");
     private static final List<String> ADMIN_SUBCOMMANDS = List.of(
             "reload", "help", "get", "set", "add", "revoke", "remove", "reset", "history",
             "inspect", "resolve", "reports", "removed", "restore", "undo");
@@ -73,24 +73,11 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             case "admin" -> handleAdminRequest(sender, args);
             case "top" -> handleLeaderboard(sender, parseInt(args, 1, 10), false);
             case "bottom" -> handleLeaderboard(sender, parseInt(args, 1, 10), true);
-            case "recent" -> new RecentReputationCommand(plugin).execute(sender, args);
-            case "positive", "negative" -> handlePolarity(sender, args);
-            case "reviews" -> handleReviews(sender, args.length >= 2 ? args[1] : sender.getName());
             case "stalk" -> handleStalk(sender, args);
             case "give" -> handleGiveCommand(sender, args);
             case "alerts" -> handleAlerts(sender);
             default -> handleProfileLookup(sender, args[0]);
         };
-    }
-
-    private boolean handlePolarity(CommandSender sender, String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(ChatColor.RED + "Use /rep recent <player> day positive or negative from console.");
-            return true;
-        }
-        OfflinePlayer target = args.length > 1 ? Bukkit.getOfflinePlayer(args[1]) : player;
-        plugin.getRepGuiManager().openPolarity(player, target, args[0].equalsIgnoreCase("positive"));
-        return true;
     }
 
     private boolean openOwnProfile(CommandSender sender) {
@@ -228,22 +215,6 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                     "giver", giver.getName(), "amount", amount,
                     "category", displayName(commendation.getCategory()), "rep", score)));
         }
-    }
-
-    private boolean handleReviews(CommandSender sender, String targetName) {
-        OfflinePlayer target = resolveKnownPlayer(sender, targetName);
-        if (target == null) return true;
-        List<Commendation> reviews = repService.getReceivedCommendations(target.getUniqueId());
-        sender.sendMessage(ChatColor.GOLD + "--- Reviews for " + ChatColor.YELLOW + safeName(target) + ChatColor.GOLD + " ---");
-        if (reviews.isEmpty()) {
-            sender.sendMessage(ChatColor.GRAY + "No reviews yet.");
-            return true;
-        }
-        reviews.stream().limit(10).forEach(entry -> sender.sendMessage(
-                coloredValue(entry.getScoreValue()) + ChatColor.GRAY + " from " + ChatColor.YELLOW
-                        + repService.nameOf(entry.getGiver()) + ChatColor.GRAY + " ["
-                        + displayName(entry.getCategory()) + "]: " + ChatColor.WHITE + trimPreview(entry.getReasonText())));
-        return true;
     }
 
     private boolean handleLeaderboard(CommandSender sender, int limit, boolean lowest) {
@@ -641,20 +612,6 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> result = new ArrayList<>();
         if (!command.getName().equalsIgnoreCase("rep")) return result;
-        if (args.length > 1 && args[0].equalsIgnoreCase("recent")) {
-            if (args.length == RecentReputationCommand.TARGET_ARGUMENTS) { addMatches(result, args[1], List.of("all")); addOnlinePlayers(result, args[1]); }
-            if (args.length == RecentReputationCommand.WINDOW_ARGUMENTS) addMatches(result, args[2], List.of("day", "week"));
-            if (args.length == RecentReputationCommand.FILTER_ARGUMENTS) {
-                addMatches(result, args[3], List.of("all", "positive", "negative"));
-                addMatches(result, args[3], SELECTABLE_CATEGORIES);
-            }
-            if (args.length == RecentReputationCommand.PAGE_ARGUMENTS) addMatches(result, args[4], List.of("1", "2", "3"));
-            return result;
-        }
-        if (args.length == 2 && List.of("positive", "negative", "reviews").contains(args[0].toLowerCase(Locale.ROOT))) {
-            addOnlinePlayers(result, args[1]);
-            return result;
-        }
         if (args.length == 1) {
             addMatches(result, args[0], rootSubcommands(sender));
             addOnlinePlayers(result, args[0]);

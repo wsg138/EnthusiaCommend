@@ -32,7 +32,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.view.AnvilView;
 import org.bukkit.persistence.PersistentDataType;
@@ -88,20 +87,19 @@ public final class RepGuiManager implements Listener {
     private final Map<UUID, Integer> pendingChatTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AnvilSession> pendingAnvils = new ConcurrentHashMap<>();
     private final Map<UUID, DraftReason> pendingDrafts = new ConcurrentHashMap<>();
-    private final ReviewBookMenu reviewBooks;
+    private static final int RETURN_LEADERBOARD_SLOT = 46;
+    private final Map<ProfileSelectionKey, Runnable> leaderboardReturns = new ConcurrentHashMap<>();
     private final Map<UUID, String> liveAnvilText = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> transitioningAnvil = new java.util.HashSet<>();
     private final Map<ProfileSelectionKey, RepProfileFilter> profileSelections = new ConcurrentHashMap<>();
 
     public RepGuiManager(CommendPlugin plugin, RepService repService, RepEffectManager effectManager) {
         this.plugin = plugin;
-        this.reviewBooks = new ReviewBookMenu(plugin);
         this.repService = repService;
         this.effectManager = effectManager;
         this.anvilGuiItemKey = new NamespacedKey(plugin, "rep-anvil-gui-item");
     }
 
-    public void registerReviewBooks() { reviewBooks.register(); }
 
     public void shutdown() {
         cancelOpenAnvilSessions(null);
@@ -113,7 +111,7 @@ public final class RepGuiManager implements Listener {
         pendingChatTimeoutTasks.clear();
         pendingAnvils.clear();
         pendingDrafts.clear();
-        reviewBooks.shutdown();
+        leaderboardReturns.clear();
         liveAnvilText.clear();
         transitioningAnvil.clear();
         profileSelections.clear();
@@ -138,11 +136,14 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    public void openPolarity(Player viewer, OfflinePlayer target, boolean positive) {
-        openProfileWithFilter(viewer, target.getUniqueId(), RepProfileFilter.polarity(positive), 0);
+    void openFromLeaderboard(Player viewer, UUID targetId, RepProfileFilter filter, Runnable returnAction) {
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(viewer.getUniqueId()));
+        leaderboardReturns.put(new ProfileSelectionKey(viewer.getUniqueId(), targetId), returnAction);
+        openProfileWithFilter(viewer, targetId, filter, 0);
     }
 
     public void openProfile(Player viewer, OfflinePlayer target) {
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(viewer.getUniqueId()));
         setProfileFilter(viewer, target.getUniqueId(), RepProfileFilter.polarity(true));
         openProfile(viewer, target, 0);
     }
@@ -199,6 +200,9 @@ public final class RepGuiManager implements Listener {
             head.setItemMeta(headMeta);
         }
         inventory.setItem(4, head);
+        if (leaderboardReturns.containsKey(new ProfileSelectionKey(viewer.getUniqueId(), targetId))) {
+            inventory.setItem(RETURN_LEADERBOARD_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back to leaderboard", List.of()));
+        }
         inventory.setItem(0, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back / All reps", List.of("Return from category or view all reps")));
         inventory.setItem(CATEGORY_MENU_SLOT, simpleButton(Material.HOPPER, ChatColor.GOLD + "Categories", List.of("Filter this side by category")));
         inventory.setItem(POSITIVE_FILTER_SLOT, profileFilterButton(true, selected, allReviews, targetId));
@@ -498,6 +502,7 @@ public final class RepGuiManager implements Listener {
         liveAnvilText.remove(playerId);
         transitioningAnvil.remove(playerId);
         profileSelections.keySet().removeIf(key -> key.viewerId().equals(playerId));
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(playerId));
     }
 
     @EventHandler
@@ -541,6 +546,11 @@ public final class RepGuiManager implements Listener {
 
     private void handleProfileClick(Player player, ProfileHolder profile, InventoryClickEvent event) {
         int slot = event.getRawSlot();
+        if (slot == RETURN_LEADERBOARD_SLOT) {
+            Runnable returnAction = leaderboardReturns.remove(new ProfileSelectionKey(player.getUniqueId(), profile.targetId()));
+            if (returnAction != null) returnAction.run();
+            return;
+        }
         if (slot == 0) {
             RepProfileFilter filter = profile.filter().category() == null ? RepProfileFilter.overall()
                     : RepProfileFilter.polarity(profile.filter().positive());
@@ -589,9 +599,7 @@ public final class RepGuiManager implements Listener {
                 return;
             }
             openRemovalConfirm(player, current, profile.page(), false, true);
-            return;
         }
-        openReviewBook(player, selected, () -> openProfileWithFilter(player, profile.targetId(), profile.filter(), profile.page()));
     }
 
     private void handleProfileFilterClick(Player player, ProfileFilterHolder holder, int slot) {
@@ -1092,7 +1100,6 @@ public final class RepGuiManager implements Listener {
             lore.add(ChatColor.GRAY + "Date: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(commendation.getCreatedAt())));
             lore.add(ChatColor.DARK_GRAY + "----------------");
             lore.addAll(wrapLore(commendation.getReasonText(), 34, ChatColor.WHITE));
-            lore.add(ChatColor.YELLOW + "Click: view full text");
             if (adminView) {
                 lore.add(ChatColor.RED + "Right-click: delete rep (admin)");
             }
@@ -1167,18 +1174,6 @@ public final class RepGuiManager implements Listener {
                 .event(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/rep admin resolve " + targetArg + " " + caseData.ipHash()))
                 .event(new HoverEvent(HoverEvent.Action.SHOW_TEXT, new ComponentBuilder(ChatColor.GRAY + "Mark this report as resolved").create()))
                 .create());
-    }
-
-    private void openReviewBook(Player viewer, Commendation commendation, Runnable returnToProfile) {
-        ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
-        BookMeta meta = (BookMeta) book.getItemMeta();
-        if (meta != null) {
-            meta.setTitle("Rep from " + repService.nameOf(commendation.getGiver()));
-            meta.setAuthor(repService.nameOf(commendation.getGiver()));
-            meta.setPages(wrapLore(commendation.getReasonText(), 220, ChatColor.BLACK));
-            book.setItemMeta(meta);
-        }
-        reviewBooks.open(viewer, book, returnToProfile);
     }
 
     private void fillBackground(Inventory inventory, Player viewer) {

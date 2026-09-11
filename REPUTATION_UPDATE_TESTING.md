@@ -1,13 +1,13 @@
 # Reputation update acceptance checks
 
 Build: `mvn -B -ntp -Dmaven.compiler.fork=true clean verify` (Java 21+).
-The automated suite covers default/custom/category effects, removal and identity persistence, Tarnished state, polarity totals, recent filtering, and book-session cleanup. It also retains the chat/anvil exploit regression tests. These checks do not replace a live Paper/client test of the virtual lectern or external teleport integration.
+The automated suite covers default/custom/category effects, removal and identity persistence, Tarnished state, polarity totals, recent filtering, and command suggestion cleanup. It also retains the chat/anvil exploit regression tests. These checks do not replace a live Paper/client test of client tooltips, GUI navigation, or external teleport integration.
 
-## Menus and books
+## Menus and navigation
 
 1. On Paper 1.21.11, open a player with enough mixed reviews to span pages. Positive and Negative open separate pages; Categories and Back preserve the selected player. Check overall polarity and individual categories in both `/rep top` and `/rep bottom`.
-2. From a filtered page after page 1, open a reason, then click Done or press Escape. The same player, filter, and page should reopen. Repeat with a full inventory. Try Take Book, shift-click, number keys, and disconnecting while reading; no temporary book should enter inventories or drop into the world.
-3. Confirm long reasons, unbroken text, and category labels fit the tooltips. The book must preserve the full reason. Check both Java and Geyser/Bedrock clients if supported on the server.
+2. From a filtered leaderboard after page 1, open a player, browse their profile and categories, then use Back to leaderboard. The same leaderboard filter, sort, and page should reopen. Direct `/rep Player` must not show a stale leaderboard return button.
+3. Hover over reviews to read reasons. Clicking a review must leave the profile open, including with a full inventory, and must never create a lectern or book. Confirm long reasons and category labels fit tooltips. Type `/rep Player` and check that player suggestions no longer show display-name metadata. Check Java and Geyser/Bedrock clients if supported. Any lecterns left by older builds need to be removed once; their locations were not recorded.
 4. Repeat the existing [rep input exploit checks](REP_INPUT_TESTING.md). Chat input must remain private and anvil dyes must not escape with a full inventory.
 
 ## Reputation and effects
@@ -23,4 +23,4 @@ The automated suite covers default/custom/category effects, removal and identity
 2. Using accounts on one client address, attempt to rep each other: both signs should be blocked. Rep a third player from one account, then try from its alternate: blocked even after deleting the first entry and restarting. Distinct addresses should work. Repeat with the first account changing addresses to verify retained history.
 3. An offline account with no recorded address is blocked until its first observed login. Confirm the configured proxy forwards actual client addresses. Confirm that only hashes appear in `data.yml`.
 4. Upgrade a copy of existing data containing Scam Stall entries and removed entries. They should appear as Scammed with the same values/reasons/timestamps. The old category should not appear in commands or menus.
-5. Check `/rep recent Player day positive`, `/rep recent Player week SCAMMED`, and `/rep recent all week all 2`. Confirm target, time boundary, polarity/category, order, and pagination. Change the configured day/week windows and verify after reload. Existing category-specific profile lookup remains available.
+5. In `/rep top`, cycle the clock through Score, Most recent, Recent: day, and Recent: week. Confirm ordering and time boundaries, including positive/negative/category filters and pagination. Change configured day/week windows and verify after reload. Confirm the removed recent, reviews, positive, and negative subcommands are absent from completion lists.

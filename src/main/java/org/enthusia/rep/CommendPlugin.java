@@ -131,7 +131,6 @@ public final class CommendPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(stalkManager, this);
         getServer().getPluginManager().registerEvents(repGuiManager, this);
-        repGuiManager.registerReviewBooks();
         getServer().getPluginManager().registerEvents(repLeaderboardGui, this);
         effectManager.register(getServer().getPluginManager());
         teleportIntegration.register();
@@ -201,6 +200,7 @@ public final class CommendPlugin extends JavaPlugin {
         }
         repCommand.setExecutor(commendCommand);
         repCommand.setTabCompleter(commendCommand);
+        getServer().getPluginManager().registerEvents(new org.enthusia.rep.command.RepSuggestionListener(), this);
     }
 
     private void registerPlaceholderExpansion() {
