@@ -46,18 +46,7 @@ class RepNavigationTest {
             var scheduler = mock(BukkitScheduler.class);
             bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
             when(scheduler.runTask(eq(plugin), any(Runnable.class))).thenAnswer(call -> { call.<Runnable>getArgument(1).run(); return null; });
-            bukkit.when(() -> Bukkit.createInventory(any(InventoryHolder.class), anyInt(), anyString())).thenAnswer(call -> {
-                var inventory = mock(Inventory.class);
-                when(inventory.getHolder()).thenReturn(call.getArgument(0));
-                when(inventory.getSize()).thenReturn(call.getArgument(1));
-                return inventory;
-            });
-            bukkit.when(() -> Bukkit.getOfflinePlayer(any(UUID.class))).thenAnswer(call -> {
-                var target = mock(OfflinePlayer.class);
-                when(target.getUniqueId()).thenReturn(call.getArgument(0));
-                when(target.getName()).thenReturn("Target");
-                return target;
-            });
+            mockInventoryAndPlayerFactories(bukkit);
             heads.when(() -> HeadUtil.createPlayerHead(eq(plugin), any(UUID.class), anyString())).thenReturn(mock(ItemStack.class));
             var scores = IntStream.range(1, 31).mapToObj(i -> Map.entry(new UUID(0, i), i)).toList();
             var reviews = scores.stream().map(e -> new Commendation(UUID.randomUUID(), e.getKey(), true,
@@ -80,6 +69,21 @@ class RepNavigationTest {
             manager.onInventoryClick(click(player, view, 46));
             assertEquals(leaderboard, current.get().getHolder());
         }
+    }
+
+    private void mockInventoryAndPlayerFactories(org.mockito.MockedStatic<Bukkit> bukkit) {
+        bukkit.when(() -> Bukkit.createInventory(any(InventoryHolder.class), anyInt(), anyString())).thenAnswer(call -> {
+            var inventory = mock(Inventory.class);
+            when(inventory.getHolder()).thenReturn(call.getArgument(0));
+            when(inventory.getSize()).thenReturn(call.getArgument(1));
+            return inventory;
+        });
+        bukkit.when(() -> Bukkit.getOfflinePlayer(any(UUID.class))).thenAnswer(call -> {
+            var target = mock(OfflinePlayer.class);
+            when(target.getUniqueId()).thenReturn(call.getArgument(0));
+            when(target.getName()).thenReturn("Target");
+            return target;
+        });
     }
 
     private InventoryClickEvent click(Player player, InventoryView view, int slot) {
