@@ -646,7 +646,7 @@ public final class RepGuiManager implements Listener {
             return;
         }
         List<RepCategory> categories = reason.positive() ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 12, 14, 16};
+        int[] slots = {11, 12, 14, 15};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             if (slot == slots[i]) {
                 openInputChoice(player, reason.targetId(), categories.get(i), reason.returnPage());
@@ -839,7 +839,7 @@ public final class RepGuiManager implements Listener {
                 positive ? ChatColor.GREEN + "Choose Positive Reason" : ChatColor.RED + "Choose Negative Reason");
         fillBackground(inventory, viewer);
         List<RepCategory> categories = positive ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 12, 14, 16};
+        int[] slots = {11, 12, 14, 15};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             inventory.setItem(slots[i], simpleButton(materialFor(positive), (positive ? ChatColor.GREEN : ChatColor.RED) + displayName(categories.get(i)),
                     List.of(ChatColor.GRAY + "Click to continue")));

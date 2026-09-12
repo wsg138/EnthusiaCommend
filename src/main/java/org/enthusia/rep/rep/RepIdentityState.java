@@ -50,10 +50,11 @@ public record RepIdentityState(Set<String> ipHashes, Set<UUID> givenTargets, lon
     }
 
     public RepIdentityState migrateSources(java.util.List<Commendation> entries) {
-        if (tarnishedAt <= 0 || !tarnishSources.isEmpty()) return this;
-        var sources = entries.stream().filter(entry -> !entry.isPositive())
+        if (tarnishedAt <= 0) return this;
+        var sources = tarnishSources.isEmpty() ? entries.stream().filter(entry -> !entry.isPositive())
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(entry -> entry.getGiver().toString(),
-                        entry -> Math.min(tarnishedAt, entry.getLastEditedAt()), Math::max));
-        return new RepIdentityState(ipHashes, givenTargets, tarnishedAt, sources);
+                        entry -> Math.min(tarnishedAt, entry.getLastEditedAt()), Math::max)) : tarnishSources;
+        long latest = sources.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+        return new RepIdentityState(ipHashes, givenTargets, latest, sources);
     }
 }

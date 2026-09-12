@@ -104,6 +104,7 @@ public final class RepService {
         snapshot.removedEntries().forEach(entry -> rememberHistoricalVote(entry.commendation()));
         identities.replaceAll((id, state) -> state.migrateSources(snapshot.commendations().stream()
                 .filter(entry -> entry.getTarget().equals(id)).toList()));
+        if (!identities.equals(snapshot.identities())) dirtyMarker.run();
         scoreByPlayer.clear();
         scoreByPlayer.putAll(snapshot.scores());
 

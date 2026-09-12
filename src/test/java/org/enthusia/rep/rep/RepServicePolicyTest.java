@@ -185,6 +185,34 @@ class RepServicePolicyTest {
     }
 
     @Test
+    void upgradeClearsLegacyTimestampAfterNegativeWasAlreadyAdminRemoved() {
+        long now = System.currentTimeMillis();
+        var removed = new Commendation(giver, target, false, RepCategory.GRIEFED, "removed", now, now, GIVER_ADDRESS, -2);
+        var snapshot = new PluginDataSnapshot(Map.of(target, 10), List.of(),
+                List.of(new RepService.RemovedRep("staff-removal", removed, now, alternate)), List.of(), List.of(),
+                List.of(), List.of(), Map.of(), Map.of(target, new RepIdentityState(Set.of(), Set.of(), now)));
+        RepService upgraded = service(snapshot);
+        assertFalse(upgraded.isTarnished(target));
+        assertEquals(ChatColor.GREEN, upgraded.colorForPlayer(target));
+        assertEquals(0L, upgraded.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt());
+        assertFalse(service(upgraded.snapshot(PluginDataSnapshot.EMPTY)).isTarnished(target));
+    }
+
+    @Test
+    void migrationKeepsOnlyRemainingVotesOriginalExpiry() {
+        long now = System.currentTimeMillis();
+        long earlier = now - 25 * 3_600_000L;
+        var old = new Commendation(giver, target, false, RepCategory.GRIEFED, "earlier", earlier, earlier, GIVER_ADDRESS, -2);
+        var state = new RepIdentityState(Set.of(), Set.of(), now);
+        var migrated = state.migrateSources(List.of(old));
+        assertEquals(earlier, migrated.tarnishedAt());
+        var previousBuild = new RepIdentityState(Set.of(), Set.of(), now, Map.of(giver.toString(), earlier));
+        assertEquals(earlier, previousBuild.migrateSources(List.of(old)).tarnishedAt());
+        var recent = new Commendation(alternate, target, false, RepCategory.SCAMMED, "recent", now, now, SHARED_ADDRESS, -2);
+        assertEquals(now, state.migrateSources(List.of(old, recent)).tarnishedAt());
+    }
+
+    @Test
     void removingLatestNegativeRestoresEarlierExpiryWithoutExtendingIt() {
         long older = System.currentTimeMillis() - 25 * 3_600_000L;
         long recent = System.currentTimeMillis();

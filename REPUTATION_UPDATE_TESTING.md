@@ -34,3 +34,5 @@ The automated suite covers default/custom/category effects, removal and identity
 1. Open /rep Player with mixed positive and negative entries: both must appear initially. Positive, Negative, and All reps filters must continue working.
 2. Open both give-reason menus: four dyes should occupy symmetric positions, two on either side of center. Click every dye and verify its category.
 3. Give a positive player two negative votes. Admin remove one: Tarnished remains. Restart, then admin remove the second: normal color and status return immediately. Repeat through the staff command and GUI. Remove the newer vote while an earlier vote remains: expiry must use the earlier vote's original time. Player self-removal must not provide admin forgiveness.
+
+4. Upgrade old data whose latest negative vote was already admin removed: stale Tarnished must clear on startup. If an earlier negative remains, use its original expiry. Repeat with data saved by test4 and verify a second restart retains the correction. Dye pairs should be adjacent in middle-row columns 3–4 and 6–7, matching the supplied screenshots.
