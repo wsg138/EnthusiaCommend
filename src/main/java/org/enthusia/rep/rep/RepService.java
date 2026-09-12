@@ -102,6 +102,8 @@ public final class RepService {
         identities.putAll(snapshot.identities());
         snapshot.commendations().forEach(this::rememberHistoricalVote);
         snapshot.removedEntries().forEach(entry -> rememberHistoricalVote(entry.commendation()));
+        identities.replaceAll((id, state) -> state.migrateSources(snapshot.commendations().stream()
+                .filter(entry -> entry.getTarget().equals(id)).toList()));
         scoreByPlayer.clear();
         scoreByPlayer.putAll(snapshot.scores());
 
@@ -227,9 +229,9 @@ public final class RepService {
         return other.ipHashes().stream().anyMatch(hashes::contains);
     }
 
-    private void markNegativeReceived(UUID target, long now) {
-        if (getScore(target) > 0) identities.compute(target, (id, state) ->
-                (state == null ? RepIdentityState.EMPTY : state).tarnish(now));
+    private void markNegativeReceived(UUID giver, UUID target, long now) {
+        identities.compute(target, (id, state) ->
+                (state == null ? RepIdentityState.EMPTY : state).tarnish(giver, now));
     }
 
     public boolean isTarnished(UUID player) {
@@ -491,7 +493,7 @@ public final class RepService {
                     giverId, targetId, positive, normalizedCategory, reasonText,
                     now, now, ipHash, value);
             rememberHistoricalVote(created);
-            if (!positive) markNegativeReceived(targetId, now);
+            if (!positive) markNegativeReceived(giverId, targetId, now);
             cacheCommendation(created, true);
             int oldScore = getScore(targetId);
             applyScore(targetId, oldScore + value, true);
@@ -512,7 +514,7 @@ public final class RepService {
             return CommendationResult.cooldown(repConfig.getEditCooldownMillis() - sinceLastEdit);
         }
 
-        if (!positive && existing.isPositive()) markNegativeReceived(targetId, now);
+        if (!positive && existing.isPositive()) markNegativeReceived(giverId, targetId, now);
         int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash);
         int oldScore = getScore(targetId);
 
@@ -569,6 +571,10 @@ public final class RepService {
             return null;
         }
 
+        if (!existing.isPositive() && (request.source() == ReputationChangeSource.STAFF_GUI
+                || request.source() == ReputationChangeSource.STAFF_COMMAND)) {
+            identities.computeIfPresent(targetId, (id, state) -> state.forgive(giverId));
+        }
         long removedAt = System.currentTimeMillis();
         int oldScore = getScore(targetId);
         int delta = -existing.getScoreValue();

@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public final class YamlPluginDataStore implements PluginDataStore {
-    private static final int DATA_VERSION = 7;
+    private static final int DATA_VERSION = 8;
 
     private final File file;
     private final Logger logger;
@@ -73,11 +73,17 @@ public final class YamlPluginDataStore implements PluginDataStore {
                     .map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
             return Optional.of(Map.entry(UUID.fromString(id), new org.enthusia.rep.rep.RepIdentityState(
                     java.util.Set.copyOf(section.getStringList(id + ".ipHashes")), targets,
-                    section.getLong(id + ".tarnishedAt", 0))));
+                    section.getLong(id + ".tarnishedAt", 0), loadTarnishSources(section.getConfigurationSection(id + ".tarnishSources")))));
         } catch (IllegalArgumentException ex) {
             if (logger.isLoggable(Level.WARNING)) logger.warning("Skipping invalid reputation identity: " + id);
             return Optional.empty();
         }
+    }
+
+    private Map<String, Long> loadTarnishSources(ConfigurationSection section) {
+        if (section == null) return Map.of();
+        return section.getValues(false).entrySet().stream().filter(entry -> entry.getValue() instanceof Number)
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> ((Number) entry.getValue()).longValue()));
     }
 
     private void writeIdentities(YamlConfiguration config, Map<UUID, org.enthusia.rep.rep.RepIdentityState> identities) {
@@ -86,6 +92,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
             config.set(path + ".ipHashes", new ArrayList<>(state.ipHashes()));
             config.set(path + ".givenTargets", state.givenTargets().stream().map(UUID::toString).toList());
             config.set(path + ".tarnishedAt", state.tarnishedAt());
+            config.set(path + ".tarnishSources", state.tarnishSources());
         });
     }
 

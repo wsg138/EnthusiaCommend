@@ -144,7 +144,7 @@ public final class RepGuiManager implements Listener {
 
     public void openProfile(Player viewer, OfflinePlayer target) {
         leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(viewer.getUniqueId()));
-        setProfileFilter(viewer, target.getUniqueId(), RepProfileFilter.polarity(true));
+        setProfileFilter(viewer, target.getUniqueId(), RepProfileFilter.overall());
         openProfile(viewer, target, 0);
     }
 
@@ -157,7 +157,7 @@ public final class RepGuiManager implements Listener {
         Bukkit.getPluginManager().callEvent(new org.enthusia.rep.events.CommendationProfileViewedEvent(viewer.getUniqueId(), target.getUniqueId()));
         UUID targetId = target.getUniqueId();
         RepProfileFilter selected = profileSelections.getOrDefault(
-                new ProfileSelectionKey(viewer.getUniqueId(), targetId), RepProfileFilter.polarity(true));
+                new ProfileSelectionKey(viewer.getUniqueId(), targetId), RepProfileFilter.overall());
         int overallScore = repService.getScore(targetId);
         String scoreColor = repService.colorCodeForPlayer(targetId);
         List<Commendation> allReviews = repService.getCommendationsAbout(targetId).stream()
@@ -646,7 +646,7 @@ public final class RepGuiManager implements Listener {
             return;
         }
         List<RepCategory> categories = reason.positive() ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 11, 12, 14, 15, 16};
+        int[] slots = {10, 12, 14, 16};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             if (slot == slots[i]) {
                 openInputChoice(player, reason.targetId(), categories.get(i), reason.returnPage());
@@ -839,7 +839,7 @@ public final class RepGuiManager implements Listener {
                 positive ? ChatColor.GREEN + "Choose Positive Reason" : ChatColor.RED + "Choose Negative Reason");
         fillBackground(inventory, viewer);
         List<RepCategory> categories = positive ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 11, 12, 14, 15, 16};
+        int[] slots = {10, 12, 14, 16};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             inventory.setItem(slots[i], simpleButton(materialFor(positive), (positive ? ChatColor.GREEN : ChatColor.RED) + displayName(categories.get(i)),
                     List.of(ChatColor.GRAY + "Click to continue")));

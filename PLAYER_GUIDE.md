@@ -50,7 +50,7 @@ opens your own reputation profile.
 /rep <player>
 ```
 
-opens another player's profile on the positive page. The Positive/Negative buttons switch between separate pages, with the newest created or edited entries first. Categories filters the selected side; Back returns to that side, and All reps combines both sides. Hover over a review to read its reason. Profiles opened from a leaderboard have a Back to leaderboard button that restores its filter, sort, and page. Category-selection menus also have Back buttons.
+opens another player's profile on the overall page, showing positive and negative entries together. The Positive/Negative buttons switch between separate pages, with the newest created or edited entries first. Categories filters the selected side; Back returns to that side, and All reps combines both sides. Hover over a review to read its reason. Profiles opened from a leaderboard have a Back to leaderboard button that restores its filter, sort, and page. Category-selection menus also have Back buttons.
 
 Other player commands:
 
@@ -121,3 +121,5 @@ By default, the plugin blocks reputation between accounts with a shared recorded
 ## Public wiki guidance
 
 Useful public information includes the +1/-2 scoring system, selectable categories, profile/review commands, the 24-hour edit cooldown, current live effect thresholds, and the stalking system. Staff audit tooling, storage internals, recovery mechanics, and webhook details should remain repository/admin documentation.
+
+Admin removal of a negative vote clears that vote's contribution to Tarnished immediately. Other negative votes in the configured Tarnished window keep the status active. When the last contributing vote is admin removed, normal color and status return. Player removal does not grant this forgiveness. Individual timers survive restarts.

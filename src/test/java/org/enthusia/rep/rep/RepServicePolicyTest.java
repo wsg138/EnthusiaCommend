@@ -144,6 +144,57 @@ class RepServicePolicyTest {
     }
 
     @Test
+    void staffMustRemoveEveryRecentNegativeToClearTarnishedAfterRestart() {
+        yaml.set("rep.ipProtection.enabled", false);
+        RepService original = service(initial(TARGET_ADDRESS));
+        original.setScore(target, 20);
+        assertTrue(vote(original, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
+        assertTrue(vote(original, alternate, false, RepCategory.SCAMMED, SHARED_ADDRESS).success());
+        original.removeCommendationLogged(UUID.randomUUID(), giver, target, true);
+        assertTrue(original.isTarnished(target));
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        restored.removeCommendationByStaffCommand(null, alternate, target, true);
+        assertFalse(restored.isTarnished(target));
+        assertEquals(ChatColor.GREEN, restored.colorForPlayer(target));
+        assertFalse(service(restored.snapshot(PluginDataSnapshot.EMPTY)).isTarnished(target));
+    }
+
+    @Test
+    void playerRemovalDoesNotClearAnotherNegativeContribution() {
+        yaml.set("rep.ipProtection.enabled", false);
+        RepService original = service(initial(TARGET_ADDRESS));
+        original.setScore(target, 20);
+        vote(original, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS);
+        vote(original, alternate, false, RepCategory.SCAMMED, SHARED_ADDRESS);
+        original.removeCommendationWithCooldown(giver, target);
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        restored.removeCommendationLogged(UUID.randomUUID(), alternate, target, true);
+        assertTrue(restored.isTarnished(target));
+    }
+
+    @Test
+    void legacyTarnishedStateCanBeClearedByStaffRemoval() {
+        long now = System.currentTimeMillis();
+        var negative = new Commendation(giver, target, false, RepCategory.GRIEFED, "old build", now, now, GIVER_ADDRESS, -2);
+        var snapshot = new PluginDataSnapshot(Map.of(target, 8), List.of(negative), List.of(), List.of(), List.of(),
+                List.of(), List.of(), Map.of(), Map.of(target, new RepIdentityState(Set.of(), Set.of(), now)));
+        RepService restored = service(snapshot);
+        assertTrue(restored.isTarnished(target));
+        restored.removeCommendationByStaffCommand(null, giver, target, true);
+        assertFalse(restored.isTarnished(target));
+    }
+
+    @Test
+    void removingLatestNegativeRestoresEarlierExpiryWithoutExtendingIt() {
+        long older = System.currentTimeMillis() - 25 * 3_600_000L;
+        long recent = System.currentTimeMillis();
+        var state = RepIdentityState.EMPTY.tarnish(giver, older).tarnish(alternate, recent);
+        var forgiven = state.forgive(alternate);
+        assertEquals(older, forgiven.tarnishedAt());
+        assertEquals(0, forgiven.forgive(giver).tarnishedAt());
+    }
+
+    @Test
     void oldRemovedRecordsSeedAntiAltHistoryAndStallScamMigrates() {
         Commendation old = new Commendation(giver, target, false, RepCategory.SCAM_STALL, "Old", 1, 1, SHARED_ADDRESS, -2);
         var snapshot = new PluginDataSnapshot(Map.of(), List.of(), List.of(new RepService.RemovedRep("old", old, 2, alternate)),

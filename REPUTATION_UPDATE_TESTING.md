@@ -28,3 +28,9 @@ The automated suite covers default/custom/category effects, removal and identity
 3. An offline account with no recorded address is blocked until its first observed login. Confirm the configured proxy forwards actual client addresses. Confirm that only hashes appear in `data.yml`.
 4. Upgrade a copy of existing data containing Scam Stall entries and removed entries. They should appear as Scammed with the same values/reasons/timestamps. The old category should not appear in commands or menus.
 5. In `/rep top`, cycle the clock through Score, Most recent, Recent: day, and Recent: week. Confirm ordering and time boundaries, including positive/negative/category filters and pagination. Change configured day/week windows and verify after reload. Confirm the removed recent, reviews, positive, and negative subcommands are absent from completion lists.
+
+## Overall profiles and admin forgiveness
+
+1. Open /rep Player with mixed positive and negative entries: both must appear initially. Positive, Negative, and All reps filters must continue working.
+2. Open both give-reason menus: four dyes should occupy symmetric positions, two on either side of center. Click every dye and verify its category.
+3. Give a positive player two negative votes. Admin remove one: Tarnished remains. Restart, then admin remove the second: normal color and status return immediately. Repeat through the staff command and GUI. Remove the newer vote while an earlier vote remains: expiry must use the earlier vote's original time. Player self-removal must not provide admin forgiveness.
