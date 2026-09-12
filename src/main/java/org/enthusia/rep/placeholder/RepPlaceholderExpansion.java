@@ -73,7 +73,7 @@ public final class RepPlaceholderExpansion extends PlaceholderExpansion {
             String color = repService.colorCodeForPlayer(id);
             return switch (params.toLowerCase(Locale.ROOT)) {
                 case "score_colored" -> repService.formatColoredScore(id);
-                case "color" -> color.toString();
+                case "color" -> color;
                 case "color_mm" -> MiniMessageColorTags.opening(color);
                 case "score_mm" -> MiniMessageColorTags.apply(color, Integer.toString(score));
                 case "glowcolor" -> legacyGlowColor(repService.getEffects(id));
@@ -94,7 +94,7 @@ public final class RepPlaceholderExpansion extends PlaceholderExpansion {
         return switch (identifier) {
             case "score", "score_raw" -> Integer.toString(score);
             case "score_colored" -> config.formatColoredScore(score);
-            case "color" -> config.colorCodeForScore(score).toString();
+            case "color" -> config.colorCodeForScore(score);
             case "glowcolor" -> legacyGlowColor(config.resolveEffects(score));
             case "score_mm" -> MiniMessageColorTags.apply(config.colorCodeForScore(score), Integer.toString(score));
             case "color_mm" -> MiniMessageColorTags.opening(config.colorCodeForScore(score));

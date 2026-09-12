@@ -10,12 +10,13 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RepCustomizationTest {
+    private static final String FALLBACK_COLOR = "GOLD";
     @Test
     void hexNamedAndLegacyColorsRoundTripWithInvalidFallback() {
-        assertEquals("#ff4a00", RepColor.miniMessageTag(RepColor.code("#FF4A00", "GOLD")));
-        assertEquals("#ff4a00", RepColor.miniMessageTag(RepColor.code("&#FF4A00", "GOLD")));
-        assertEquals("green", RepColor.miniMessageTag(RepColor.code("&a", "GOLD")));
-        assertEquals("gold", RepColor.miniMessageTag(RepColor.code("invalid", "GOLD")));
+        assertEquals("#ff4a00", RepColor.miniMessageTag(RepColor.code("#FF4A00", FALLBACK_COLOR)));
+        assertEquals("#ff4a00", RepColor.miniMessageTag(RepColor.code("&#FF4A00", FALLBACK_COLOR)));
+        assertEquals("green", RepColor.miniMessageTag(RepColor.code("&a", FALLBACK_COLOR)));
+        assertEquals("gold", RepColor.miniMessageTag(RepColor.code("invalid", FALLBACK_COLOR)));
         var yaml = new YamlConfiguration();
         yaml.set("rep.tarnished.color", "#FF4A00");
         yaml.set("rep.colors.positive", "#123456");
