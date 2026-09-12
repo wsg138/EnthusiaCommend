@@ -78,14 +78,16 @@ class RepRulesTest {
                 new Commendation(UUID.randomUUID(), target, true, RepCategory.OTHER_POSITIVE, "", 4L, 4L, null, 1)
         );
         Map<RepCategory, Integer> scores = RepRules.categoryScores(entries);
-        assertEquals(2, scores.get(RepCategory.HELPED_ME));
+        assertFalse(scores.containsKey(RepCategory.HELPED_ME));
         assertEquals(-2, scores.get(RepCategory.SCAMMED));
-        assertEquals(1, scores.get(RepCategory.WAS_KIND));
+        assertEquals(3, scores.get(RepCategory.WAS_KIND));
     }
 
     @Test
     void selectableRegistryProvidesDisplayMetadataWithoutLegacyDuplicates() {
-        assertEquals(10, RepCategory.selectableValues().size());
+        assertEquals(8, RepCategory.selectableValues().size());
+        assertFalse(RepCategory.selectableValues().contains(RepCategory.HELPED_ME));
+        assertFalse(RepCategory.selectableValues().contains(RepCategory.SCAM_STALL));
         assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_POSITIVE));
         assertFalse(RepCategory.selectableValues().contains(RepCategory.OTHER_NEGATIVE));
         assertTrue(RepCategory.selectableValues().stream().allMatch(category -> !category.displayName().isBlank()));

@@ -49,7 +49,7 @@ class CommendationMigrationTest {
         );
         Map<RepCategory, Integer> totals = RepRules.categoryScores(entries);
         assertEquals(-3, totals.get(RepCategory.SCAMMED));
-        assertEquals(1, totals.get(RepCategory.HELPED_ME));
+        assertEquals(1, totals.get(RepCategory.WAS_KIND));
     }
 
     @Test

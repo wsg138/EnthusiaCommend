@@ -25,7 +25,7 @@ class RepAppliedEffectsTest {
                 true,
                 ChatColor.RED,
                 true,
-                5
+                1.4
         );
 
         assertEquals(
@@ -36,7 +36,7 @@ class RepAppliedEffectsTest {
                         + "Wind charge cooldown: 5s\n"
                         + "Glow: RED\n"
                         + "Stalkable\n"
-                        + "Cashback: 5%",
+                        + "Teleport cooldown: 140%",
                 effects.describe()
         );
     }

@@ -19,7 +19,6 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
@@ -33,7 +32,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.view.AnvilView;
 import org.bukkit.persistence.PersistentDataType;
@@ -71,6 +69,7 @@ public final class RepGuiManager implements Listener {
     private static final int POSITIVE_REP_SLOT = 48;
     private static final int EFFECTS_OR_REMOVE_SLOT = 49;
     private static final int NEGATIVE_REP_SLOT = 50;
+    private static final int CATEGORY_MENU_SLOT = 8;
     private static final int POSITIVE_FILTER_SLOT = 2;
     private static final int NEGATIVE_FILTER_SLOT = 6;
     private static final int FILTER_BACK_SLOT = 22;
@@ -88,7 +87,8 @@ public final class RepGuiManager implements Listener {
     private final Map<UUID, Integer> pendingChatTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AnvilSession> pendingAnvils = new ConcurrentHashMap<>();
     private final Map<UUID, DraftReason> pendingDrafts = new ConcurrentHashMap<>();
-    private final Map<UUID, ProfileContext> returnFromBook = new ConcurrentHashMap<>();
+    private static final int RETURN_LEADERBOARD_SLOT = 46;
+    private final Map<ProfileSelectionKey, Runnable> leaderboardReturns = new ConcurrentHashMap<>();
     private final Map<UUID, String> liveAnvilText = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> transitioningAnvil = new java.util.HashSet<>();
     private final Map<ProfileSelectionKey, RepProfileFilter> profileSelections = new ConcurrentHashMap<>();
@@ -100,6 +100,7 @@ public final class RepGuiManager implements Listener {
         this.anvilGuiItemKey = new NamespacedKey(plugin, "rep-anvil-gui-item");
     }
 
+
     public void shutdown() {
         cancelOpenAnvilSessions(null);
         for (Integer taskId : pendingChatTimeoutTasks.values()) {
@@ -110,7 +111,7 @@ public final class RepGuiManager implements Listener {
         pendingChatTimeoutTasks.clear();
         pendingAnvils.clear();
         pendingDrafts.clear();
-        returnFromBook.clear();
+        leaderboardReturns.clear();
         liveAnvilText.clear();
         transitioningAnvil.clear();
         profileSelections.clear();
@@ -135,8 +136,15 @@ public final class RepGuiManager implements Listener {
         }
     }
 
+    void openFromLeaderboard(Player viewer, UUID targetId, RepProfileFilter filter, Runnable returnAction) {
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(viewer.getUniqueId()));
+        leaderboardReturns.put(new ProfileSelectionKey(viewer.getUniqueId(), targetId), returnAction);
+        openProfileWithFilter(viewer, targetId, filter, 0);
+    }
+
     public void openProfile(Player viewer, OfflinePlayer target) {
-        profileSelections.remove(new ProfileSelectionKey(viewer.getUniqueId(), target.getUniqueId()));
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(viewer.getUniqueId()));
+        setProfileFilter(viewer, target.getUniqueId(), RepProfileFilter.overall());
         openProfile(viewer, target, 0);
     }
 
@@ -151,9 +159,9 @@ public final class RepGuiManager implements Listener {
         RepProfileFilter selected = profileSelections.getOrDefault(
                 new ProfileSelectionKey(viewer.getUniqueId(), targetId), RepProfileFilter.overall());
         int overallScore = repService.getScore(targetId);
-        ChatColor scoreColor = plugin.getRepConfig().colorForScore(overallScore);
+        String scoreColor = repService.colorCodeForPlayer(targetId);
         List<Commendation> allReviews = repService.getCommendationsAbout(targetId).stream()
-                .sorted(Comparator.comparingLong(Commendation::getCreatedAt).reversed())
+                .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
                 .toList();
         List<Commendation> reviews = selected.apply(allReviews);
         int viewTotal = profileFilterTotal(targetId, selected, overallScore);
@@ -171,14 +179,14 @@ public final class RepGuiManager implements Listener {
         Inventory inventory = Bukkit.createInventory(
                 new ProfileHolder(targetId, selected, resolvedPage, visibleReviews), 54,
                 ChatColor.DARK_GREEN + "Rep: " + ChatColor.RESET + safeName(target) + ChatColor.GRAY
-                        + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
+                        + " [" + (resolvedPage + 1) + "]");
         fillBackground(inventory, viewer);
 
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId, scoreColor + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
             List<String> profileLore = new ArrayList<>();
-            profileLore.add(ChatColor.GRAY + "Total reputation: " + plugin.getRepConfig().formatColoredScore(overallScore));
+            profileLore.add(ChatColor.GRAY + "Total reputation: " + repService.formatColoredScore(targetId));
             profileLore.add(ChatColor.GRAY + "Positive reps: " + ChatColor.GREEN + positives);
             profileLore.add(ChatColor.GRAY + "Negative reps: " + ChatColor.RED + negatives);
             if (!selected.isOverall()) {
@@ -187,10 +195,16 @@ public final class RepGuiManager implements Listener {
                 profileLore.add(ChatColor.GRAY + "Filtered score: " + RepCategoryGuiSupport.coloredValue(viewTotal));
                 profileLore.add(ChatColor.GRAY + "Entries shown: " + ChatColor.WHITE + reviews.size());
             }
-            headMeta.setLore(profileLore);
+            if (repService.isTarnished(targetId)) profileLore.add(repService.colorCodeForPlayer(targetId) + plugin.getRepConfig().getTarnishedLabel());
+            headMeta.setLore(GuiText.lore(profileLore));
             head.setItemMeta(headMeta);
         }
         inventory.setItem(4, head);
+        if (leaderboardReturns.containsKey(new ProfileSelectionKey(viewer.getUniqueId(), targetId))) {
+            inventory.setItem(RETURN_LEADERBOARD_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back to leaderboard", List.of()));
+        }
+        inventory.setItem(0, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back / All reps", List.of("Return from category or view all reps")));
+        inventory.setItem(CATEGORY_MENU_SLOT, simpleButton(Material.HOPPER, ChatColor.GOLD + "Categories", List.of("Filter this side by category")));
         inventory.setItem(POSITIVE_FILTER_SLOT, profileFilterButton(true, selected, allReviews, targetId));
         inventory.setItem(NEGATIVE_FILTER_SLOT, profileFilterButton(false, selected, allReviews, targetId));
 
@@ -485,10 +499,10 @@ public final class RepGuiManager implements Listener {
             purgeAnvilGuiItems(event.getPlayer());
         }
         pendingDrafts.remove(playerId);
-        returnFromBook.remove(playerId);
         liveAnvilText.remove(playerId);
         transitioningAnvil.remove(playerId);
         profileSelections.keySet().removeIf(key -> key.viewerId().equals(playerId));
+        leaderboardReturns.keySet().removeIf(key -> key.viewerId().equals(playerId));
     }
 
     @EventHandler
@@ -530,24 +544,29 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    @EventHandler
-    public void onInventoryOpen(InventoryOpenEvent event) {
-        if (event.getPlayer() instanceof Player player) {
-            ProfileContext context = returnFromBook.remove(player.getUniqueId());
-            if (context != null) {
-                Bukkit.getScheduler().runTask(plugin, () -> openProfile(player, Bukkit.getOfflinePlayer(context.targetId()), context.page()));
-            }
-        }
-    }
-
     private void handleProfileClick(Player player, ProfileHolder profile, InventoryClickEvent event) {
         int slot = event.getRawSlot();
+        if (slot == RETURN_LEADERBOARD_SLOT) {
+            Runnable returnAction = leaderboardReturns.remove(new ProfileSelectionKey(player.getUniqueId(), profile.targetId()));
+            if (returnAction != null) returnAction.run();
+            return;
+        }
+        if (slot == 0) {
+            RepProfileFilter filter = profile.filter().category() == null ? RepProfileFilter.overall()
+                    : RepProfileFilter.polarity(profile.filter().positive());
+            openProfileWithFilter(player, profile.targetId(), filter, 0);
+            return;
+        }
+        if (slot == CATEGORY_MENU_SLOT) {
+            openProfileFilterMenu(player, profile.targetId(), !Boolean.FALSE.equals(profile.filter().positive()), profile.page(), profile.filter());
+            return;
+        }
         if (slot == POSITIVE_FILTER_SLOT) {
-            openProfileFilterMenu(player, profile.targetId(), true, profile.page(), profile.filter());
+            openProfileWithFilter(player, profile.targetId(), RepProfileFilter.polarity(true), 0);
             return;
         }
         if (slot == NEGATIVE_FILTER_SLOT) {
-            openProfileFilterMenu(player, profile.targetId(), false, profile.page(), profile.filter());
+            openProfileWithFilter(player, profile.targetId(), RepProfileFilter.polarity(false), 0);
             return;
         }
         if (slot == PREVIOUS_PAGE_SLOT) {
@@ -580,10 +599,7 @@ public final class RepGuiManager implements Listener {
                 return;
             }
             openRemovalConfirm(player, current, profile.page(), false, true);
-            return;
         }
-        returnFromBook.put(player.getUniqueId(), new ProfileContext(profile.targetId(), profile.page()));
-        openReviewBook(player, selected);
     }
 
     private void handleProfileFilterClick(Player player, ProfileFilterHolder holder, int slot) {
@@ -625,8 +641,12 @@ public final class RepGuiManager implements Listener {
     }
 
     private void handleReasonClick(Player player, ReasonHolder reason, int slot) {
+        if (slot == FILTER_BACK_SLOT) {
+            openProfile(player, Bukkit.getOfflinePlayer(reason.targetId()), reason.returnPage());
+            return;
+        }
         List<RepCategory> categories = reason.positive() ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 11, 12, 14, 15, 16};
+        int[] slots = {11, 12, 14, 15};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             if (slot == slots[i]) {
                 openInputChoice(player, reason.targetId(), categories.get(i), reason.returnPage());
@@ -783,15 +803,14 @@ public final class RepGuiManager implements Listener {
                 positive ? ChatColor.GREEN + "Positive Rep Filters" : ChatColor.RED + "Negative Rep Filters");
         fillBackground(inventory, viewer);
 
-        int overallScore = repService.getScore(targetId);
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId,
-                plugin.getRepConfig().colorForScore(overallScore) + safeName(target));
+                repService.colorCodeForPlayer(targetId) + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
             long positiveCount = allReviews.stream().filter(Commendation::isPositive).count();
             long negativeCount = allReviews.size() - positiveCount;
             headMeta.setLore(List.of(
-                    ChatColor.GRAY + "Total reputation: " + plugin.getRepConfig().formatColoredScore(overallScore),
+                    ChatColor.GRAY + "Total reputation: " + repService.formatColoredScore(targetId),
                     ChatColor.GRAY + "Positive reps: " + ChatColor.GREEN + positiveCount,
                     ChatColor.GRAY + "Negative reps: " + ChatColor.RED + negativeCount
             ));
@@ -808,7 +827,7 @@ public final class RepGuiManager implements Listener {
             RepCategory category = categories.get(index);
             RepProfileFilter option = RepProfileFilter.category(category);
             inventory.setItem(FILTER_OPTION_SLOTS[index + 1], profileFilterChoice(
-                    category.icon(), option, returnFilter, allReviews, category.description()));
+                    category.icon(), option, returnFilter, allReviews, plugin.getRepConfig().getCategoryDescription(category)));
         }
         inventory.setItem(FILTER_BACK_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back to Profile",
                 List.of(ChatColor.GRAY + "Return without changing the filter.")));
@@ -820,11 +839,12 @@ public final class RepGuiManager implements Listener {
                 positive ? ChatColor.GREEN + "Choose Positive Reason" : ChatColor.RED + "Choose Negative Reason");
         fillBackground(inventory, viewer);
         List<RepCategory> categories = positive ? positiveCategories() : negativeCategories();
-        int[] slots = {10, 11, 12, 14, 15, 16};
+        int[] slots = {11, 12, 14, 15};
         for (int i = 0; i < categories.size() && i < slots.length; i++) {
             inventory.setItem(slots[i], simpleButton(materialFor(positive), (positive ? ChatColor.GREEN : ChatColor.RED) + displayName(categories.get(i)),
                     List.of(ChatColor.GRAY + "Click to continue")));
         }
+        inventory.setItem(FILTER_BACK_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back to profile", List.of()));
         viewer.openInventory(inventory);
     }
 
@@ -985,7 +1005,11 @@ public final class RepGuiManager implements Listener {
         );
 
         if (!result.success()) {
-            if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
+            if (result.failure() == RepService.CommendationResult.Failure.ADDRESSES_UNKNOWN) {
+                player.sendMessage(ChatColor.RED + "Both players must join once after the update before their addresses can be checked.");
+            } else if (result.failure() == RepService.CommendationResult.Failure.IP_RESTRICTED) {
+                player.sendMessage(ChatColor.RED + "You cannot rep yourself, a shared-address account, or a player already repped by one.");
+            } else if (result.failure() == RepService.CommendationResult.Failure.INVALID_CATEGORY) {
                 player.sendMessage(plugin.getMessages().get("rep.category-invalid", Map.of(
                         "list", RepCategory.selectableValues().stream()
                                 .map(RepCategory::displayName)
@@ -1003,7 +1027,7 @@ public final class RepGuiManager implements Listener {
 
         pendingDrafts.remove(player.getUniqueId());
         Commendation commendation = result.commendation();
-        String formattedScore = plugin.getRepConfig().formatColoredScore(repService.getScore(targetId));
+        String formattedScore = repService.formatColoredScore(targetId);
         OfflinePlayer target = Bukkit.getOfflinePlayer(targetId);
         player.sendMessage(plugin.getMessages().get("rep.give-success", Map.of(
                 "amount", coloredValue(commendation.getScoreValue()),
@@ -1076,11 +1100,10 @@ public final class RepGuiManager implements Listener {
             lore.add(ChatColor.GRAY + "Date: " + ChatColor.WHITE + dateFormatter.format(Instant.ofEpochMilli(commendation.getCreatedAt())));
             lore.add(ChatColor.DARK_GRAY + "----------------");
             lore.addAll(wrapLore(commendation.getReasonText(), 34, ChatColor.WHITE));
-            lore.add(ChatColor.YELLOW + "Click: view full text");
             if (adminView) {
                 lore.add(ChatColor.RED + "Right-click: delete rep (admin)");
             }
-            meta.setLore(lore);
+            meta.setLore(GuiText.lore(lore));
             head.setItemMeta(meta);
         }
         return head;
@@ -1124,7 +1147,7 @@ public final class RepGuiManager implements Listener {
                 lore.addAll(wrapLore(caseData.detail(), 34, ChatColor.WHITE));
             }
             lore.add(ChatColor.YELLOW + "Click to post details in chat.");
-            meta.setLore(lore);
+            meta.setLore(GuiText.lore(lore));
             item.setItemMeta(meta);
         }
         return item;
@@ -1153,18 +1176,6 @@ public final class RepGuiManager implements Listener {
                 .create());
     }
 
-    private void openReviewBook(Player viewer, Commendation commendation) {
-        ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
-        BookMeta meta = (BookMeta) book.getItemMeta();
-        if (meta != null) {
-            meta.setTitle("Rep from " + repService.nameOf(commendation.getGiver()));
-            meta.setAuthor(repService.nameOf(commendation.getGiver()));
-            meta.setPages(wrapLore(commendation.getReasonText(), 220, ChatColor.BLACK));
-            book.setItemMeta(meta);
-        }
-        viewer.openBook(book);
-    }
-
     private void fillBackground(Inventory inventory, Player viewer) {
         if (viewer.getName().startsWith("*")) {
             return;
@@ -1180,7 +1191,7 @@ public final class RepGuiManager implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(displayName);
-            meta.setLore(lore);
+            meta.setLore(GuiText.lore(lore));
             meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
             item.setItemMeta(meta);
         }
@@ -1195,8 +1206,8 @@ public final class RepGuiManager implements Listener {
         lore.add(ChatColor.GRAY + "Entries: " + ChatColor.WHITE + polarity.count(allReviews));
         lore.add(ChatColor.GRAY + "Score: " + RepCategoryGuiSupport.coloredValue(profileFilterTotal(
                 targetId, polarity, repService.getScore(targetId))));
-        lore.add(ChatColor.GRAY + "Choose all " + (positive ? "positive" : "negative") + " reps");
-        lore.add(ChatColor.GRAY + "or one specific category.");
+        lore.add(ChatColor.GRAY + "Click to view all " + (positive ? "positive" : "negative") + " reps");
+        lore.add(ChatColor.GRAY + "Use Categories for a specific reason.");
         lore.add(active ? ChatColor.GREEN + "This side is currently selected."
                 : ChatColor.YELLOW + "Click to choose a filter.");
         return simpleButton(positive ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
@@ -1325,8 +1336,9 @@ public final class RepGuiManager implements Listener {
         if (effects.stalkable()) {
             lore.add(ChatColor.WHITE + "Stalkable in warzone");
         }
-        if (effects.cashbackPercent() > 0) {
-            lore.add(ChatColor.WHITE + "Cashback: " + ChatColor.YELLOW + effects.cashbackPercent() + "%");
+        if (effects.teleportCooldownMultiplier() != RepAppliedEffects.NONE.teleportCooldownMultiplier()) {
+            lore.add(ChatColor.WHITE + "Teleport cooldown: " + ChatColor.YELLOW
+                    + Math.round(effects.teleportCooldownMultiplier() * 100) + "%");
         }
     }
 
@@ -1353,7 +1365,7 @@ public final class RepGuiManager implements Listener {
         }
     }
 
-    private void openProfileWithFilter(Player viewer, UUID targetId, RepProfileFilter filter, int page) {
+    void openProfileWithFilter(Player viewer, UUID targetId, RepProfileFilter filter, int page) {
         setProfileFilter(viewer, targetId, filter);
         openProfile(viewer, Bukkit.getOfflinePlayer(targetId), page);
     }
@@ -1385,25 +1397,7 @@ public final class RepGuiManager implements Listener {
     }
 
     private List<String> wrapLore(String text, int width, ChatColor color) {
-        List<String> lines = new ArrayList<>();
-        if (text == null || text.isBlank()) {
-            return List.of(color + "(no message)");
-        }
-        StringBuilder current = new StringBuilder();
-        for (String word : text.split("\\s+")) {
-            if (current.length() + word.length() + 1 > width && current.length() > 0) {
-                lines.add(color + current.toString());
-                current.setLength(0);
-            }
-            if (current.length() > 0) {
-                current.append(' ');
-            }
-            current.append(word);
-        }
-        if (current.length() > 0) {
-            lines.add(color + current.toString());
-        }
-        return lines;
+        return GuiText.wrap(color + (text == null || text.isBlank() ? "(no message)" : text), width);
     }
 
     private String coloredValue(int value) {
@@ -1558,8 +1552,6 @@ public final class RepGuiManager implements Listener {
     private record DraftReason(UUID targetId, RepCategory category, int returnPage, String reason) {
     }
 
-    private record ProfileContext(UUID targetId, int page) {
-    }
 
     private record AnvilSession(UUID targetId, RepCategory category, int returnPage, Inventory inventory) {
     }

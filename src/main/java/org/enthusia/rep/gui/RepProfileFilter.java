@@ -80,6 +80,6 @@ record RepProfileFilter(Boolean positive, RepCategory category) {
         if (positive == null) {
             return "All Reputation";
         }
-        return positive ? "All Positive Reputation" : "All Negative Reputation";
+        return positive ? "All Positive Rep" : "All Negative Rep";
     }
 }

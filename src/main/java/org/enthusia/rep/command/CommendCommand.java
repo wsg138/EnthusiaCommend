@@ -35,8 +35,8 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     private static final int PAGE_SIZE = 10;
     private static final long MILLIS_PER_DAY = 24L * 60L * 60L * 1000L;
     private static final long MILLIS_PER_HOUR = 60L * 60L * 1000L;
-    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "reviews", "stalk", "give");
-    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "reviews", "stalk", "give");
+    private static final List<String> PLAYER_ROOTS = List.of("top", "bottom", "stalk", "give");
+    private static final List<String> ADMIN_ROOTS = List.of("admin", "top", "bottom", "stalk", "give");
     private static final List<String> ADMIN_SUBCOMMANDS = List.of(
             "reload", "help", "get", "set", "add", "revoke", "remove", "reset", "history",
             "inspect", "resolve", "reports", "removed", "restore", "undo");
@@ -73,7 +73,6 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
             case "admin" -> handleAdminRequest(sender, args);
             case "top" -> handleLeaderboard(sender, parseInt(args, 1, 10), false);
             case "bottom" -> handleLeaderboard(sender, parseInt(args, 1, 10), true);
-            case "reviews" -> handleReviews(sender, args.length >= 2 ? args[1] : sender.getName());
             case "stalk" -> handleStalk(sender, args);
             case "give" -> handleGiveCommand(sender, args);
             case "alerts" -> handleAlerts(sender);
@@ -122,7 +121,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
         if (!(sender instanceof Player player)) {
             sender.sendMessage(ChatColor.GOLD + "Rep for " + ChatColor.YELLOW + targetName + ChatColor.GOLD
-                    + ": " + plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId())));
+                    + ": " + repService.formatColoredScore(target.getUniqueId()));
             return true;
         }
         if (!target.isOnline() && !target.hasPlayedBefore()) {
@@ -180,12 +179,20 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendGiveFailureMessage(Player giver, RepService.CommendationResult result) {
-    if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
-        giver.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
-        return;
+        if (result.failure() == RepService.CommendationResult.Failure.ADDRESSES_UNKNOWN) {
+            giver.sendMessage(ChatColor.RED + "Both players must join once after the update before their addresses can be checked.");
+            return;
+        }
+        if (result.failure() == RepService.CommendationResult.Failure.IP_RESTRICTED) {
+            giver.sendMessage(ChatColor.RED + "You cannot rep yourself, a shared-address account, or a player already repped by one.");
+            return;
+        }
+        if (result.failure() == RepService.CommendationResult.Failure.REPUTATION_BLACKLISTED) {
+            giver.sendMessage(plugin.getMessages().get("rep.blacklisted-giver"));
+            return;
+        }
+        sendCooldownMessage(giver, result);
     }
-    sendCooldownMessage(giver, result);
-}
 
     private void sendCooldownMessage(Player giver, RepService.CommendationResult result) {
         if (result.cooldownRemainingMillis() <= 0L) {
@@ -198,7 +205,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
 
     private void sendDirectGiveSuccess(Player giver, OfflinePlayer target, Commendation commendation) {
         String amount = coloredValue(commendation.getScoreValue());
-        String score = plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId()));
+        String score = repService.formatColoredScore(target.getUniqueId());
         giver.sendMessage(plugin.getMessages().get("rep.give-success", Map.of(
                 "amount", amount, "target", safeName(target),
                 "category", displayName(commendation.getCategory()), "rep", score)));
@@ -208,22 +215,6 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
                     "giver", giver.getName(), "amount", amount,
                     "category", displayName(commendation.getCategory()), "rep", score)));
         }
-    }
-
-    private boolean handleReviews(CommandSender sender, String targetName) {
-        OfflinePlayer target = resolveKnownPlayer(sender, targetName);
-        if (target == null) return true;
-        List<Commendation> reviews = repService.getReceivedCommendations(target.getUniqueId());
-        sender.sendMessage(ChatColor.GOLD + "--- Reviews for " + ChatColor.YELLOW + safeName(target) + ChatColor.GOLD + " ---");
-        if (reviews.isEmpty()) {
-            sender.sendMessage(ChatColor.GRAY + "No reviews yet.");
-            return true;
-        }
-        reviews.stream().limit(10).forEach(entry -> sender.sendMessage(
-                coloredValue(entry.getScoreValue()) + ChatColor.GRAY + " from " + ChatColor.YELLOW
-                        + repService.nameOf(entry.getGiver()) + ChatColor.GRAY + " ["
-                        + displayName(entry.getCategory()) + "]: " + ChatColor.WHITE + trimPreview(entry.getReasonText())));
-        return true;
     }
 
     private boolean handleLeaderboard(CommandSender sender, int limit, boolean lowest) {
@@ -364,7 +355,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         if (args.length < 3) { sendAdminHelp(sender); return; }
         OfflinePlayer target = resolveOfflinePlayer(args[2]);
         sender.sendMessage(ChatColor.GOLD + "Rep for " + ChatColor.YELLOW + safeName(target) + ChatColor.GOLD + ": "
-                + plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId())));
+                + repService.formatColoredScore(target.getUniqueId()));
         Map<RepCategory, Integer> categories = repService.getCategoryScores(target.getUniqueId());
         if (!categories.isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "Category totals:");
@@ -387,7 +378,7 @@ public final class CommendCommand implements CommandExecutor, TabCompleter {
         else repService.adjustScoreByStaff(target.getUniqueId(), value, sender);
         sender.sendMessage(ChatColor.GOLD + (absolute ? "Set rep of " : "Adjusted rep of ")
                 + ChatColor.YELLOW + safeName(target) + ChatColor.GOLD + " to "
-                + plugin.getRepConfig().formatColoredScore(repService.getScore(target.getUniqueId())));
+                + repService.formatColoredScore(target.getUniqueId()));
     }
 
     private void handleAdminRevoke(CommandSender sender, String[] args, boolean requireCategory) {

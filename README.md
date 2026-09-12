@@ -12,7 +12,7 @@ For the current **player-facing SMP behavior**—categories, scoring, commands, 
 - Positive commendations worth `+1` and new negative commendations worth `-2`
 - Per-category reputation totals derived from persisted commendations
 - Staff history, targeted removal, restore, and suspicious-activity reports
-- Reciprocity, clustered-downrep, and same-IP abuse detection
+- Reciprocal/clustered-downrep alerts and persistent same-IP vote prevention
 - Vault-backed stalking subscriptions with verified transaction results
 - Optional PlaceholderAPI, Plan, ProtocolLib, EnthusiaTeleport, WarzoneDuels, and Discord webhook integrations
 - Versioned, atomic YAML persistence with periodic autosave and shutdown flushing
@@ -33,7 +33,7 @@ The deployable jar is created under `target/EnthusiaCommend-<version>.jar`.
 
 ## Reputation category views
 
-`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation and every registered category. Overall views retain the overall leaderboard population; category views include only players with an actual record in that category, including records whose values total zero. Sorting, ranks, and pagination all use that filtered population, and empty categories show an explicit empty state. Each open GUI freezes the visible player or review identities so a concurrent reputation change cannot redirect a click to a different entry. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
+`/rep top` and `/rep bottom` open a paginated leaderboard. Use the category icons to switch between overall reputation, all positive reputation, all negative reputation, and every registered category. Overall views retain the overall leaderboard population; category views include only players with an actual record in that category, including records whose values total zero. Sorting, ranks, and pagination all use that filtered population, and empty categories show an explicit empty state. Each open GUI freezes the visible player or review identities so a concurrent reputation change cannot redirect a click to a different entry. `/rep <player>` uses the same category registry and shows the target's overall total plus a selectable total for every category; selecting one filters the displayed entries and pagination to that category.
 
 ## Administrative rep-trading alerts
 
@@ -83,3 +83,43 @@ Category • Reason
 ```
 
 The reason line omits the separator when no reason exists. The embed includes the event timestamp and a 64px square Minecraft head thumbnail for the reputation giver, resolved as a URL from the giver UUID through `mc-heads.net`; no skin download or blocking lookup occurs on the server thread. Removal and restoration audit events are also sent through the same ordered asynchronous queue, using compact action-specific wording that identifies the actor and affected player without exposing UUIDs, database IDs, internal enum names, totals, or reputation amounts. Missing thumbnail data simply omits the thumbnail.
+
+## Reputation rules in 2.14
+
+`rep.effectRules.overall` is a list of rules with `effect`, `threshold`, `value`, and optional `enabled: false`. A positive threshold activates at or above it; a negative threshold activates at or below it. An empty list disables that scope. Each `rep.effectRules.categories.<CATEGORY>` list overrides that category; absent category lists use the built-in polarity defaults independently of the overall list. `rep.effectRules.disabledEffects` disables named effects everywhere. Config changes apply with `/rep admin reload`.
+
+Supported effects are `teleport` (cooldown multiplier), `glow`, `redGlow`, `stalk` (positive value enables), `movement`, `potion`, `firework` (percent), `pearl`, and `wind` (additional cooldown seconds). Only teleport, glow, and stalking have default rules. Cashback is no longer supported. The strongest penalty wins over positive rewards; effects do not multiply or sum across categories. Glow excludes Spawn and retains duel exemptions. Optional legacy gameplay effects retain their existing region restrictions.
+
+```yaml
+rep:
+  effectRules:
+    disabledEffects: [redGlow]
+    categories:
+      SPAWN_KILLED:
+        - {effect: glow, threshold: -10, value: 1}
+        - {effect: stalk, threshold: -12, value: 1}
+        - {effect: teleport, threshold: -10, value: 1.4}
+      WAS_KIND:
+        - {effect: teleport, threshold: 5, value: 0.8}
+      GOOD_STALL: []
+```
+
+The defaults merger adds missing new settings without replacing explicit lists. Old potion/pearl/wind/firework/movement/cashback threshold keys are no longer used; opt into those supported effects through rules if desired. Legacy glow/stalking keys are fallback values for absent category rules. Scam Stall data migrates to Scammed, preserving totals, timestamps, and reasons. Data version 7 adds immutable identity snapshots to the existing atomic YAML save.
+
+`rep.removalCooldownHours` defaults to 24 and applies to player, staff, API, and reset removals. Set it to zero to disable; it is independent of `rep.editCooldownHours`. Administrative restoration restores the original entry and clears its removal cooldown.
+
+`rep.ipProtection.enabled` defaults to true. Login captures hashed addresses, and vote history is retained after removal. Shared historical addresses block giver-to-target reputation and repeated target voting by other accounts. `requireKnownAddresses: true` rejects votes until both accounts have been observed; existing giver address hashes are migrated. This also affects families/shared networks. Proxy installations must forward the real client address correctly. Disabling protection does not permit self-reputation. No raw IP addresses are stored or displayed.
+
+`rep.tarnished.hours`, `.color` (named, legacy, or hex color, default GOLD), and `.label` configure the temporary status; zero hours disables it. `%enthusiarep_status%` returns the label when active, `%enthusiarep_tarnished%` returns true/false, and the existing color/colored-score placeholders reflect it. Glow placeholders now include category effects. Score colors are evaluated when requested, so expiry does not require a new vote.
+
+Use the clock in `/rep top` or `/rep bottom` to cycle Score, Most recent, Recent: day, and Recent: week. Recent ordering uses the latest created or edited matching entry per player. Positive, negative, and individual category filters remain available. Configure `rep.recent.dayHours` and `.weekHours` (24/168 by default). Profiles opened from a leaderboard have a Back button that restores its filter, sort, and page. Deleted entries stay in staff removal/history views.
+
+Review reasons appear in the review item tooltip; clicking no longer opens a book or creates a lectern. Command suggestions omit display-name tooltips. This build targets Paper 1.21.11 APIs. See [REPUTATION_UPDATE_TESTING.md](REPUTATION_UPDATE_TESTING.md) for server acceptance checks.
+
+### Category and color customization
+
+Helped Me is merged into Was Kind. Existing votes retain their values, reasons, giver/target identities, and timestamps. Custom HELPED_ME effect rules are moved into WAS_KIND and combined with existing rules once.
+
+Edit `rep.categories.SPAWN_KILLED.description` (or another category key) in `config.yml`. Set `rep.tarnished.color` to `'#FF4A00'` for orange. `rep.colors.positive`, `.negative`, and `.neutral` also accept named colors, legacy ampersand codes, or quoted hex. Run `/rep admin reload` after editing. Legacy and MiniMessage reputation placeholders both preserve hex colors; glow team colors remain limited to Minecraft's named colors.
+
+Server suggestion tooltips are stripped. As a fallback for clients that derive tooltips from tab-list names, literal MiniMessage formatting in player-list names is translated once per second. Existing formatted names and non-formatting tags are preserved. This also corrects raw markup in the tab list itself.

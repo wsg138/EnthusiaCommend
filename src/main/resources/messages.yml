@@ -10,7 +10,7 @@ rep:
   not-found: "&cPlayer not found: {name}"
   no-permission: "&cYou do not have permission."
 stalk:
-  not-stalkable: "&cThat player is not stalkable (rep must be &e-12&c or lower)."
+  not-stalkable: "&cThat player does not meet the configured overall or category stalking threshold."
   no-economy: "&cEconomy not set up; cannot buy stalk subscription."
   not-enough: "&cYou need ${cost} to stalk for {days} day(s)."
   purchased: "&6You are now stalking &e{target}&6 for &e{days}&6 day(s)."

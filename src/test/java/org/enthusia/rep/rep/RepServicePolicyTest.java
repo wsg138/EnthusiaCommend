@@ -1,0 +1,246 @@
+package org.enthusia.rep.rep;
+
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.PluginManager;
+import org.enthusia.rep.CommendPlugin;
+import org.enthusia.rep.config.RepConfig;
+import org.enthusia.rep.storage.PluginDataSnapshot;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class RepServicePolicyTest {
+    private static final String TARGET_ADDRESS = "target-ip";
+    private static final String GIVER_ADDRESS = "giver-ip";
+    private static final String SHARED_ADDRESS = "shared";
+    private final UUID giver = UUID.randomUUID();
+    private final UUID target = UUID.randomUUID();
+    private final UUID alternate = UUID.randomUUID();
+    private MockedStatic<Bukkit> bukkit;
+    private YamlConfiguration yaml;
+    private final AtomicInteger refreshes = new AtomicInteger();
+
+    @BeforeEach
+    void setup() {
+        bukkit = mockStatic(Bukkit.class);
+        bukkit.when(Bukkit::getPluginManager).thenReturn(mock(PluginManager.class));
+        bukkit.when(() -> Bukkit.getOfflinePlayer(org.mockito.ArgumentMatchers.any(UUID.class))).thenAnswer(call -> {
+            org.bukkit.OfflinePlayer player = mock(org.bukkit.OfflinePlayer.class);
+            when(player.getName()).thenReturn("Tester");
+            return player;
+        });
+        yaml = new YamlConfiguration();
+        yaml.set("rep.editCooldownHours", 0);
+    }
+
+    @AfterEach
+    void close() { bukkit.close(); }
+
+    private PluginDataSnapshot initial(String targetHash) {
+        return new PluginDataSnapshot(Map.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), Map.of(),
+                Map.of(target, new RepIdentityState(Set.of(targetHash), Set.of(), 0)));
+    }
+
+    private RepService service(PluginDataSnapshot snapshot) {
+        return new RepService(mock(CommendPlugin.class), new RepConfig(yaml), snapshot, () -> { },
+                ignored -> refreshes.incrementAndGet(), null);
+    }
+
+    private RepService.CommendationResult vote(RepService service, UUID author, boolean positive, RepCategory category, String hash) {
+        return service.addOrUpdateCommendation(author, target, positive, category, "Reason", hash);
+    }
+
+    @Test
+    void blocksSharedIpTargetWithoutChangingScores() {
+        RepService service = service(initial(SHARED_ADDRESS));
+        assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
+                vote(service, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).failure());
+        assertEquals(0, service.getScore(target));
+        assertTrue(service.getCommendationsAbout(target).isEmpty());
+    }
+
+    @Test
+    void blocksUnknownAddressesAndSelfReputation() {
+        RepService service = service(PluginDataSnapshot.EMPTY);
+        assertEquals(RepService.CommendationResult.Failure.ADDRESSES_UNKNOWN,
+                vote(service, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).failure());
+        assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
+                vote(service, target, true, RepCategory.WAS_KIND, TARGET_ADDRESS).failure());
+    }
+
+    @Test
+    void alternateVoteBlockedEvenAfterRemovalAndRestart() {
+        RepService original = service(initial(TARGET_ADDRESS));
+        assertTrue(vote(original, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+        original.removeCommendation(giver, target);
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
+                vote(restored, alternate, false, RepCategory.GRIEFED, SHARED_ADDRESS).failure());
+        assertEquals(RepService.CommendationResult.Failure.COOLDOWN,
+                vote(restored, giver, true, RepCategory.WAS_KIND, "new-address").failure());
+        assertTrue(restored.getRemovalCooldownMillis(giver, target) > 23 * 3_600_000L);
+    }
+
+    @Test
+    void staffRemovalAlsoAppliesConfiguredCooldownAndZeroDisablesIt() {
+        RepService service = service(initial(TARGET_ADDRESS));
+        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).success());
+        service.removeCommendationLogged(alternate, giver, target, false);
+        assertTrue(service.getRemovalCooldownMillis(giver, target) > 0);
+        yaml.set("rep.removalCooldownHours", 0);
+        service.reload(new RepConfig(yaml));
+        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
+    }
+
+    @Test
+    void ipProtectionCanBeDisabledWithoutAllowingSelfRep() {
+        yaml.set("rep.ipProtection.enabled", false);
+        RepService service = service(initial(SHARED_ADDRESS));
+        assertTrue(vote(service, giver, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+        assertTrue(vote(service, alternate, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+        assertFalse(vote(service, target, true, RepCategory.WAS_KIND, SHARED_ADDRESS).success());
+    }
+
+    @Test
+    void tarnishedPersistsExpiresAndNeverOverridesNegativeColor() {
+        RepService service = service(initial(TARGET_ADDRESS));
+        service.setScore(target, 10);
+        assertTrue(vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
+        RepService restored = service(service.snapshot(PluginDataSnapshot.EMPTY));
+        assertTrue(restored.isTarnished(target));
+        assertEquals(ChatColor.GOLD, restored.colorForPlayer(target));
+        restored.setScore(target, -5);
+        assertEquals(ChatColor.RED, restored.colorForPlayer(target));
+        restored.setScore(target, 8);
+        yaml.set("rep.tarnished.hours", 0);
+        restored.reload(new RepConfig(yaml));
+        assertEquals(ChatColor.GREEN, restored.colorForPlayer(target));
+    }
+
+    @Test
+    void editingNegativeReasonDoesNotExtendTarnishAndCategorySwitchRefreshesEffects() {
+        RepService service = service(initial(TARGET_ADDRESS));
+        service.setScore(target, 10);
+        vote(service, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS);
+        long originalTime = service.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt();
+        int before = refreshes.get();
+        assertTrue(vote(service, giver, false, RepCategory.SPAWN_KILLED, GIVER_ADDRESS).success());
+        assertEquals(originalTime, service.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt());
+        assertEquals(before + 1, refreshes.get());
+        assertEquals(-2, service.getCategoryScore(target, RepCategory.SPAWN_KILLED));
+        assertEquals(0, service.getCategoryScore(target, RepCategory.GRIEFED));
+    }
+
+    @Test
+    void staffMustRemoveEveryRecentNegativeToClearTarnishedAfterRestart() {
+        yaml.set("rep.ipProtection.enabled", false);
+        RepService original = service(initial(TARGET_ADDRESS));
+        original.setScore(target, 20);
+        assertTrue(vote(original, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
+        assertTrue(vote(original, alternate, false, RepCategory.SCAMMED, SHARED_ADDRESS).success());
+        original.removeCommendationLogged(UUID.randomUUID(), giver, target, true);
+        assertTrue(original.isTarnished(target));
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        restored.removeCommendationByStaffCommand(null, alternate, target, true);
+        assertFalse(restored.isTarnished(target));
+        assertEquals(ChatColor.GREEN, restored.colorForPlayer(target));
+        assertFalse(service(restored.snapshot(PluginDataSnapshot.EMPTY)).isTarnished(target));
+    }
+
+    @Test
+    void playerRemovalDoesNotClearAnotherNegativeContribution() {
+        yaml.set("rep.ipProtection.enabled", false);
+        RepService original = service(initial(TARGET_ADDRESS));
+        original.setScore(target, 20);
+        vote(original, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS);
+        vote(original, alternate, false, RepCategory.SCAMMED, SHARED_ADDRESS);
+        original.removeCommendationWithCooldown(giver, target);
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        restored.removeCommendationLogged(UUID.randomUUID(), alternate, target, true);
+        assertTrue(restored.isTarnished(target));
+    }
+
+    @Test
+    void legacyTarnishedStateCanBeClearedByStaffRemoval() {
+        long now = System.currentTimeMillis();
+        var negative = new Commendation(giver, target, false, RepCategory.GRIEFED, "old build", now, now, GIVER_ADDRESS, -2);
+        var snapshot = new PluginDataSnapshot(Map.of(target, 8), List.of(negative), List.of(), List.of(), List.of(),
+                List.of(), List.of(), Map.of(), Map.of(target, new RepIdentityState(Set.of(), Set.of(), now)));
+        RepService restored = service(snapshot);
+        assertTrue(restored.isTarnished(target));
+        restored.removeCommendationByStaffCommand(null, giver, target, true);
+        assertFalse(restored.isTarnished(target));
+    }
+
+    @Test
+    void upgradeClearsLegacyTimestampAfterNegativeWasAlreadyAdminRemoved() {
+        long now = System.currentTimeMillis();
+        var removed = new Commendation(giver, target, false, RepCategory.GRIEFED, "removed", now, now, GIVER_ADDRESS, -2);
+        var snapshot = new PluginDataSnapshot(Map.of(target, 10), List.of(),
+                List.of(new RepService.RemovedRep("staff-removal", removed, now, alternate)), List.of(), List.of(),
+                List.of(), List.of(), Map.of(), Map.of(target, new RepIdentityState(Set.of(), Set.of(), now)));
+        RepService upgraded = service(snapshot);
+        assertFalse(upgraded.isTarnished(target));
+        assertEquals(ChatColor.GREEN, upgraded.colorForPlayer(target));
+        assertEquals(0L, upgraded.snapshot(PluginDataSnapshot.EMPTY).identities().get(target).tarnishedAt());
+        assertFalse(service(upgraded.snapshot(PluginDataSnapshot.EMPTY)).isTarnished(target));
+    }
+
+    @Test
+    void migrationKeepsOnlyRemainingVotesOriginalExpiry() {
+        long now = System.currentTimeMillis();
+        long earlier = now - 25 * 3_600_000L;
+        var old = new Commendation(giver, target, false, RepCategory.GRIEFED, "earlier", earlier, earlier, GIVER_ADDRESS, -2);
+        var state = new RepIdentityState(Set.of(), Set.of(), now);
+        var migrated = state.migrateSources(List.of(old));
+        assertEquals(earlier, migrated.tarnishedAt());
+        var previousBuild = new RepIdentityState(Set.of(), Set.of(), now, Map.of(giver.toString(), earlier));
+        assertEquals(earlier, previousBuild.migrateSources(List.of(old)).tarnishedAt());
+        var recent = new Commendation(alternate, target, false, RepCategory.SCAMMED, "recent", now, now, SHARED_ADDRESS, -2);
+        assertEquals(now, state.migrateSources(List.of(old, recent)).tarnishedAt());
+    }
+
+    @Test
+    void removingLatestNegativeRestoresEarlierExpiryWithoutExtendingIt() {
+        long older = System.currentTimeMillis() - 25 * 3_600_000L;
+        long recent = System.currentTimeMillis();
+        var state = RepIdentityState.EMPTY.tarnish(giver, older).tarnish(alternate, recent);
+        var forgiven = state.forgive(alternate);
+        assertEquals(older, forgiven.tarnishedAt());
+        assertEquals(0, forgiven.forgive(giver).tarnishedAt());
+    }
+
+    @Test
+    void oldRemovedRecordsSeedAntiAltHistoryAndStallScamMigrates() {
+        Commendation old = new Commendation(giver, target, false, RepCategory.SCAM_STALL, "Old", 1, 1, SHARED_ADDRESS, -2);
+        var snapshot = new PluginDataSnapshot(Map.of(), List.of(), List.of(new RepService.RemovedRep("old", old, 2, alternate)),
+                List.of(), List.of(), List.of());
+        RepService service = service(snapshot);
+        assertEquals(RepService.CommendationResult.Failure.IP_RESTRICTED,
+                vote(service, alternate, true, RepCategory.WAS_KIND, SHARED_ADDRESS).failure());
+        assertFalse(RepCategory.SCAM_STALL.isSelectable());
+        assertEquals(RepCategory.SCAMMED, RepCategory.fromStored("SCAM_STALL", false));
+    }
+
+    @Test
+    void polarityLeaderboardsSumAllCategoriesWithoutNettingTheOtherSide() {
+        RepService service = service(initial(TARGET_ADDRESS));
+        vote(service, giver, true, RepCategory.WAS_KIND, "one");
+        vote(service, alternate, false, RepCategory.GRIEFED, "two");
+        assertEquals(-1, service.getScore(target));
+        assertEquals(List.of(Map.entry(target, 1)), service.leaderboardPolarity(true, false));
+        assertEquals(List.of(Map.entry(target, -2)), service.leaderboardPolarity(false, true));
+    }
+}

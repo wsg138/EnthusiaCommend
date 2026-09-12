@@ -118,12 +118,13 @@ public final class CommendPlugin extends JavaPlugin {
         );
         for (var player : Bukkit.getOnlinePlayers()) {
             repService.rememberName(player.getUniqueId(), player.getName());
+            repService.rememberAddress(player);
         }
-        this.stalkManager = new StalkManager(this, regionManager, repService, repConfig, this::markDirty);
+        this.stalkManager = new StalkManager(this, regionManager, repService, this::markDirty);
         this.stalkManager.load(snapshot);
         this.warzoneDuelsHook = new WarzoneDuelsHook(this);
         this.warzoneDuelsHook.refresh();
-        this.effectManager = new RepEffectManager(this, repConfig, regionManager, repService, warzoneDuelsHook);
+        this.effectManager = new RepEffectManager(this, regionManager, repService, warzoneDuelsHook);
         this.teleportIntegration = new TeleportIntegration(this, repService);
         this.repGuiManager = new RepGuiManager(this, repService, effectManager);
         this.repLeaderboardGui = new RepLeaderboardGui(this, repService);
@@ -181,8 +182,8 @@ public final class CommendPlugin extends JavaPlugin {
         if (analyticsService != null) {
             analyticsService.pruneExpired(true);
         }
-        this.stalkManager.reload(repConfig);
-        this.effectManager.reload(repConfig);
+        this.stalkManager.reload();
+        this.effectManager.reload();
         this.warzoneDuelsHook.refresh();
         this.teleportIntegration.refresh();
         reloadDiscordWebhook();
@@ -199,6 +200,8 @@ public final class CommendPlugin extends JavaPlugin {
         }
         repCommand.setExecutor(commendCommand);
         repCommand.setTabCompleter(commendCommand);
+        getServer().getPluginManager().registerEvents(new org.enthusia.rep.command.RepSuggestionListener(), this);
+        getServer().getScheduler().runTaskTimer(this, new org.enthusia.rep.command.PlayerListNameFormatter(), 1L, 20L);
     }
 
     private void registerPlaceholderExpansion() {
@@ -283,7 +286,8 @@ public final class CommendPlugin extends JavaPlugin {
                 analyticsService != null ? analyticsService.snapshot() : java.util.List.of(),
                 repSnapshot.suspiciousCases(),
                 repSnapshot.removalCooldowns(),
-                repSnapshot.repTradingAlertPreferences()
+                repSnapshot.repTradingAlertPreferences(),
+                repSnapshot.identities()
         );
     }
 
@@ -394,7 +398,8 @@ public final class CommendPlugin extends JavaPlugin {
             }
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
                     new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-            if (mergeMissingSections(config, defaults)) {
+            boolean migrated = org.enthusia.rep.config.KindCategoryMigration.migrate(config);
+            if (mergeMissingSections(config, defaults) || migrated) {
                 saveConfig();
             }
         } catch (Exception exception) {

@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public final class YamlPluginDataStore implements PluginDataStore {
-    private static final int DATA_VERSION = 6;
+    private static final int DATA_VERSION = 8;
 
     private final File file;
     private final Logger logger;
@@ -54,8 +54,46 @@ public final class YamlPluginDataStore implements PluginDataStore {
                 loadMappedEntries(config, "reputationChanges", ReputationChangeRecord::fromMap),
                 loadMappedEntries(config, "suspiciousCases", RepService.SuspiciousRepCase::fromMap),
                 loadRemovalCooldowns(config),
-                loadAlertPreferences(config)
+                loadAlertPreferences(config),
+                loadIdentities(config)
         );
+    }
+
+    private Map<UUID, org.enthusia.rep.rep.RepIdentityState> loadIdentities(YamlConfiguration config) {
+        ConfigurationSection section = config.getConfigurationSection("identities");
+        if (section == null) return Map.of();
+        return section.getKeys(false).stream().map(id -> loadIdentity(section, id))
+                .flatMap(Optional::stream)
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    private Optional<Map.Entry<UUID, org.enthusia.rep.rep.RepIdentityState>> loadIdentity(ConfigurationSection section, String id) {
+        try {
+            java.util.Set<UUID> targets = section.getStringList(id + ".givenTargets").stream()
+                    .map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
+            return Optional.of(Map.entry(UUID.fromString(id), new org.enthusia.rep.rep.RepIdentityState(
+                    java.util.Set.copyOf(section.getStringList(id + ".ipHashes")), targets,
+                    section.getLong(id + ".tarnishedAt", 0), loadTarnishSources(section.getConfigurationSection(id + ".tarnishSources")))));
+        } catch (IllegalArgumentException ex) {
+            if (logger.isLoggable(Level.WARNING)) logger.warning("Skipping invalid reputation identity: " + id);
+            return Optional.empty();
+        }
+    }
+
+    private Map<String, Long> loadTarnishSources(ConfigurationSection section) {
+        if (section == null) return Map.of();
+        return section.getValues(false).entrySet().stream().filter(entry -> entry.getValue() instanceof Number)
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> ((Number) entry.getValue()).longValue()));
+    }
+
+    private void writeIdentities(YamlConfiguration config, Map<UUID, org.enthusia.rep.rep.RepIdentityState> identities) {
+        identities.forEach((id, state) -> {
+            String path = "identities." + id;
+            config.set(path + ".ipHashes", new ArrayList<>(state.ipHashes()));
+            config.set(path + ".givenTargets", state.givenTargets().stream().map(UUID::toString).toList());
+            config.set(path + ".tarnishedAt", state.tarnishedAt());
+            config.set(path + ".tarnishSources", state.tarnishSources());
+        });
     }
 
     private Map<UUID, Integer> loadScores(YamlConfiguration config) {
@@ -183,6 +221,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
     public boolean save(PluginDataSnapshot snapshot) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", DATA_VERSION);
+        writeIdentities(config, snapshot.identities());
         writeScores(config, snapshot.scores());
         writeCommendations(config, snapshot.commendations());
         config.set("removed", serialize(snapshot.removedEntries(), RepService.RemovedRep::serialize));

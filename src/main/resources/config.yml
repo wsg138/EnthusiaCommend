@@ -5,36 +5,72 @@ rep:
     default: ANVIL
     maxReasonLength: 256
     timeoutSeconds: 60
-  effects:
-    # Movement-speed keys remain for config compatibility but are intentionally inert.
-    penalties:
-      moveSpeedMinus1PercentAt: -5
-      pearlCooldown3SecondsAt: -6
-      fireworkDurationMinus5PercentAt: -6
-      moveSpeedMinus3PercentAt: -7
-      windChargeCooldown2SecondsAt: -7
-      fireworkDurationMinus10PercentAt: -7
-      moveSpeedMinus5PercentAt: -10
-      glowAt: -10
-      stalkableAt: -12
-      potionDurationMinus10PercentAt: -12
-      pearlCooldown7SecondsAt: -15
-      windChargeCooldown5SecondsAt: -15
-      fireworkDurationMinus15PercentAt: -15
-      pearlCooldown10SecondsAt: -20
-      windChargeCooldown10SecondsAt: -20
-      moveSpeedMinus10PercentAt: -20
-      potionDurationMinus15PercentAt: -20
-      fireworkDurationMinus25PercentAt: -20
-      redGlowAt: -20
-    benefits:
-      moveSpeedPlus1PercentAt: 5
-      moveSpeedPlus3PercentAt: 10
-      potionDurationPlus5PercentAt: 10
-      cashback3PercentAt: 10
-      moveSpeedPlus5PercentAt: 15
-      potionDurationPlus10PercentAt: 15
-      cashback5PercentAt: 15
+  # Applies after every removal, including staff removals. Zero disables it.
+  removalCooldownHours: 24
+  ipProtection:
+    enabled: true
+    # Require both accounts to have a saved address hash (captured on login).
+    requireKnownAddresses: true
+  tarnished:
+    hours: 24
+    color: GOLD
+    label: Tarnished
+  # Named colors, &a codes, or quoted hex colors such as '#FF4A00'.
+  colors:
+    positive: GREEN
+    negative: RED
+    neutral: YELLOW
+  # Reload with /rep admin reload after editing descriptions or colors.
+  categories:
+    WAS_KIND:
+      description: "Friendly behavior, useful help, or support."
+    GAVE_ITEMS:
+      description: "Gave items or money fairly."
+    TRUSTWORTHY:
+      description: "Kept promises and acted reliably."
+    GOOD_STALL:
+      description: "Ran a fair and reliable market stall."
+    SCAMMED:
+      description: "Scammed or deliberately misled another player."
+    SPAWN_KILLED:
+      description: "Killed players unfairly around spawn."
+    GRIEFED:
+      description: "Damaged or destroyed another player's build."
+    TRAPPED:
+      description: "Used a trap unfairly against another player."
+  recent:
+    dayHours: 24
+    weekHours: 168
+  effectRules:
+    # Disable an effect in every scope, e.g. [stalk, redGlow].
+    disabledEffects: []
+    # A negative threshold activates at or below it; positive at or above it.
+    # Delete rules or set enabled: false to disable. [] disables a whole scope.
+    # Supported effects: teleport (multiplier), glow/redGlow/stalk (1 = on),
+    # movement/potion/firework (percent), pearl/wind (extra cooldown seconds).
+    # Cashback has been removed. Only the following effects run by default.
+    overall:
+      - {effect: teleport, threshold: -10, value: 1.4}
+      - {effect: teleport, threshold: -15, value: 1.6}
+      - {effect: teleport, threshold: -25, value: 2.0}
+      - {effect: glow, threshold: -10, value: 1}
+      - {effect: redGlow, threshold: -20, value: 1}
+      - {effect: stalk, threshold: -12, value: 1}
+      - {effect: teleport, threshold: 5, value: 0.8333333333333334}
+      - {effect: teleport, threshold: 10, value: 0.75}
+      - {effect: teleport, threshold: 15, value: 0.6666666666666666}
+      - {effect: teleport, threshold: 20, value: 0.5}
+    # Each category independently uses the built-in rules for its polarity.
+    # To override a category, uncomment its list and add/remove rules there.
+    # An empty list explicitly disables that category's effects.
+    categories: {}
+    # categories:
+    #   SPAWN_KILLED:
+    #     - {effect: glow, threshold: -10, value: 1}
+    #     - {effect: stalk, threshold: -12, value: 1}
+    #   WAS_KIND:
+    #     - {effect: teleport, threshold: 5, value: 0.8}
+    #   GOOD_STALL: []
 rep-trading-alerts:
   # Applies only to operators or players granted enthusiacommend.rep.alert.
   # Authorized administrators without a saved preference inherit this value.

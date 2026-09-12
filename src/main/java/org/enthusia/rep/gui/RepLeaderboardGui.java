@@ -3,7 +3,6 @@ package org.enthusia.rep.gui;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -31,6 +30,7 @@ public final class RepLeaderboardGui implements Listener {
             19, 20, 21, 22, 23, 24, 25,
             28, 29, 30, 31, 32, 33, 34,
             37, 38, 39, 40, 41, 42, 43);
+    private static final int SORT_SLOT = 8;
     private static final int POSITIVE_FILTER_SLOT = 2;
     private static final int CURRENT_VIEW_SLOT = 4;
     private static final int NEGATIVE_FILTER_SLOT = 6;
@@ -52,9 +52,15 @@ public final class RepLeaderboardGui implements Listener {
     }
 
     public void open(Player viewer, boolean lowest, RepCategory category, int page) {
+        openFiltered(viewer, lowest, RepProfileFilter.category(category), page, LeaderboardOrder.SCORE);
+    }
+
+    private void openFiltered(Player viewer, boolean lowest, RepProfileFilter filter, int page, LeaderboardOrder order) {
         Bukkit.getPluginManager().callEvent(new CommendationLeaderboardViewedEvent(viewer.getUniqueId()));
-        RepCategory selected = canonicalCategory(category);
-        List<Map.Entry<UUID, Integer>> entries = repService.leaderboard(selected, lowest);
+        RepCategory selected = filter.category();
+        List<Map.Entry<UUID, Integer>> entries = filter.isPolarity()
+                ? repService.leaderboardPolarity(filter.positive(), lowest) : repService.leaderboard(selected, lowest);
+        entries = orderedEntries(entries, filter, order);
         int maxPage = Math.max(0, (entries.size() - 1) / ENTRY_SLOTS.size());
         int resolvedPage = Math.max(0, Math.min(page, maxPage));
         int start = resolvedPage * ENTRY_SLOTS.size();
@@ -64,14 +70,15 @@ public final class RepLeaderboardGui implements Listener {
                 .map(Map.Entry::getKey)
                 .toList();
         String direction = lowest ? "Lowest" : "Top";
-        String viewName = RepCategoryGuiSupport.displayName(selected);
+        String viewName = filter.displayName();
         Inventory inventory = Bukkit.createInventory(
-                new LeaderboardHolder(lowest, selected, resolvedPage, visiblePlayerIds), 54,
-                ChatColor.DARK_GREEN + direction + " Rep: " + ChatColor.RESET + viewName
-                        + ChatColor.GRAY + " [" + (resolvedPage + 1) + "/" + (maxPage + 1) + "]");
+                new LeaderboardHolder(lowest, filter, resolvedPage, visiblePlayerIds, order), 54,
+                ChatColor.DARK_GREEN + direction + " Reputation [" + (resolvedPage + 1) + "]");
         fillBackground(inventory);
+        inventory.setItem(SORT_SLOT, button(Material.CLOCK, ChatColor.GOLD + "Sort: " + order.label(),
+                List.of(ChatColor.YELLOW + "Click: " + order.next().label(), ChatColor.GRAY + "Recent uses the latest received rep edit.")));
         inventory.setItem(POSITIVE_FILTER_SLOT, categoryMenuButton(true, selected));
-        inventory.setItem(CURRENT_VIEW_SLOT, currentViewButton(viewer, selected));
+        inventory.setItem(CURRENT_VIEW_SLOT, button(Material.NETHER_STAR, ChatColor.GOLD + viewName, List.of(ChatColor.YELLOW + "Click to view overall reputation")));
         inventory.setItem(NEGATIVE_FILTER_SLOT, categoryMenuButton(false, selected));
 
         if (entries.isEmpty()) {
@@ -82,7 +89,7 @@ public final class RepLeaderboardGui implements Listener {
         for (int index = 0; index < visiblePlayerIds.size(); index++) {
             Map.Entry<UUID, Integer> entry = entries.get(start + index);
             inventory.setItem(ENTRY_SLOTS.get(index), playerItem(entry.getKey(), entry.getValue(),
-                    start + index + 1, selected));
+                    start + index + 1, filter));
         }
         if (resolvedPage > 0) {
             inventory.setItem(PREVIOUS_SLOT, button(Material.ARROW, ChatColor.YELLOW + "Previous page", List.of()));
@@ -91,6 +98,17 @@ public final class RepLeaderboardGui implements Listener {
             inventory.setItem(NEXT_SLOT, button(Material.ARROW, ChatColor.YELLOW + "Next page", List.of()));
         }
         viewer.openInventory(inventory);
+    }
+
+    private List<Map.Entry<UUID, Integer>> orderedEntries(List<Map.Entry<UUID, Integer>> entries,
+            RepProfileFilter filter, LeaderboardOrder order) {
+        if (order == LeaderboardOrder.SCORE) return entries;
+        long since = switch (order) {
+            case DAY -> System.currentTimeMillis() - plugin.getRepConfig().getRecentWindowMillis("day");
+            case WEEK -> System.currentTimeMillis() - plugin.getRepConfig().getRecentWindowMillis("week");
+            default -> 0L;
+        };
+        return order.sort(entries, repService.recentCommendationSnapshots(Integer.MAX_VALUE), filter, since);
     }
 
     @EventHandler
@@ -108,32 +126,38 @@ public final class RepLeaderboardGui implements Listener {
             return;
         }
 
-        if (holder instanceof LeaderboardHolder leaderboard) {
-            handleLeaderboardClick(player, leaderboard, event.getRawSlot());
-        } else if (holder instanceof LeaderboardFilterHolder filter) {
-            handleFilterClick(player, filter, event.getRawSlot());
-        }
+        Inventory inventory = event.getView().getTopInventory();
+        int slot = event.getRawSlot();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline() || !inventory.equals(player.getOpenInventory().getTopInventory())) return;
+            if (holder instanceof LeaderboardHolder leaderboard) handleLeaderboardClick(player, leaderboard, slot);
+            else if (holder instanceof LeaderboardFilterHolder filter) handleFilterClick(player, filter, slot);
+        });
     }
 
     private void handleLeaderboardClick(Player player, LeaderboardHolder holder, int slot) {
+        if (slot == SORT_SLOT) {
+            openFiltered(player, holder.lowest(), holder.filter(), 0, holder.order().next());
+            return;
+        }
         if (slot == POSITIVE_FILTER_SLOT) {
-            openFilterMenu(player, holder.lowest(), true, holder.category(), holder.page());
+            openFilterMenu(player, holder.lowest(), true, holder.filter(), holder.page(), holder.order());
             return;
         }
         if (slot == NEGATIVE_FILTER_SLOT) {
-            openFilterMenu(player, holder.lowest(), false, holder.category(), holder.page());
+            openFilterMenu(player, holder.lowest(), false, holder.filter(), holder.page(), holder.order());
             return;
         }
-        if (slot == CURRENT_VIEW_SLOT && holder.category() != null) {
-            open(player, holder.lowest(), null, 0);
+        if (slot == CURRENT_VIEW_SLOT) {
+            openFiltered(player, holder.lowest(), RepProfileFilter.overall(), 0, holder.order());
             return;
         }
         if (slot == PREVIOUS_SLOT) {
-            open(player, holder.lowest(), holder.category(), holder.page() - 1);
+            openFiltered(player, holder.lowest(), holder.filter(), holder.page() - 1, holder.order());
             return;
         }
         if (slot == NEXT_SLOT) {
-            open(player, holder.lowest(), holder.category(), holder.page() + 1);
+            openFiltered(player, holder.lowest(), holder.filter(), holder.page() + 1, holder.order());
             return;
         }
         int relative = ENTRY_SLOTS.indexOf(slot);
@@ -141,38 +165,46 @@ public final class RepLeaderboardGui implements Listener {
         if (targetId == null) {
             return;
         }
-        OfflinePlayer target = Bukkit.getOfflinePlayer(targetId);
-        plugin.getRepGuiManager().openProfile(player, target, holder.category());
+        plugin.getRepGuiManager().openFromLeaderboard(player, targetId, holder.filter(),
+                () -> openFiltered(player, holder.lowest(), holder.filter(), holder.page(), holder.order()));
     }
 
     private void handleFilterClick(Player player, LeaderboardFilterHolder holder, int slot) {
         if (slot == FILTER_BACK_SLOT) {
-            open(player, holder.lowest(), holder.returnCategory(), holder.returnPage());
+            openFiltered(player, holder.lowest(), holder.returnFilter(), holder.returnPage(), holder.order());
             return;
         }
-        if (slot == CURRENT_VIEW_SLOT && holder.returnCategory() != null) {
-            open(player, holder.lowest(), null, 0);
+        if (slot == CURRENT_VIEW_SLOT) {
+            openFiltered(player, holder.lowest(), RepProfileFilter.overall(), 0, holder.order());
             return;
         }
         if (!isFilterOptionSlot(slot)) {
             return;
         }
-        open(player, holder.lowest(), filterCategoryAt(holder.positive(), slot), 0);
+        if (slot == FILTER_OPTION_SLOTS.get(0)) {
+            openFiltered(player, holder.lowest(), RepProfileFilter.polarity(holder.positive()), 0, holder.order());
+        } else {
+            RepCategory category = filterCategoryAt(holder.positive(), slot);
+            if (category != null) openFiltered(player, holder.lowest(), RepProfileFilter.category(category), 0, holder.order());
+        }
     }
 
     private void openFilterMenu(Player viewer, boolean lowest, boolean positive,
-                                RepCategory returnCategory, int returnPage) {
+                                RepProfileFilter returnFilter, int returnPage, LeaderboardOrder order) {
         Inventory inventory = Bukkit.createInventory(
-                new LeaderboardFilterHolder(lowest, positive, canonicalCategory(returnCategory), returnPage), 27,
+                new LeaderboardFilterHolder(lowest, positive, returnFilter, returnPage, order), 27,
                 positive ? ChatColor.GREEN + "Positive Rep Filters" : ChatColor.RED + "Negative Rep Filters");
         fillBackground(inventory);
-        inventory.setItem(CURRENT_VIEW_SLOT, currentViewButton(viewer, returnCategory));
+        inventory.setItem(CURRENT_VIEW_SLOT, button(Material.NETHER_STAR, ChatColor.GOLD + returnFilter.displayName(),
+                List.of(ChatColor.YELLOW + "Click to view overall reputation.")));
 
-        inventory.setItem(FILTER_OPTION_SLOTS.get(0), filterChoiceButton(viewer, null, returnCategory));
+        inventory.setItem(FILTER_OPTION_SLOTS.get(0), button(positive ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
+                (positive ? ChatColor.GREEN : ChatColor.RED) + (positive ? "All Positive Reputation" : "All Negative Reputation"),
+                List.of(ChatColor.GRAY + "Rank by this side across all categories.")));
         List<RepCategory> options = categories(positive);
         for (int index = 0; index < options.size(); index++) {
             inventory.setItem(FILTER_OPTION_SLOTS.get(index + 1),
-                    filterChoiceButton(viewer, options.get(index), returnCategory));
+                    filterChoiceButton(viewer, options.get(index), returnFilter.category()));
         }
         inventory.setItem(FILTER_BACK_SLOT, button(Material.ARROW, ChatColor.YELLOW + "Back to leaderboard",
                 List.of(ChatColor.GRAY + "Return without changing the filter.")));
@@ -187,38 +219,19 @@ public final class RepLeaderboardGui implements Listener {
         }
     }
 
-    private ItemStack playerItem(UUID playerId, int value, int rank, RepCategory category) {
-        ItemStack item = HeadUtil.createPlayerHead(plugin, playerId, ChatColor.GOLD + repService.nameOf(playerId));
+    private ItemStack playerItem(UUID playerId, int value, int rank, RepProfileFilter filter) {
+        ItemStack item = HeadUtil.createPlayerHead(plugin, playerId, repService.colorCodeForPlayer(playerId) + repService.nameOf(playerId));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             List<String> lore = new ArrayList<>();
             lore.add(ChatColor.GRAY + "Rank: " + ChatColor.YELLOW + "#" + rank);
-            lore.add(ChatColor.GRAY + RepCategoryGuiSupport.displayName(category) + ": "
+            lore.add(ChatColor.GRAY + filter.displayName() + ": "
                     + RepCategoryGuiSupport.coloredValue(value));
             lore.add(ChatColor.YELLOW + "Click to open profile");
-            meta.setLore(lore);
+            meta.setLore(GuiText.lore(lore));
             item.setItemMeta(meta);
         }
         return item;
-    }
-
-    private ItemStack currentViewButton(Player viewer, RepCategory category) {
-        RepCategory selected = canonicalCategory(category);
-        List<String> lore = new ArrayList<>();
-        if (selected == null) {
-            lore.add(ChatColor.GRAY + "All positive and negative reputation combined.");
-        } else {
-            lore.add(ChatColor.GRAY + selected.description());
-        }
-        lore.add(ChatColor.GRAY + "Your score: " + RepCategoryGuiSupport.coloredValue(
-                RepCategoryGuiSupport.total(repService, viewer.getUniqueId(), selected)));
-        if (selected == null) {
-            lore.add(ChatColor.GREEN + "Currently viewing the overall leaderboard.");
-        } else {
-            lore.add(ChatColor.YELLOW + "Click to return to overall reputation.");
-        }
-        return button(selected == null ? Material.NETHER_STAR : selected.icon(),
-                ChatColor.GOLD + "Viewing: " + RepCategoryGuiSupport.displayName(selected), lore);
     }
 
     private ItemStack categoryMenuButton(boolean positive, RepCategory selected) {
@@ -244,7 +257,7 @@ public final class RepLeaderboardGui implements Listener {
         if (category == null) {
             lore.add(ChatColor.GRAY + "All positive and negative reputation combined.");
         } else {
-            lore.add(ChatColor.GRAY + category.description());
+            lore.add(ChatColor.GRAY + plugin.getRepConfig().getCategoryDescription(category));
         }
         lore.add(ChatColor.GRAY + "Your score: " + RepCategoryGuiSupport.coloredValue(
                 RepCategoryGuiSupport.total(repService, viewer.getUniqueId(), category)));
@@ -296,26 +309,24 @@ public final class RepLeaderboardGui implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(name);
-            meta.setLore(lore);
+            meta.setLore(GuiText.lore(lore));
             item.setItemMeta(meta);
         }
         return item;
     }
 
-    private record LeaderboardHolder(boolean lowest, RepCategory category, int page,
-                                     List<UUID> visiblePlayerIds) implements InventoryHolder {
+    private record LeaderboardHolder(boolean lowest, RepProfileFilter filter, int page,
+                                     List<UUID> visiblePlayerIds, LeaderboardOrder order) implements InventoryHolder {
         private LeaderboardHolder {
-            category = canonicalCategory(category);
             visiblePlayerIds = visiblePlayerIds == null ? List.of() : List.copyOf(visiblePlayerIds);
         }
 
         @Override public Inventory getInventory() { return null; }
     }
 
-    private record LeaderboardFilterHolder(boolean lowest, boolean positive, RepCategory returnCategory,
-                                           int returnPage) implements InventoryHolder {
+    private record LeaderboardFilterHolder(boolean lowest, boolean positive, RepProfileFilter returnFilter,
+                                           int returnPage, LeaderboardOrder order) implements InventoryHolder {
         private LeaderboardFilterHolder {
-            returnCategory = canonicalCategory(returnCategory);
             returnPage = Math.max(0, returnPage);
         }
 

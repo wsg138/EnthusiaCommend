@@ -46,6 +46,7 @@ public final class RepService {
     private volatile org.enthusia.rep.config.RepConfig repConfig;
     private volatile Predicate<UUID> grantPolicy = ignored -> true;
 
+    private final Map<UUID, RepIdentityState> identities = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> scoreByPlayer = new ConcurrentHashMap<>();
     private final Map<UUID, String> knownNames = new ConcurrentHashMap<>();
     private final Map<UUID, List<Commendation>> commendationsByTarget = new ConcurrentHashMap<>();
@@ -98,6 +99,12 @@ public final class RepService {
     }
 
     private void loadSnapshot(PluginDataSnapshot snapshot) {
+        identities.putAll(snapshot.identities());
+        snapshot.commendations().forEach(this::rememberHistoricalVote);
+        snapshot.removedEntries().forEach(entry -> rememberHistoricalVote(entry.commendation()));
+        identities.replaceAll((id, state) -> state.migrateSources(snapshot.commendations().stream()
+                .filter(entry -> entry.getTarget().equals(id)).toList()));
+        if (!identities.equals(snapshot.identities())) dirtyMarker.run();
         scoreByPlayer.clear();
         scoreByPlayer.putAll(snapshot.scores());
 
@@ -117,7 +124,7 @@ public final class RepService {
         }
         removalCooldowns.clear();
         long now = System.currentTimeMillis();
-        long cooldownMillis = repConfig.getEditCooldownMillis();
+        long cooldownMillis = repConfig.getRemovalCooldownMillis();
         for (PluginDataSnapshot.RemovalCooldownEntry entry : snapshot.removalCooldowns()) {
             if (RepRules.isCooldownActive(entry.removedAt(), now, cooldownMillis)) {
                 removalCooldowns.put(new RepPair(entry.giverId(), entry.targetId()), entry.removedAt());
@@ -167,7 +174,7 @@ public final class RepService {
             cases = suspiciousCases.stream().map(SuspiciousRepCase::copy).toList();
         }
         long now = System.currentTimeMillis();
-        long cooldownMillis = repConfig.getEditCooldownMillis();
+        long cooldownMillis = repConfig.getRemovalCooldownMillis();
         List<PluginDataSnapshot.RemovalCooldownEntry> cooldowns = removalCooldowns.entrySet().stream()
                 .filter(entry -> RepRules.isCooldownActive(entry.getValue(), now, cooldownMillis))
                 .map(entry -> new PluginDataSnapshot.RemovalCooldownEntry(
@@ -181,8 +188,68 @@ public final class RepService {
                 base.reputationChanges(),
                 cases,
                 cooldowns,
-                alertPreferences.snapshot()
+                alertPreferences.snapshot(),
+                Map.copyOf(identities)
         );
+    }
+
+    public org.enthusia.rep.effects.RepAppliedEffects getEffects(UUID playerId) {
+        return repConfig.resolveEffects(getScore(playerId), getCategoryScores(playerId));
+    }
+
+    public void rememberAddress(Player player) {
+        if (player.getAddress() != null && player.getAddress().getAddress() != null) {
+            rememberIp(player.getUniqueId(), hashIp(player.getAddress().getAddress().getHostAddress()));
+        }
+    }
+
+    private void rememberIp(UUID player, String hash) {
+        RepIdentityState before = identities.getOrDefault(player, RepIdentityState.EMPTY);
+        RepIdentityState after = before.rememberIp(hash);
+        if (!before.equals(after)) {
+            identities.put(player, after);
+            dirtyMarker.run();
+        }
+    }
+
+    private void rememberHistoricalVote(Commendation entry) {
+        identities.compute(entry.getGiver(), (id, state) -> (state == null ? RepIdentityState.EMPTY : state)
+                .rememberIp(entry.getIpHash()).rememberVote(entry.getTarget()));
+    }
+
+    public boolean isIpRestricted(UUID giver, UUID target) {
+        if (giver.equals(target)) return true;
+        if (!repConfig.isIpProtectionEnabled()) return false;
+        Set<String> hashes = identities.getOrDefault(giver, RepIdentityState.EMPTY).ipHashes();
+        if (sharesAddress(hashes, identities.getOrDefault(target, RepIdentityState.EMPTY))) return true;
+        return identities.entrySet().stream().anyMatch(entry -> !entry.getKey().equals(giver)
+                && entry.getValue().givenTargets().contains(target) && sharesAddress(hashes, entry.getValue()));
+    }
+
+    private static boolean sharesAddress(Set<String> hashes, RepIdentityState other) {
+        return other.ipHashes().stream().anyMatch(hashes::contains);
+    }
+
+    private void markNegativeReceived(UUID giver, UUID target, long now) {
+        identities.compute(target, (id, state) ->
+                (state == null ? RepIdentityState.EMPTY : state).tarnish(giver, now));
+    }
+
+    public boolean isTarnished(UUID player) {
+        long at = identities.getOrDefault(player, RepIdentityState.EMPTY).tarnishedAt();
+        return getScore(player) > 0 && at > 0 && System.currentTimeMillis() - at < repConfig.getTarnishedMillis();
+    }
+
+    public org.bukkit.ChatColor colorForPlayer(UUID player) {
+        return isTarnished(player) ? repConfig.getTarnishedColor() : repConfig.colorForScore(getScore(player));
+    }
+
+    public String colorCodeForPlayer(UUID player) {
+        return isTarnished(player) ? repConfig.getTarnishedColorCode() : repConfig.colorCodeForScore(getScore(player));
+    }
+
+    public String formatColoredScore(UUID player) {
+        return colorCodeForPlayer(player) + getScore(player);
     }
 
     public int getScore(UUID playerId) {
@@ -331,6 +398,16 @@ public final class RepService {
         return leaderboard(null, lowest).stream().limit(Math.max(1, limit)).toList();
     }
 
+    public List<Map.Entry<UUID, Integer>> leaderboardPolarity(boolean positive, boolean lowest) {
+        Map<UUID, Integer> totals = new ConcurrentHashMap<>();
+        for (UUID target : commendationsByTarget.keySet()) {
+            List<Commendation> entries = getCommendationsAbout(target).stream()
+                    .filter(entry -> entry.isPositive() == positive).toList();
+            if (!entries.isEmpty()) totals.put(target, entries.stream().mapToInt(Commendation::getScoreValue).sum());
+        }
+        return RepLeaderboardSorter.sort(totals, lowest);
+    }
+
     public List<Map.Entry<UUID, Integer>> leaderboard(RepCategory category, boolean lowest) {
         Map<UUID, Integer> values = new LinkedHashMap<>();
         if (category == null) {
@@ -393,6 +470,17 @@ public final class RepService {
             return CommendationResult.invalid();
         }
 
+        rememberIp(giverId, ipHash);
+        Player onlineTarget = Bukkit.getPlayer(targetId);
+        if (onlineTarget != null) rememberAddress(onlineTarget);
+        if (isIpRestricted(giverId, targetId)) {
+            return new CommendationResult(false, false, null, 0L, 0, CommendationResult.Failure.IP_RESTRICTED);
+        }
+        if (repConfig.isIpProtectionEnabled() && repConfig.requiresKnownAddresses()
+                && (identities.getOrDefault(giverId, RepIdentityState.EMPTY).ipHashes().isEmpty()
+                || identities.getOrDefault(targetId, RepIdentityState.EMPTY).ipHashes().isEmpty())) {
+            return new CommendationResult(false, false, null, 0L, 0, CommendationResult.Failure.ADDRESSES_UNKNOWN);
+        }
         long now = System.currentTimeMillis();
         Commendation existing = getCommendation(giverId, targetId);
         if (existing == null) {
@@ -405,6 +493,8 @@ public final class RepService {
             Commendation created = new Commendation(
                     giverId, targetId, positive, normalizedCategory, reasonText,
                     now, now, ipHash, value);
+            rememberHistoricalVote(created);
+            if (!positive) markNegativeReceived(giverId, targetId, now);
             cacheCommendation(created, true);
             int oldScore = getScore(targetId);
             applyScore(targetId, oldScore + value, true);
@@ -425,12 +515,16 @@ public final class RepService {
             return CommendationResult.cooldown(repConfig.getEditCooldownMillis() - sinceLastEdit);
         }
 
+        if (!positive && existing.isPositive()) markNegativeReceived(giverId, targetId, now);
         int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash);
         int oldScore = getScore(targetId);
 
         if (delta != 0) {
             applyScore(targetId, oldScore + delta, true);
+        } else {
+            scoreChangeListener.accept(targetId);
         }
+        rememberHistoricalVote(existing);
         recordPlayerChange(targetId, giverId, delta, ReputationChangeAction.UPDATE,
                 normalizedCategory, reasonText, oldScore, oldScore + delta);
         removalCooldowns.remove(key(giverId, targetId));
@@ -478,12 +572,16 @@ public final class RepService {
             return null;
         }
 
+        if (!existing.isPositive() && (request.source() == ReputationChangeSource.STAFF_GUI
+                || request.source() == ReputationChangeSource.STAFF_COMMAND)) {
+            identities.computeIfPresent(targetId, (id, state) -> state.forgive(giverId));
+        }
         long removedAt = System.currentTimeMillis();
         int oldScore = getScore(targetId);
         int delta = -existing.getScoreValue();
         int newScore = oldScore + delta;
         applyScore(targetId, newScore, true);
-        updateRemovalCooldown(giverId, targetId, removedAt, request.applyCooldown());
+        updateRemovalCooldown(giverId, targetId, removedAt);
         RemovedRep removedRep = appendRemovalLog(existing, removedAt, request);
         recordChange(targetId, request.actorId(), delta, ReputationChangeAction.REMOVE, request.source(),
                 existing.getCategory(), existing.getReasonText(), oldScore, newScore);
@@ -526,9 +624,9 @@ public final class RepService {
         return existing;
     }
 
-    private void updateRemovalCooldown(UUID giverId, UUID targetId, long removedAt, boolean applyCooldown) {
+    private void updateRemovalCooldown(UUID giverId, UUID targetId, long removedAt) {
         RepPair pair = key(giverId, targetId);
-        if (applyCooldown) {
+        if (repConfig.getRemovalCooldownMillis() > 0) {
             removalCooldowns.put(pair, removedAt);
         } else {
             removalCooldowns.remove(pair);
@@ -572,7 +670,7 @@ public final class RepService {
             return 0L;
         }
         long now = System.currentTimeMillis();
-        long cooldownMillis = repConfig.getEditCooldownMillis();
+        long cooldownMillis = repConfig.getRemovalCooldownMillis();
         if (!RepRules.isCooldownActive(removedAt, now, cooldownMillis)) {
             removalCooldowns.remove(key(giverId, targetId));
             return 0L;
@@ -1024,7 +1122,9 @@ public final class RepService {
             NONE,
             COOLDOWN,
             INVALID_CATEGORY,
-            REPUTATION_BLACKLISTED
+            REPUTATION_BLACKLISTED,
+            IP_RESTRICTED,
+            ADDRESSES_UNKNOWN
         }
 
         public static CommendationResult created(Commendation commendation) {
