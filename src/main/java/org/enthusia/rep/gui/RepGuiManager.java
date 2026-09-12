@@ -159,7 +159,7 @@ public final class RepGuiManager implements Listener {
         RepProfileFilter selected = profileSelections.getOrDefault(
                 new ProfileSelectionKey(viewer.getUniqueId(), targetId), RepProfileFilter.polarity(true));
         int overallScore = repService.getScore(targetId);
-        ChatColor scoreColor = repService.colorForPlayer(targetId);
+        String scoreColor = repService.colorCodeForPlayer(targetId);
         List<Commendation> allReviews = repService.getCommendationsAbout(targetId).stream()
                 .sorted(Comparator.comparingLong(Commendation::getLastEditedAt).reversed())
                 .toList();
@@ -195,7 +195,7 @@ public final class RepGuiManager implements Listener {
                 profileLore.add(ChatColor.GRAY + "Filtered score: " + RepCategoryGuiSupport.coloredValue(viewTotal));
                 profileLore.add(ChatColor.GRAY + "Entries shown: " + ChatColor.WHITE + reviews.size());
             }
-            if (repService.isTarnished(targetId)) profileLore.add(repService.colorForPlayer(targetId) + plugin.getRepConfig().getTarnishedLabel());
+            if (repService.isTarnished(targetId)) profileLore.add(repService.colorCodeForPlayer(targetId) + plugin.getRepConfig().getTarnishedLabel());
             headMeta.setLore(GuiText.lore(profileLore));
             head.setItemMeta(headMeta);
         }
@@ -804,7 +804,7 @@ public final class RepGuiManager implements Listener {
         fillBackground(inventory, viewer);
 
         ItemStack head = HeadUtil.createPlayerHead(plugin, targetId,
-                repService.colorForPlayer(targetId) + safeName(target));
+                repService.colorCodeForPlayer(targetId) + safeName(target));
         ItemMeta headMeta = head.getItemMeta();
         if (headMeta != null) {
             long positiveCount = allReviews.stream().filter(Commendation::isPositive).count();
@@ -827,7 +827,7 @@ public final class RepGuiManager implements Listener {
             RepCategory category = categories.get(index);
             RepProfileFilter option = RepProfileFilter.category(category);
             inventory.setItem(FILTER_OPTION_SLOTS[index + 1], profileFilterChoice(
-                    category.icon(), option, returnFilter, allReviews, category.description()));
+                    category.icon(), option, returnFilter, allReviews, plugin.getRepConfig().getCategoryDescription(category)));
         }
         inventory.setItem(FILTER_BACK_SLOT, simpleButton(Material.ARROW, ChatColor.YELLOW + "Back to Profile",
                 List.of(ChatColor.GRAY + "Return without changing the filter.")));

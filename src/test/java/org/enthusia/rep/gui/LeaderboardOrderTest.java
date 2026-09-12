@@ -25,7 +25,7 @@ class LeaderboardOrderTest {
     @Test
     void windowBoundaryAndCategoryFilterExcludeUnrelatedActivity() {
         var reviews = List.of(entry(FIRST, RepCategory.WAS_KIND, 19), entry(SECOND, RepCategory.WAS_KIND, 20),
-                entry(FIRST, RepCategory.HELPED_ME, 30));
+                entry(FIRST, RepCategory.GAVE_ITEMS, 30));
         assertEquals(List.of(SCORES.get(1)), LeaderboardOrder.DAY.sort(SCORES, reviews, RepProfileFilter.category(RepCategory.WAS_KIND), 20));
         assertEquals(List.of(), LeaderboardOrder.WEEK.sort(SCORES, reviews, RepProfileFilter.polarity(false), 0));
     }

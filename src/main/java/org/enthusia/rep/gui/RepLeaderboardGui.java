@@ -220,7 +220,7 @@ public final class RepLeaderboardGui implements Listener {
     }
 
     private ItemStack playerItem(UUID playerId, int value, int rank, RepProfileFilter filter) {
-        ItemStack item = HeadUtil.createPlayerHead(plugin, playerId, repService.colorForPlayer(playerId) + repService.nameOf(playerId));
+        ItemStack item = HeadUtil.createPlayerHead(plugin, playerId, repService.colorCodeForPlayer(playerId) + repService.nameOf(playerId));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             List<String> lore = new ArrayList<>();
@@ -257,7 +257,7 @@ public final class RepLeaderboardGui implements Listener {
         if (category == null) {
             lore.add(ChatColor.GRAY + "All positive and negative reputation combined.");
         } else {
-            lore.add(ChatColor.GRAY + category.description());
+            lore.add(ChatColor.GRAY + plugin.getRepConfig().getCategoryDescription(category));
         }
         lore.add(ChatColor.GRAY + "Your score: " + RepCategoryGuiSupport.coloredValue(
                 RepCategoryGuiSupport.total(repService, viewer.getUniqueId(), category)));

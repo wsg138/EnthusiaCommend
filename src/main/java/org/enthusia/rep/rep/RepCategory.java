@@ -11,8 +11,8 @@ import java.util.List;
  * readable for data migration but are never presented as selectable views.
  */
 public enum RepCategory {
-    WAS_KIND(true, true, "Was Kind", "Friendly or considerate behavior.", Material.PINK_TULIP),
-    HELPED_ME(true, true, "Helped Me", "Provided useful help or support.", Material.GOLDEN_CARROT),
+    WAS_KIND(true, true, "Was Kind", "Friendly behavior, useful help, or support.", Material.PINK_TULIP),
+    HELPED_ME(true, false, "Helped Me", "Provided useful help or support.", Material.GOLDEN_CARROT),
     GAVE_ITEMS(true, true, "Gave Items/Money", "Gave items or money fairly.", Material.EMERALD),
     TRUSTWORTHY(true, true, "Trustworthy", "Kept promises and acted reliably.", Material.SHIELD),
     GOOD_STALL(true, true, "Good Stall", "Ran a fair and reliable market stall.", Material.CHEST),
@@ -52,7 +52,7 @@ public enum RepCategory {
 
     public RepCategory migratedCategory() {
         return switch (this) {
-            case OTHER_POSITIVE -> WAS_KIND;
+            case OTHER_POSITIVE, HELPED_ME -> WAS_KIND;
             case OTHER_NEGATIVE, SCAM_STALL -> SCAMMED;
             default -> this;
         };

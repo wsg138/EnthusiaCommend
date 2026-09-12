@@ -24,7 +24,7 @@ class RepLeaderboardGuiTest {
         List<RepCategory> positive = RepLeaderboardGui.categories(true);
         List<RepCategory> negative = RepLeaderboardGui.categories(false);
 
-        assertEquals(5, positive.size());
+        assertEquals(4, positive.size());
         assertEquals(4, negative.size());
         assertTrue(positive.stream().allMatch(RepCategory::isPositive));
         assertTrue(negative.stream().noneMatch(RepCategory::isPositive));
@@ -39,7 +39,7 @@ class RepLeaderboardGuiTest {
         assertFalse(RepLeaderboardGui.isFilterOptionSlot(13));
         assertNull(RepLeaderboardGui.filterCategoryAt(true, 10));
         assertEquals(RepCategory.WAS_KIND, RepLeaderboardGui.filterCategoryAt(true, 11));
-        assertEquals(RepCategory.GOOD_STALL, RepLeaderboardGui.filterCategoryAt(true, 16));
+        assertEquals(RepCategory.GOOD_STALL, RepLeaderboardGui.filterCategoryAt(true, 15));
         assertEquals(RepCategory.SCAMMED, RepLeaderboardGui.filterCategoryAt(false, 11));
         assertNull(RepLeaderboardGui.filterCategoryAt(false, 16));
         assertNull(RepLeaderboardGui.filterCategoryAt(false, 13));

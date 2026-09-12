@@ -15,6 +15,29 @@ rep:
     hours: 24
     color: GOLD
     label: Tarnished
+  # Named colors, &a codes, or quoted hex colors such as '#FF4A00'.
+  colors:
+    positive: GREEN
+    negative: RED
+    neutral: YELLOW
+  # Reload with /rep admin reload after editing descriptions or colors.
+  categories:
+    WAS_KIND:
+      description: "Friendly behavior, useful help, or support."
+    GAVE_ITEMS:
+      description: "Gave items or money fairly."
+    TRUSTWORTHY:
+      description: "Kept promises and acted reliably."
+    GOOD_STALL:
+      description: "Ran a fair and reliable market stall."
+    SCAMMED:
+      description: "Scammed or deliberately misled another player."
+    SPAWN_KILLED:
+      description: "Killed players unfairly around spawn."
+    GRIEFED:
+      description: "Damaged or destroyed another player's build."
+    TRAPPED:
+      description: "Used a trap unfairly against another player."
   recent:
     dayHours: 24
     weekHours: 168

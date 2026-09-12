@@ -21,8 +21,7 @@ Every reputation entry has a category and an optional written reason.
 
 | Category | Intended use |
 | --- | --- |
-| **Was Kind** | Friendly or considerate behavior |
-| **Helped Me** | Useful help or support |
+| **Was Kind** | Friendly behavior, useful help, or support |
 | **Gave Items/Money** | Fairly gave items or money |
 | **Trustworthy** | Kept promises and acted reliably |
 | **Good Stall** | Ran a fair/reliable market stall |

@@ -22,6 +22,15 @@ public final class MiniMessageColorTags {
         return '<' + name + '>' + escapeText(text) + "</" + name + '>';
     }
 
+    public static String opening(String code) {
+        return '<' + org.enthusia.rep.config.RepColor.miniMessageTag(code) + '>';
+    }
+
+    public static String apply(String code, String text) {
+        String tag = org.enthusia.rep.config.RepColor.miniMessageTag(code);
+        return '<' + tag + '>' + escapeText(text) + "</" + tag + '>';
+    }
+
     private static String canonicalName(ChatColor color) {
         return color.name().toLowerCase(Locale.ROOT);
     }

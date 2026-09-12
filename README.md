@@ -110,8 +110,16 @@ The defaults merger adds missing new settings without replacing explicit lists. 
 
 `rep.ipProtection.enabled` defaults to true. Login captures hashed addresses, and vote history is retained after removal. Shared historical addresses block giver-to-target reputation and repeated target voting by other accounts. `requireKnownAddresses: true` rejects votes until both accounts have been observed; existing giver address hashes are migrated. This also affects families/shared networks. Proxy installations must forward the real client address correctly. Disabling protection does not permit self-reputation. No raw IP addresses are stored or displayed.
 
-`rep.tarnished.hours`, `.color` (Bukkit color name, default GOLD), and `.label` configure the temporary status; zero hours disables it. `%enthusiarep_status%` returns the label when active, `%enthusiarep_tarnished%` returns true/false, and the existing color/colored-score placeholders reflect it. Glow placeholders now include category effects. Score colors are evaluated when requested, so expiry does not require a new vote.
+`rep.tarnished.hours`, `.color` (named, legacy, or hex color, default GOLD), and `.label` configure the temporary status; zero hours disables it. `%enthusiarep_status%` returns the label when active, `%enthusiarep_tarnished%` returns true/false, and the existing color/colored-score placeholders reflect it. Glow placeholders now include category effects. Score colors are evaluated when requested, so expiry does not require a new vote.
 
 Use the clock in `/rep top` or `/rep bottom` to cycle Score, Most recent, Recent: day, and Recent: week. Recent ordering uses the latest created or edited matching entry per player. Positive, negative, and individual category filters remain available. Configure `rep.recent.dayHours` and `.weekHours` (24/168 by default). Profiles opened from a leaderboard have a Back button that restores its filter, sort, and page. Deleted entries stay in staff removal/history views.
 
 Review reasons appear in the review item tooltip; clicking no longer opens a book or creates a lectern. Command suggestions omit display-name tooltips. This build targets Paper 1.21.11 APIs. See [REPUTATION_UPDATE_TESTING.md](REPUTATION_UPDATE_TESTING.md) for server acceptance checks.
+
+### Category and color customization
+
+Helped Me is merged into Was Kind. Existing votes retain their values, reasons, giver/target identities, and timestamps. Custom HELPED_ME effect rules are moved into WAS_KIND and combined with existing rules once.
+
+Edit `rep.categories.SPAWN_KILLED.description` (or another category key) in `config.yml`. Set `rep.tarnished.color` to `'#FF4A00'` for orange. `rep.colors.positive`, `.negative`, and `.neutral` also accept named colors, legacy ampersand codes, or quoted hex. Run `/rep admin reload` after editing. Legacy and MiniMessage reputation placeholders both preserve hex colors; glow team colors remain limited to Minecraft's named colors.
+
+Server suggestion tooltips are stripped. As a fallback for clients that derive tooltips from tab-list names, literal MiniMessage formatting in player-list names is translated once per second. Existing formatted names and non-formatting tags are preserved. This also corrects raw markup in the tab list itself.

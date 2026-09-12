@@ -12,6 +12,10 @@ The automated suite covers default/custom/category effects, removal and identity
 
 ## Reputation and effects
 
+1. Upgrade data with both Helped Me and Was Kind entries. Confirm only Was Kind appears in menus, their scores combine, and every reason, timestamp, and giver remains intact. Check custom rules from both old categories are retained under WAS_KIND after reload and restart.
+2. Edit `rep.categories.SPAWN_KILLED.description`, reload, and inspect both profile and leaderboard category filters. Set `rep.tarnished.color: '#FF4A00'` and check profile names and both legacy/MiniMessage placeholders while Tarnished. Try a custom `rep.colors.positive` too.
+3. With the server's rank/tab plugin active, type `/rep Player`. Check that any remaining rank tooltip renders formatting instead of literal MiniMessage tags. Check tab-list names immediately after login and after a rank update. Existing formatted names must retain their styling.
+
 1. Give a player +30 overall score and -10 in Spawn Killed through actual entries. Confirm warzone glow and a 140% EnthusiaTeleport cooldown despite positive overall score. Spawn and duels must not glow. At -12 category score, stalking should be available.
 2. Confirm positive teleport tiers at +5/+10/+15/+20, and negative tiers at -10/-15/-25. Check that warmup is unchanged. With default rules, potion duration, pearl/wind cooldowns, firework duration, and movement must be unchanged, and no cashback is displayed or paid.
 3. Change a category rule, add an optional effect, disable a rule, then put an effect in `disabledEffects` and reload. Confirm disabled effects clear, including existing teleport modifiers and glow. A same-value category edit must refresh effects.

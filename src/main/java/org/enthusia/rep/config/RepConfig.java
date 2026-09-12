@@ -73,6 +73,20 @@ public final class RepConfig {
         try { return ChatColor.valueOf(settings.getString("rep.tarnished.color", "GOLD").toUpperCase(Locale.ROOT)); }
         catch (IllegalArgumentException ex) { return ChatColor.GOLD; }
     }
+    public String getCategoryDescription(org.enthusia.rep.rep.RepCategory category) {
+        var canonical = category.migratedCategory();
+        return settings.getString("rep.categories." + canonical.name() + ".description", canonical.description());
+    }
+
+    public String getTarnishedColorCode() {
+        return RepColor.code(settings.getString("rep.tarnished.color", "GOLD"), "GOLD");
+    }
+
+    public String colorCodeForScore(int score) {
+        String side = score > 0 ? "positive" : score < 0 ? "negative" : "neutral";
+        return RepColor.code(settings.getString("rep.colors." + side), colorForScore(score).name());
+    }
+
     public long getRecentWindowMillis(String window) {
         return Math.max(1L, settings.getLong("rep.recent." + window + "Hours", window.equals("week") ? 168 : 24)) * 3_600_000L;
     }
@@ -84,7 +98,7 @@ public final class RepConfig {
     }
 
     public String formatColoredScore(int score) {
-        return colorForScore(score).toString() + score;
+        return colorCodeForScore(score) + score;
     }
 
     public RepAppliedEffects resolveEffects(int score) {

@@ -241,8 +241,12 @@ public final class RepService {
         return isTarnished(player) ? repConfig.getTarnishedColor() : repConfig.colorForScore(getScore(player));
     }
 
+    public String colorCodeForPlayer(UUID player) {
+        return isTarnished(player) ? repConfig.getTarnishedColorCode() : repConfig.colorCodeForScore(getScore(player));
+    }
+
     public String formatColoredScore(UUID player) {
-        return colorForPlayer(player).toString() + getScore(player);
+        return colorCodeForPlayer(player) + getScore(player);
     }
 
     public int getScore(UUID playerId) {

@@ -50,9 +50,9 @@ class RepProfileFilterTest {
         assertFalse(filter.isOverall());
         assertFalse(filter.isPolarity());
         assertTrue(filter.positive());
-        assertEquals(1, filter.count(entries));
-        assertEquals(1, filter.score(entries));
-        assertEquals("Helped Me", filter.displayName());
+        assertEquals(2, filter.count(entries));
+        assertEquals(2, filter.score(entries));
+        assertEquals("Was Kind", filter.displayName());
     }
 
     private List<Commendation> sampleEntries() {

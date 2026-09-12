@@ -201,6 +201,7 @@ public final class CommendPlugin extends JavaPlugin {
         repCommand.setExecutor(commendCommand);
         repCommand.setTabCompleter(commendCommand);
         getServer().getPluginManager().registerEvents(new org.enthusia.rep.command.RepSuggestionListener(), this);
+        getServer().getScheduler().runTaskTimer(this, new org.enthusia.rep.command.PlayerListNameFormatter(), 1L, 20L);
     }
 
     private void registerPlaceholderExpansion() {
@@ -397,7 +398,8 @@ public final class CommendPlugin extends JavaPlugin {
             }
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
                     new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-            if (mergeMissingSections(config, defaults)) {
+            boolean migrated = org.enthusia.rep.config.KindCategoryMigration.migrate(config);
+            if (mergeMissingSections(config, defaults) || migrated) {
                 saveConfig();
             }
         } catch (Exception exception) {
