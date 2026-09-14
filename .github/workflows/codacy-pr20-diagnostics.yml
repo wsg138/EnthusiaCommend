@@ -1,17 +1,45 @@
-name: Codacy PR20 diagnostics
+name: Apply PR20 RepService quality patch
 on:
   push:
     branches: [diag/pr20-codacy]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  issues:
+  patch:
     runs-on: ubuntu-latest
     steps:
-      - name: Print added Codacy issues
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch exact PR20 head
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -H 'Accept: application/json' \
-            'https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaCommend/pull-requests/20/issues?limit=100' \
-          | jq -r '.data[] | select(.deltaType == "Added") | [(.commitIssue.filePath // ""), ((.commitIssue.lineNumber // 0)|tostring), (.commitIssue.patternInfo.id // ""), (.commitIssue.patternInfo.level // ""), (.commitIssue.category // ""), (.commitIssue.message // ""), (.commitIssue.lineText // "")] | @tsv'
+          EXPECTED=63b389ec31b0f2c5346001d2f5ac3b821b506f03
+          git fetch origin fix/pr19-review-findings
+          ACTUAL=$(git rev-parse origin/fix/pr19-review-findings)
+          test "$ACTUAL" = "$EXPECTED"
+          git checkout -B fix/pr19-review-findings origin/fix/pr19-review-findings
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/main/java/org/enthusia/rep/rep/RepService.java')
+          s = p.read_text()
+          old = '''        Map<UUID, List<Commendation>> activeByTarget = new LinkedHashMap<>();
+        for (Commendation commendation : snapshot.commendations()) {
+            activeByTarget.computeIfAbsent(commendation.getTarget(), ignored -> new ArrayList<>()).add(commendation);
+        }
+'''
+          new = '''        java.util.concurrent.ConcurrentMap<UUID, List<Commendation>> activeByTarget =
+                snapshot.commendations().stream()
+                        .collect(java.util.stream.Collectors.groupingByConcurrent(Commendation::getTarget));
+'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exact startup snippet once, found {s.count(old)}')
+          p.write_text(s.replace(old, new))
+          PY
+          git diff --check
+          git config user.name 'wsg138'
+          git config user.email '208424056+wsg138@users.noreply.github.com'
+          git add src/main/java/org/enthusia/rep/rep/RepService.java
+          git commit -m 'Resolve Tarnished startup static analysis findings'
+          git push origin HEAD:fix/pr19-review-findings
