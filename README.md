@@ -4,7 +4,7 @@
 
 Reputation and commendation plugin for Enthusia SMP, targeting Java 21 and Paper-compatible 1.21.x servers.
 
-For the current **player-facing SMP behavior**—categories, scoring, commands, exact live benefit/penalty thresholds, region scoping, and stalking—see **[`PLAYER_GUIDE.md`](PLAYER_GUIDE.md)**. This README remains the technical/admin reference.
+For the current **player-facing shipped defaults and supported behavior**—categories, scoring, commands, benefit/penalty thresholds, region scoping, and stalking—see **[`PLAYER_GUIDE.md`](PLAYER_GUIDE.md)**. Actual live values may be administrator-configured; this README remains the technical/admin reference.
 
 ## Features
 
@@ -104,11 +104,11 @@ rep:
       GOOD_STALL: []
 ```
 
-The defaults merger adds missing new settings without replacing explicit lists. Old potion/pearl/wind/firework/movement/cashback threshold keys are no longer used; opt into those supported effects through rules if desired. On first upgrade, legacy glow/red-glow/stalking thresholds are preserved in the new overall rule list when no explicit overall list already exists, and they remain fallback values for absent category rules. Scam Stall data migrates to Scammed, preserving totals, timestamps, and reasons. Data version 8 adds identity state and per-vote Tarnished contributors to the existing atomic YAML save.
+The defaults merger adds missing new settings without replacing explicit lists. Old potion/pearl/wind/firework/movement/cashback threshold keys are no longer used; opt into those supported effects through rules if desired. On first upgrade, legacy glow/red-glow/stalking thresholds are preserved in the new overall rule list when no explicit overall list already exists, and they remain fallback values for absent category rules. Scam Stall data migrates to Scammed, preserving totals, timestamps, and reasons. Data version 8 added identity state and per-vote Tarnished contributors to the existing atomic YAML save. Data version 9 replaces persisted unsalted address digests with protected identifiers: legacy address identifiers are removed during migration because they cannot be securely converted without the original address, while non-address reputation and vote-target history are preserved.
 
 `rep.removalCooldownHours` defaults to 24 and applies to player, staff, API, and reset removals. Set it to zero to disable; it is independent of `rep.editCooldownHours`. Administrative restoration restores the original entry and clears its removal cooldown.
 
-`rep.ipProtection.enabled` defaults to true. Login captures hashed addresses, and vote history is retained after removal. Shared historical addresses block giver-to-target reputation and repeated target voting by other accounts. `requireKnownAddresses: true` rejects votes until both accounts have been observed; existing giver address hashes are migrated. This also affects families/shared networks. Proxy installations must forward the real client address correctly. Disabling protection does not permit self-reputation. No raw IP addresses are stored or displayed.
+`rep.ipProtection.enabled` defaults to true. Login captures server-keyed HMAC address identifiers, and vote-target history is retained after removal. Shared observed addresses block giver-to-target reputation and repeated target voting by other accounts. `requireKnownAddresses: true` rejects votes until both accounts have been observed. Data version 9 removes legacy unsalted address identifiers; players are learned again as they connect. The HMAC key is stored separately in `ip-hmac.key`; protect that file and do not distribute it with `data.yml` when sharing or troubleshooting data. This also affects families/shared networks. Proxy installations must forward the real client address correctly. Disabling protection does not permit self-reputation. No raw IP addresses are stored or displayed.
 
 `rep.tarnished.hours`, `.color` (named, legacy, or hex color, default GOLD), and `.label` configure the temporary status; zero hours disables it. `%enthusiarep_status%` returns the label when active, `%enthusiarep_tarnished%` returns true/false, and the existing color/colored-score placeholders reflect it. Glow placeholders now include category effects. Score colors are evaluated when requested, so expiry does not require a new vote.
 
