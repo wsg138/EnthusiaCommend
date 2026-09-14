@@ -108,7 +108,8 @@ public final class RepLeaderboardGui implements Listener {
             case WEEK -> System.currentTimeMillis() - plugin.getRepConfig().getRecentWindowMillis("week");
             default -> 0L;
         };
-        return order.sort(entries, repService.recentCommendationSnapshots(Integer.MAX_VALUE), filter, since);
+        Map<UUID, Long> latest = repService.latestCommendationTimestamps(filter::matches, since);
+        return order.sort(entries, latest);
     }
 
     @EventHandler
