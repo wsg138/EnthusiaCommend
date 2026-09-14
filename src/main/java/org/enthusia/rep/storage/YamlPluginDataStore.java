@@ -5,6 +5,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.CommendPlugin;
 import org.enthusia.rep.analytics.ReputationChangeRecord;
 import org.enthusia.rep.rep.Commendation;
+import org.enthusia.rep.rep.IpAddressHasher;
+import org.enthusia.rep.rep.RepIdentityState;
 import org.enthusia.rep.rep.RepService;
 
 import java.io.File;
@@ -19,13 +21,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public final class YamlPluginDataStore implements PluginDataStore {
-    private static final int DATA_VERSION = 8;
+    private static final int DATA_VERSION = 9;
+    private static final String ALT_IP_CASE = "ALT_IP";
 
     private final File file;
     private final Logger logger;
@@ -46,34 +50,51 @@ public final class YamlPluginDataStore implements PluginDataStore {
         }
 
         YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
-        return new PluginDataSnapshot(
+        int sourceVersion = config.getInt("dataVersion", 0);
+        PluginDataSnapshot snapshot = new PluginDataSnapshot(
                 loadScores(config),
                 loadCommendations(config),
-                loadMappedEntries(config, "removed", RepService.RemovedRep::fromMap),
+                loadRemovedEntries(config),
                 loadStalkEntries(config),
                 loadMappedEntries(config, "reputationChanges", ReputationChangeRecord::fromMap),
-                loadMappedEntries(config, "suspiciousCases", RepService.SuspiciousRepCase::fromMap),
+                loadSuspiciousCases(config),
                 loadRemovalCooldowns(config),
                 loadAlertPreferences(config),
                 loadIdentities(config)
         );
+        if (sourceVersion < DATA_VERSION && !save(snapshot)) {
+            logger.warning("Loaded legacy reputation data but could not persist the data-version migration.");
+        }
+        return snapshot;
     }
 
-    private Map<UUID, org.enthusia.rep.rep.RepIdentityState> loadIdentities(YamlConfiguration config) {
+    private Map<UUID, RepIdentityState> loadIdentities(YamlConfiguration config) {
         ConfigurationSection section = config.getConfigurationSection("identities");
         if (section == null) return Map.of();
-        return section.getKeys(false).stream().map(id -> loadIdentity(section, id))
-                .flatMap(Optional::stream)
-                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+        Map<UUID, RepIdentityState> identities = new ConcurrentHashMap<>();
+        for (String id : section.getKeys(false)) {
+            Optional<Map.Entry<UUID, RepIdentityState>> loaded = loadIdentity(section, id);
+            if (loaded.isEmpty()) {
+                continue;
+            }
+            Map.Entry<UUID, RepIdentityState> entry = loaded.get();
+            if (identities.putIfAbsent(entry.getKey(), entry.getValue()) != null && logger.isLoggable(Level.WARNING)) {
+                logger.warning("Skipping duplicate canonical reputation identity: " + id);
+            }
+        }
+        return Map.copyOf(identities);
     }
 
-    private Optional<Map.Entry<UUID, org.enthusia.rep.rep.RepIdentityState>> loadIdentity(ConfigurationSection section, String id) {
+    private Optional<Map.Entry<UUID, RepIdentityState>> loadIdentity(ConfigurationSection section, String id) {
         try {
             java.util.Set<UUID> targets = section.getStringList(id + ".givenTargets").stream()
                     .map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
-            return Optional.of(Map.entry(UUID.fromString(id), new org.enthusia.rep.rep.RepIdentityState(
-                    java.util.Set.copyOf(section.getStringList(id + ".ipHashes")), targets,
-                    section.getLong(id + ".tarnishedAt", 0), loadTarnishSources(section.getConfigurationSection(id + ".tarnishSources")))));
+            java.util.Set<String> protectedHashes = section.getStringList(id + ".ipHashes").stream()
+                    .filter(IpAddressHasher::isProtectedIdentifier)
+                    .collect(Collectors.toUnmodifiableSet());
+            return Optional.of(Map.entry(UUID.fromString(id), new RepIdentityState(
+                    protectedHashes, targets, section.getLong(id + ".tarnishedAt", 0),
+                    loadTarnishSources(section.getConfigurationSection(id + ".tarnishSources")))));
         } catch (IllegalArgumentException ex) {
             if (logger.isLoggable(Level.WARNING)) logger.warning("Skipping invalid reputation identity: " + id);
             return Optional.empty();
@@ -86,10 +107,11 @@ public final class YamlPluginDataStore implements PluginDataStore {
                 .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> ((Number) entry.getValue()).longValue()));
     }
 
-    private void writeIdentities(YamlConfiguration config, Map<UUID, org.enthusia.rep.rep.RepIdentityState> identities) {
+    private void writeIdentities(YamlConfiguration config, Map<UUID, RepIdentityState> identities) {
         identities.forEach((id, state) -> {
             String path = "identities." + id;
-            config.set(path + ".ipHashes", new ArrayList<>(state.ipHashes()));
+            config.set(path + ".ipHashes", state.ipHashes().stream()
+                    .filter(IpAddressHasher::isProtectedIdentifier).toList());
             config.set(path + ".givenTargets", state.givenTargets().stream().map(UUID::toString).toList());
             config.set(path + ".tarnishedAt", state.tarnishedAt());
             config.set(path + ".tarnishSources", state.tarnishSources());
@@ -120,10 +142,44 @@ public final class YamlPluginDataStore implements PluginDataStore {
         for (String key : section.getKeys(false)) {
             Commendation commendation = Commendation.fromSection(section.getConfigurationSection(key));
             if (commendation != null) {
+                sanitizeCommendationAddress(commendation);
                 commendations.add(commendation);
             }
         }
         return commendations;
+    }
+
+    private List<RepService.RemovedRep> loadRemovedEntries(YamlConfiguration config) {
+        List<RepService.RemovedRep> removed = loadMappedEntries(config, "removed", RepService.RemovedRep::fromMap);
+        removed.forEach(entry -> sanitizeCommendationAddress(entry.commendation()));
+        return removed;
+    }
+
+    private List<RepService.SuspiciousRepCase> loadSuspiciousCases(YamlConfiguration config) {
+        return loadMappedEntries(config, "suspiciousCases", RepService.SuspiciousRepCase::fromMap).stream()
+                .map(this::sanitizeSuspiciousCase)
+                .toList();
+    }
+
+    private RepService.SuspiciousRepCase sanitizeSuspiciousCase(RepService.SuspiciousRepCase entry) {
+        if (!ALT_IP_CASE.equals(entry.type()) || IpAddressHasher.isProtectedIdentifier(entry.key())) {
+            return entry;
+        }
+        return new RepService.SuspiciousRepCase(
+                entry.getTarget(),
+                entry.type(),
+                "legacy-alt-" + entry.getCreatedAt(),
+                entry.givers(),
+                entry.getCreatedAt(),
+                entry.isResolved(),
+                "Legacy shared-address alert (address identifier removed during secure migration)."
+        );
+    }
+
+    private void sanitizeCommendationAddress(Commendation commendation) {
+        if (!IpAddressHasher.isProtectedIdentifier(commendation.getIpHash())) {
+            commendation.setIpHash(null);
+        }
     }
 
     private <T> List<T> loadMappedEntries(YamlConfiguration config, String path,
@@ -224,11 +280,11 @@ public final class YamlPluginDataStore implements PluginDataStore {
         writeIdentities(config, snapshot.identities());
         writeScores(config, snapshot.scores());
         writeCommendations(config, snapshot.commendations());
-        config.set("removed", serialize(snapshot.removedEntries(), RepService.RemovedRep::serialize));
+        config.set("removed", serialize(snapshot.removedEntries(), entry -> sanitizeSerializedAddress(entry.serialize())));
         config.set("reputationChanges", serialize(
                 snapshot.reputationChanges(), ReputationChangeRecord::serialize));
         config.set("suspiciousCases", serialize(
-                snapshot.suspiciousCases(), RepService.SuspiciousRepCase::serialize));
+                snapshot.suspiciousCases(), this::serializeSuspiciousCase));
         config.set("removalCooldowns", serializeRemovalCooldowns(snapshot.removalCooldowns()));
         writeAlertPreferences(config, snapshot.repTradingAlertPreferences());
         writeStalkEntries(config, snapshot.stalkEntries());
@@ -243,8 +299,26 @@ public final class YamlPluginDataStore implements PluginDataStore {
 
     private void writeCommendations(YamlConfiguration config, List<Commendation> commendations) {
         for (int index = 0; index < commendations.size(); index++) {
-            config.createSection("commendations." + index, commendations.get(index).serialize());
+            config.createSection("commendations." + index,
+                    sanitizeSerializedAddress(commendations.get(index).serialize()));
         }
+    }
+
+    private Map<String, Object> sanitizeSerializedAddress(Map<String, Object> serialized) {
+        Object value = serialized.get("ipHash");
+        if (value == null || !IpAddressHasher.isProtectedIdentifier(value.toString())) {
+            serialized.remove("ipHash");
+        }
+        return serialized;
+    }
+
+    private Map<String, Object> serializeSuspiciousCase(RepService.SuspiciousRepCase entry) {
+        Map<String, Object> serialized = entry.serialize();
+        if (ALT_IP_CASE.equals(entry.type()) && !IpAddressHasher.isProtectedIdentifier(entry.key())) {
+            serialized.put("key", "legacy-alt-" + entry.getCreatedAt());
+            serialized.put("detail", "Legacy shared-address alert (address identifier removed during secure migration).");
+        }
+        return serialized;
     }
 
     private <T> List<Map<String, Object>> serialize(List<T> entries,
