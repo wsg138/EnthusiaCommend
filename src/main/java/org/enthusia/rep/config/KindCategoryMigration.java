@@ -3,13 +3,14 @@ package org.enthusia.rep.config;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Preserve custom reputation rules while upgrading older configurations. */
 public final class KindCategoryMigration {
     private static final String OVERALL_RULES = "rep.effectRules.overall";
+    private static final String TELEPORT = "teleport";
 
     private KindCategoryMigration() { }
 
@@ -38,16 +39,16 @@ public final class KindCategoryMigration {
         }
 
         List<Map<String, Object>> rules = new ArrayList<>();
-        addRule(rules, "teleport", -10, 1.4D);
-        addRule(rules, "teleport", -15, 1.6D);
-        addRule(rules, "teleport", -25, 2.0D);
+        addRule(rules, TELEPORT, -10, 1.4D);
+        addRule(rules, TELEPORT, -15, 1.6D);
+        addRule(rules, TELEPORT, -25, 2.0D);
         addRule(rules, "glow", config.getInt("rep.effects.penalties.glowAt", -10), 1.0D);
         addRule(rules, "redGlow", config.getInt("rep.effects.penalties.redGlowAt", -20), 1.0D);
         addRule(rules, "stalk", config.getInt("rep.effects.penalties.stalkableAt", -12), 1.0D);
-        addRule(rules, "teleport", 5, 50.0D / 60.0D);
-        addRule(rules, "teleport", 10, 0.75D);
-        addRule(rules, "teleport", 15, 40.0D / 60.0D);
-        addRule(rules, "teleport", 20, 0.5D);
+        addRule(rules, TELEPORT, 5, 50.0D / 60.0D);
+        addRule(rules, TELEPORT, 10, 0.75D);
+        addRule(rules, TELEPORT, 15, 40.0D / 60.0D);
+        addRule(rules, TELEPORT, 20, 0.5D);
         config.set(OVERALL_RULES, rules);
         return true;
     }
@@ -59,7 +60,7 @@ public final class KindCategoryMigration {
     }
 
     private static void addRule(List<Map<String, Object>> rules, String effect, int threshold, double value) {
-        Map<String, Object> rule = new LinkedHashMap<>();
+        Map<String, Object> rule = new ConcurrentHashMap<>();
         rule.put("effect", effect);
         rule.put("threshold", threshold);
         rule.put("value", value);
