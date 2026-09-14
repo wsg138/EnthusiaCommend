@@ -26,6 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class YamlPluginDataStoreTest {
     private static final String INVALID_VALUE = "invalid";
     private static final String PROTECTED_HASH = "h1:00112233445566778899aabbccddeeff";
+    private static final String DATA_FILE_NAME = "data.yml";
+    private static final String IP_HASHES_SUFFIX = ".ipHashes";
 
     @TempDir
     Path temporaryDirectory;
@@ -84,7 +86,7 @@ class YamlPluginDataStoreTest {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", 8);
         config.set("players." + targetId + ".score", 1);
-        config.set("identities." + giverId + ".ipHashes", List.of("legacy-unsalted-hash"));
+        config.set("identities." + giverId + IP_HASHES_SUFFIX, List.of("legacy-unsalted-hash"));
         config.set("identities." + giverId + ".givenTargets", List.of(targetId.toString()));
         config.set("commendations.0.giver", giverId.toString());
         config.set("commendations.0.target", targetId.toString());
@@ -95,7 +97,7 @@ class YamlPluginDataStoreTest {
         config.set("commendations.0.lastEditedAt", 20L);
         config.set("commendations.0.scoreValue", 1);
         config.set("commendations.0.ipHash", "legacy-unsalted-hash");
-        config.save(temporaryDirectory.resolve("data.yml").toFile());
+        config.save(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
 
         YamlPluginDataStore store = new YamlPluginDataStore(temporaryDirectory.toFile(), testLogger());
         PluginDataSnapshot loaded = store.load();
@@ -103,9 +105,9 @@ class YamlPluginDataStoreTest {
         assertTrue(loaded.identities().get(giverId).ipHashes().isEmpty());
         assertNull(loaded.commendations().getFirst().getIpHash());
 
-        YamlConfiguration migrated = YamlConfiguration.loadConfiguration(temporaryDirectory.resolve("data.yml").toFile());
+        YamlConfiguration migrated = YamlConfiguration.loadConfiguration(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
         assertEquals(9, migrated.getInt("dataVersion"));
-        assertTrue(migrated.getStringList("identities." + giverId + ".ipHashes").isEmpty());
+        assertTrue(migrated.getStringList("identities." + giverId + IP_HASHES_SUFFIX).isEmpty());
         assertFalse(migrated.isSet("commendations.0.ipHash"));
     }
 
@@ -116,11 +118,11 @@ class YamlPluginDataStoreTest {
         String upper = lower.toUpperCase(java.util.Locale.ROOT);
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", 9);
-        config.set("identities." + lower + ".ipHashes", List.of(PROTECTED_HASH));
+        config.set("identities." + lower + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
         config.set("identities." + lower + ".givenTargets", List.of());
-        config.set("identities." + upper + ".ipHashes", List.of(PROTECTED_HASH));
+        config.set("identities." + upper + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
         config.set("identities." + upper + ".givenTargets", List.of());
-        config.save(temporaryDirectory.resolve("data.yml").toFile());
+        config.save(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
 
         YamlPluginDataStore store = new YamlPluginDataStore(temporaryDirectory.toFile(), testLogger());
         PluginDataSnapshot loaded = store.load();
@@ -148,7 +150,7 @@ class YamlPluginDataStoreTest {
         config.set("removalCooldowns", List.of(Map.of("giver", INVALID_VALUE)));
         config.set("playerSettings.not-a-uuid.repTradingAlertsEnabled", true);
         config.set("stalks.0.stalker", "not-a-uuid");
-        config.save(temporaryDirectory.resolve("data.yml").toFile());
+        config.save(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
         YamlPluginDataStore store = new YamlPluginDataStore(
                 temporaryDirectory.toFile(), testLogger());
 
