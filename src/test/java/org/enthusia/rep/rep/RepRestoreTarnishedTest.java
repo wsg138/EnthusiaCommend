@@ -66,6 +66,20 @@ class RepRestoreTarnishedTest {
                 .identities().get(target).tarnishedAt());
     }
 
+    @Test
+    void restoringOlderContributorDoesNotReplaceNewerTarnishTimestamp() {
+        UUID newerGiver = UUID.randomUUID();
+        long older = System.currentTimeMillis() - 60_000L;
+        long newer = System.currentTimeMillis();
+        RepIdentityState state = RepIdentityState.EMPTY.tarnish(giver, older).tarnish(newerGiver, newer);
+
+        RepIdentityState restoredOlder = state.tarnish(giver, older);
+
+        assertEquals(newer, restoredOlder.tarnishedAt());
+        assertEquals(older, restoredOlder.tarnishSources().get(giver.toString()));
+        assertEquals(newer, restoredOlder.tarnishSources().get(newerGiver.toString()));
+    }
+
     private RepService service(PluginDataSnapshot snapshot) {
         return new RepService(
                 mock(CommendPlugin.class),
