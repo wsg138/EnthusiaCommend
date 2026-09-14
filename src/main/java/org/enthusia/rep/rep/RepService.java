@@ -16,13 +16,10 @@ import org.enthusia.rep.events.RepMilestoneReachedEvent;
 import org.enthusia.rep.events.RepScoreChangedEvent;
 import org.enthusia.rep.storage.PluginDataSnapshot;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -42,6 +39,7 @@ public final class RepService {
     private final ReputationAnalyticsService analyticsService;
     private final Consumer<AuditRecord> auditConsumer;
     private final RepAlertPreferences alertPreferences;
+    private final IpAddressHasher ipAddressHasher;
 
     private volatile org.enthusia.rep.config.RepConfig repConfig;
     private volatile Predicate<UUID> grantPolicy = ignored -> true;
@@ -77,6 +75,7 @@ public final class RepService {
             Consumer<AuditRecord> auditConsumer
     ) {
         Objects.requireNonNull(plugin, "plugin");
+        this.ipAddressHasher = IpAddressHasher.forPlugin(plugin);
         this.repConfig = repConfig;
         this.dirtyMarker = dirtyMarker;
         this.scoreChangeListener = scoreChangeListener;
@@ -396,6 +395,27 @@ public final class RepService {
                 .toList();
     }
 
+    /** Returns the latest matching edit per target without cloning or sorting the full history. */
+    public Map<UUID, Long> latestCommendationTimestamps(Predicate<Commendation> filter, long since) {
+        Objects.requireNonNull(filter, "filter");
+        Map<UUID, Long> latest = new ConcurrentHashMap<>();
+        for (Map.Entry<UUID, List<Commendation>> targetEntry : commendationsByTarget.entrySet()) {
+            long latestTimestamp = Long.MIN_VALUE;
+            List<Commendation> entries = targetEntry.getValue();
+            synchronized (entries) {
+                for (Commendation commendation : entries) {
+                    if (commendation.getLastEditedAt() >= since && filter.test(commendation)) {
+                        latestTimestamp = Math.max(latestTimestamp, commendation.getLastEditedAt());
+                    }
+                }
+            }
+            if (latestTimestamp != Long.MIN_VALUE) {
+                latest.put(targetEntry.getKey(), latestTimestamp);
+            }
+        }
+        return Map.copyOf(latest);
+    }
+
     public List<Map.Entry<UUID, Integer>> top(int limit, boolean lowest) {
         return leaderboard(null, lowest).stream().limit(Math.max(1, limit)).toList();
     }
@@ -706,20 +726,11 @@ public final class RepService {
     }
 
     public String hashIp(String ipAddress) {
-        return hashIpValue(ipAddress);
+        return ipAddressHasher.hash(ipAddress);
     }
 
     static String hashIpValue(String ipAddress) {
-        if (ipAddress == null || ipAddress.isBlank()) {
-            return null;
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(ipAddress.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(bytes, 0, 8);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("Required SHA-256 digest is unavailable.", exception);
-        }
+        return IpAddressHasher.testHasher().hash(ipAddress);
     }
 
     public List<SuspiciousRepCase> getSuspiciousCases() {
