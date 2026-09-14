@@ -110,6 +110,26 @@ class YamlPluginDataStoreTest {
     }
 
     @Test
+    void duplicateCanonicalIdentityKeysDoNotAbortLoad() throws Exception {
+        UUID playerId = UUID.fromString("abcdefab-cdef-abcd-efab-cdefabcdefab");
+        String lower = playerId.toString();
+        String upper = lower.toUpperCase(java.util.Locale.ROOT);
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("dataVersion", 9);
+        config.set("identities." + lower + ".ipHashes", List.of(PROTECTED_HASH));
+        config.set("identities." + lower + ".givenTargets", List.of());
+        config.set("identities." + upper + ".ipHashes", List.of(PROTECTED_HASH));
+        config.set("identities." + upper + ".givenTargets", List.of());
+        config.save(temporaryDirectory.resolve("data.yml").toFile());
+
+        YamlPluginDataStore store = new YamlPluginDataStore(temporaryDirectory.toFile(), testLogger());
+        PluginDataSnapshot loaded = store.load();
+
+        assertEquals(1, loaded.identities().size());
+        assertTrue(loaded.identities().containsKey(playerId));
+    }
+
+    @Test
     void missingDataFileLoadsAnEmptySnapshot() {
         YamlPluginDataStore store = new YamlPluginDataStore(
                 temporaryDirectory.toFile(), testLogger());
