@@ -1,11 +1,11 @@
 package org.enthusia.rep.gui;
 
-import org.enthusia.rep.rep.Commendation;
-import org.enthusia.rep.rep.RepCategory;
 import org.junit.jupiter.api.Test;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -16,26 +16,18 @@ class LeaderboardOrderTest {
 
     @Test
     void recentUsesLatestMatchingEditInsteadOfScore() {
-        var reviews = List.of(entry(FIRST, RepCategory.WAS_KIND, 10), entry(SECOND, RepCategory.WAS_KIND, 20),
-                entry(FIRST, RepCategory.SCAMMED, 30));
-        assertEquals(List.of(SCORES.get(1), SCORES.get(0)), LeaderboardOrder.RECENT.sort(SCORES, reviews, RepProfileFilter.polarity(true), 0));
-        assertEquals(SCORES, LeaderboardOrder.RECENT.sort(SCORES, reviews, RepProfileFilter.overall(), 0));
+        Map<UUID, Long> latest = Map.of(FIRST, 10L, SECOND, 20L);
+        assertEquals(List.of(SCORES.get(1), SCORES.get(0)), LeaderboardOrder.RECENT.sort(SCORES, latest));
     }
 
     @Test
-    void windowBoundaryAndCategoryFilterExcludeUnrelatedActivity() {
-        var reviews = List.of(entry(FIRST, RepCategory.WAS_KIND, 19), entry(SECOND, RepCategory.WAS_KIND, 20),
-                entry(FIRST, RepCategory.GAVE_ITEMS, 30));
-        assertEquals(List.of(SCORES.get(1)), LeaderboardOrder.DAY.sort(SCORES, reviews, RepProfileFilter.category(RepCategory.WAS_KIND), 20));
-        assertEquals(List.of(), LeaderboardOrder.WEEK.sort(SCORES, reviews, RepProfileFilter.polarity(false), 0));
+    void recentExcludesPlayersWithoutMatchingWindowEntries() {
+        assertEquals(List.of(SCORES.get(1)), LeaderboardOrder.DAY.sort(SCORES, Map.of(SECOND, 20L)));
+        assertEquals(List.of(), LeaderboardOrder.WEEK.sort(SCORES, Map.of()));
     }
 
     @Test
     void scoreOrderRetainsPlayersWithoutRecentEntries() {
-        assertSame(SCORES, LeaderboardOrder.SCORE.sort(SCORES, List.of(), RepProfileFilter.overall(), 100));
-    }
-
-    private Commendation entry(UUID target, RepCategory category, long edited) {
-        return new Commendation(UUID.randomUUID(), target, category.isPositive(), category, "reason", 1L, edited, null, 1);
+        assertSame(SCORES, LeaderboardOrder.SCORE.sort(SCORES, Map.of()));
     }
 }
