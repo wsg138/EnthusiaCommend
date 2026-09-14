@@ -102,10 +102,9 @@ public final class RepService {
         identities.putAll(snapshot.identities());
         snapshot.commendations().forEach(this::rememberHistoricalVote);
         snapshot.removedEntries().forEach(entry -> rememberHistoricalVote(entry.commendation()));
-        Map<UUID, List<Commendation>> activeByTarget = new LinkedHashMap<>();
-        for (Commendation commendation : snapshot.commendations()) {
-            activeByTarget.computeIfAbsent(commendation.getTarget(), ignored -> new ArrayList<>()).add(commendation);
-        }
+        java.util.concurrent.ConcurrentMap<UUID, List<Commendation>> activeByTarget =
+                snapshot.commendations().stream()
+                        .collect(java.util.stream.Collectors.groupingByConcurrent(Commendation::getTarget));
         identities.replaceAll((id, state) -> state.migrateSources(activeByTarget.getOrDefault(id, List.of())));
         if (!identities.equals(snapshot.identities())) dirtyMarker.run();
         scoreByPlayer.clear();
