@@ -104,7 +104,7 @@ rep:
       GOOD_STALL: []
 ```
 
-The defaults merger adds missing new settings without replacing explicit lists. Old potion/pearl/wind/firework/movement/cashback threshold keys are no longer used; opt into those supported effects through rules if desired. Legacy glow/stalking keys are fallback values for absent category rules. Scam Stall data migrates to Scammed, preserving totals, timestamps, and reasons. Data version 7 adds immutable identity snapshots to the existing atomic YAML save.
+The defaults merger adds missing new settings without replacing explicit lists. Old potion/pearl/wind/firework/movement/cashback threshold keys are no longer used; opt into those supported effects through rules if desired. On first upgrade, legacy glow/red-glow/stalking thresholds are preserved in the new overall rule list when no explicit overall list already exists, and they remain fallback values for absent category rules. Scam Stall data migrates to Scammed, preserving totals, timestamps, and reasons. Data version 8 adds identity state and per-vote Tarnished contributors to the existing atomic YAML save.
 
 `rep.removalCooldownHours` defaults to 24 and applies to player, staff, API, and reset removals. Set it to zero to disable; it is independent of `rep.editCooldownHours`. Administrative restoration restores the original entry and clears its removal cooldown.
 
