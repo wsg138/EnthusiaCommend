@@ -36,9 +36,13 @@ public final class IpAddressHasher {
     static IpAddressHasher forPlugin(CommendPlugin plugin) {
         Path dataFolder = plugin.getDataFolder() == null ? null : plugin.getDataFolder().toPath();
         if (dataFolder == null) {
-            return new IpAddressHasher(TEST_KEY);
+            return testHasher();
         }
         return loadOrCreate(dataFolder, plugin.getLogger());
+    }
+
+    static IpAddressHasher testHasher() {
+        return new IpAddressHasher(TEST_KEY);
     }
 
     static IpAddressHasher loadOrCreate(Path dataFolder, Logger logger) {
