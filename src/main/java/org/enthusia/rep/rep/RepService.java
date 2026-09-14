@@ -102,8 +102,11 @@ public final class RepService {
         identities.putAll(snapshot.identities());
         snapshot.commendations().forEach(this::rememberHistoricalVote);
         snapshot.removedEntries().forEach(entry -> rememberHistoricalVote(entry.commendation()));
-        identities.replaceAll((id, state) -> state.migrateSources(snapshot.commendations().stream()
-                .filter(entry -> entry.getTarget().equals(id)).toList()));
+        Map<UUID, List<Commendation>> activeByTarget = new LinkedHashMap<>();
+        for (Commendation commendation : snapshot.commendations()) {
+            activeByTarget.computeIfAbsent(commendation.getTarget(), ignored -> new ArrayList<>()).add(commendation);
+        }
+        identities.replaceAll((id, state) -> state.migrateSources(activeByTarget.getOrDefault(id, List.of())));
         if (!identities.equals(snapshot.identities())) dirtyMarker.run();
         scoreByPlayer.clear();
         scoreByPlayer.putAll(snapshot.scores());
@@ -784,6 +787,9 @@ public final class RepService {
 
         Commendation restored = cloneCommendation(commendation);
         cacheCommendation(restored, true);
+        if (!restored.isPositive()) {
+            markNegativeReceived(restored.getGiver(), restored.getTarget(), restored.getLastEditedAt());
+        }
         int oldScore = getScore(restored.getTarget());
         int delta = restored.getScoreValue();
         applyScore(restored.getTarget(), oldScore + delta, true);
