@@ -4,12 +4,18 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RepServiceHashTest {
     @Test
-    void createsStableFixedWidthIpHash() {
-        assertEquals("17af1cf3d1b5332c", RepService.hashIpValue("203.0.113.42"));
-        assertEquals("001a300482762fdd", RepService.hashIpValue("10.0.0.110"));
+    void createsStableProtectedIpIdentifier() {
+        String first = RepService.hashIpValue("203.0.113.42");
+        String second = RepService.hashIpValue("10.0.0.110");
+
+        assertEquals("h1:d1c934c619b3764c369349b858122f80", first);
+        assertEquals("h1:8a5c21595b8d0410385fc1a3c1cc0c67", second);
+        assertTrue(IpAddressHasher.isProtectedIdentifier(first));
+        assertTrue(IpAddressHasher.isProtectedIdentifier(second));
     }
 
     @Test
