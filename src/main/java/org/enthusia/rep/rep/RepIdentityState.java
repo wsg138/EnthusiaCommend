@@ -39,7 +39,8 @@ public record RepIdentityState(Set<String> ipHashes, Set<UUID> givenTargets, lon
     public RepIdentityState tarnish(UUID giver, long now) {
         var updated = new java.util.concurrent.ConcurrentHashMap<>(tarnishSources);
         updated.put(giver.toString(), now);
-        return new RepIdentityState(ipHashes, givenTargets, now, updated);
+        long latest = updated.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+        return new RepIdentityState(ipHashes, givenTargets, latest, updated);
     }
 
     public RepIdentityState forgive(UUID giver) {
