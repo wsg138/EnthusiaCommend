@@ -27,6 +27,7 @@ class YamlPluginDataStoreTest {
     private static final String INVALID_VALUE = "invalid";
     private static final String PROTECTED_HASH = "h1:00112233445566778899aabbccddeeff";
     private static final String DATA_FILE_NAME = "data.yml";
+    private static final String IDENTITIES_PREFIX = "identities.";
     private static final String IP_HASHES_SUFFIX = ".ipHashes";
 
     @TempDir
@@ -86,8 +87,8 @@ class YamlPluginDataStoreTest {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", 8);
         config.set("players." + targetId + ".score", 1);
-        config.set("identities." + giverId + IP_HASHES_SUFFIX, List.of("legacy-unsalted-hash"));
-        config.set("identities." + giverId + ".givenTargets", List.of(targetId.toString()));
+        config.set(IDENTITIES_PREFIX + giverId + IP_HASHES_SUFFIX, List.of("legacy-unsalted-hash"));
+        config.set(IDENTITIES_PREFIX + giverId + ".givenTargets", List.of(targetId.toString()));
         config.set("commendations.0.giver", giverId.toString());
         config.set("commendations.0.target", targetId.toString());
         config.set("commendations.0.positive", true);
@@ -107,7 +108,7 @@ class YamlPluginDataStoreTest {
 
         YamlConfiguration migrated = YamlConfiguration.loadConfiguration(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
         assertEquals(9, migrated.getInt("dataVersion"));
-        assertTrue(migrated.getStringList("identities." + giverId + IP_HASHES_SUFFIX).isEmpty());
+        assertTrue(migrated.getStringList(IDENTITIES_PREFIX + giverId + IP_HASHES_SUFFIX).isEmpty());
         assertFalse(migrated.isSet("commendations.0.ipHash"));
     }
 
@@ -118,10 +119,10 @@ class YamlPluginDataStoreTest {
         String upper = lower.toUpperCase(java.util.Locale.ROOT);
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", 9);
-        config.set("identities." + lower + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
-        config.set("identities." + lower + ".givenTargets", List.of());
-        config.set("identities." + upper + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
-        config.set("identities." + upper + ".givenTargets", List.of());
+        config.set(IDENTITIES_PREFIX + lower + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
+        config.set(IDENTITIES_PREFIX + lower + ".givenTargets", List.of());
+        config.set(IDENTITIES_PREFIX + upper + IP_HASHES_SUFFIX, List.of(PROTECTED_HASH));
+        config.set(IDENTITIES_PREFIX + upper + ".givenTargets", List.of());
         config.save(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
 
         YamlPluginDataStore store = new YamlPluginDataStore(temporaryDirectory.toFile(), testLogger());
