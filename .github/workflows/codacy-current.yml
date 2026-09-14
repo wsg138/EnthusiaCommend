@@ -1,0 +1,17 @@
+name: Codacy current PR20 issues
+on:
+  push:
+    branches: [diag/pr20-codacy]
+permissions:
+  contents: read
+jobs:
+  issues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print added Codacy issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H 'Accept: application/json' \
+            'https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaCommend/pull-requests/20/issues?limit=100' \
+          | jq -r '.data[] | select(.deltaType == "Added") | [(.commitIssue.filePath // ""), ((.commitIssue.lineNumber // 0)|tostring), (.commitIssue.patternInfo.id // ""), (.commitIssue.patternInfo.level // ""), (.commitIssue.message // ""), (.commitIssue.lineText // "")] | @tsv'
