@@ -1336,9 +1336,9 @@ public final class RepGuiManager implements Listener {
         if (effects.stalkable()) {
             lore.add(ChatColor.WHITE + "Stalkable in warzone");
         }
-        if (effects.teleportCooldownMultiplier() != RepAppliedEffects.NONE.teleportCooldownMultiplier()) {
-            lore.add(ChatColor.WHITE + "Teleport cooldown: " + ChatColor.YELLOW
-                    + Math.round(effects.teleportCooldownMultiplier() * 100) + "%");
+        if (effects.teleportWarmupMultiplier() != RepAppliedEffects.NONE.teleportWarmupMultiplier()) {
+            lore.add(ChatColor.WHITE + "Teleport warmup: " + ChatColor.YELLOW
+                    + Math.round(effects.teleportWarmupMultiplier() * 100) + "%");
         }
     }
 

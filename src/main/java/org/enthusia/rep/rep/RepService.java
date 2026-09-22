@@ -511,7 +511,7 @@ public final class RepService {
                 return CommendationResult.cooldown(remainingCooldown);
             }
 
-            int value = normalizedCategory.defaultScoreValue();
+            int value = repConfig.getVoteWeight(positive);
             Commendation created = new Commendation(
                     giverId, targetId, positive, normalizedCategory, reasonText,
                     now, now, ipHash, value);
@@ -538,7 +538,7 @@ public final class RepService {
         }
 
         if (!positive && existing.isPositive()) markNegativeReceived(giverId, targetId, now);
-        int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash);
+        int delta = existing.applyUpdate(positive, normalizedCategory, reasonText, now, ipHash, repConfig.getVoteWeight(positive));
         int oldScore = getScore(targetId);
 
         if (delta != 0) {

@@ -1,4 +1,10 @@
 rep:
+  # New votes and polarity changes only; existing votes retain their saved weight.
+  # Use a positive integer for positive and a negative integer for negative.
+  # Invalid values fall back to 1 / -2. Apply changes with /rep admin reload.
+  weights:
+    positive: 1
+    negative: -2
   minActivePlaytimeHours: 12
   editCooldownHours: 24
   input:

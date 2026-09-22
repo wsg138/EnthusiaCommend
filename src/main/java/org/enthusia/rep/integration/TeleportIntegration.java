@@ -44,8 +44,8 @@ public final class TeleportIntegration implements Listener {
         if (!ensureHooked()) {
             return;
         }
-        invoke(setWarmupModifierMethod, playerId, 1.0D);
-        invoke(setCooldownModifierMethod, playerId, repService.getEffects(playerId).teleportCooldownMultiplier());
+        invoke(setWarmupModifierMethod, playerId, repService.getEffects(playerId).teleportWarmupMultiplier());
+        invoke(setCooldownModifierMethod, playerId, 1.0D);
     }
 
     public void clearPlayer(UUID playerId) {

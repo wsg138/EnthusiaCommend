@@ -48,6 +48,17 @@ public final class RepConfig {
     }
 
     public int getMinActivePlaytimeHours() { return minActivePlaytimeHours; }
+    public int getVoteWeight(boolean positive) {
+        int fallback = positive ? 1 : -2;
+        String path = positive ? "rep.weights.positive" : "rep.weights.negative";
+        try {
+            int value = Integer.parseInt(settings.getString(path, Integer.toString(fallback)));
+            if (value == Integer.MIN_VALUE) return fallback;
+            return (positive ? value > 0 : value < 0) ? value : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
     public long getEditCooldownMillis() { return editCooldownMillis; }
     public InputMode getDefaultInputMode() { return defaultInputMode; }
     public int getMaxReasonLength() { return maxReasonLength; }

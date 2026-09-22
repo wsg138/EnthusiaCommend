@@ -14,9 +14,15 @@ public record RepAppliedEffects(
         boolean glow,
         ChatColor glowColor,
         boolean stalkable,
-        double teleportCooldownMultiplier
+        double teleportWarmupMultiplier
 ) {
     public static final RepAppliedEffects NONE = new RepAppliedEffects(0, 0, 0, 0, 0, false, null, false, 1);
+
+    /** Compatibility accessor; the teleport rule now controls warmup. */
+    @Deprecated
+    public double teleportCooldownMultiplier() {
+        return teleportWarmupMultiplier;
+    }
 
     public String describe() {
         List<String> descriptions = new ArrayList<>(8);
@@ -27,7 +33,7 @@ public record RepAppliedEffects(
         addSecondsDescription(descriptions, "Wind charge cooldown", windCooldownSeconds);
         addDescription(descriptions, glow, "Glow: " + (glowColor != null ? glowColor.name() : "WHITE"));
         addDescription(descriptions, stalkable, "Stalkable");
-        if (teleportCooldownMultiplier != NONE.teleportCooldownMultiplier()) descriptions.add("Teleport cooldown: " + Math.round(teleportCooldownMultiplier * 100) + "%");
+        if (teleportWarmupMultiplier != NONE.teleportWarmupMultiplier()) descriptions.add("Teleport warmup: " + Math.round(teleportWarmupMultiplier * 100) + "%");
         if (descriptions.isEmpty()) {
             return "You currently have no rep-based buffs or penalties.";
         }
