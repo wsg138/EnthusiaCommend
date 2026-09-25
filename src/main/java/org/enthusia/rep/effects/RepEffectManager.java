@@ -3,6 +3,7 @@ package org.enthusia.rep.effects;
 import com.destroystokyo.paper.event.player.PlayerElytraBoostEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
@@ -91,13 +92,18 @@ public final class RepEffectManager implements Listener {
     }
 
     private void applyEffects(Player player, boolean force) {
+        applyEffects(player, force, player.getLocation());
+    }
+
+    private void applyEffects(Player player, boolean force, Location location) {
         UUID playerId = player.getUniqueId();
         RepAppliedEffects desired = repService.getEffects(playerId);
         currentEffects.put(playerId, desired);
         boolean duelExempt = warzoneDuelsHook.isDuelExempt(player);
-        boolean inEffectZone = !duelExempt && regionManager.isInSpawnOrWarzone(player.getLocation());
+        boolean inEffectZone = !duelExempt && regionManager.isInSpawnOrWarzone(location);
         applyMovement(player, inEffectZone ? desired.movementSpeedPercent() : 0, force);
-        applyGlow(player, !duelExempt && regionManager.isInWarzone(player.getLocation()) && !regionManager.isInSpawn(player.getLocation()) && desired.glow(), desired.glowColor(), force);
+        boolean inWarzone = regionManager.resolveZone(location) == RegionManager.LogicalZone.WARZONE;
+        applyGlow(player, !duelExempt && inWarzone && desired.glow(), desired.glowColor(), force);
     }
 
     private void applyMovement(Player player, int desiredPercent, boolean force) {
@@ -208,9 +214,9 @@ public final class RepEffectManager implements Listener {
                 && event.getFrom().getBlockX() == event.getTo().getBlockX()
                 && event.getFrom().getBlockY() == event.getTo().getBlockY()
                 && event.getFrom().getBlockZ() == event.getTo().getBlockZ()) return;
-        boolean wasInZone = regionManager.isInSpawnOrWarzone(event.getFrom());
-        boolean isInZone = regionManager.isInSpawnOrWarzone(event.getTo());
-        if (wasInZone != isInZone) applyEffects(event.getPlayer(), true);
+        RegionManager.LogicalZone fromZone = regionManager.resolveZone(event.getFrom());
+        RegionManager.LogicalZone toZone = regionManager.resolveZone(event.getTo());
+        if (fromZone != toZone) applyEffects(event.getPlayer(), true, event.getTo());
     }
 
     @EventHandler
