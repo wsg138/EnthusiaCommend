@@ -16,10 +16,12 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Verify retry handling
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Verify
-        run: mvn --batch-mode --no-transfer-progress clean verify
+        run: python3 .github/scripts/maven_retry.py verify
       - name: PMD
-        run: mvn --batch-mode --no-transfer-progress org.apache.maven.plugins:maven-pmd-plugin:3.26.0:pmd
+        run: python3 .github/scripts/maven_retry.py pmd
       - name: Upload plugin jar
         uses: actions/upload-artifact@v4
         with:

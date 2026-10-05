@@ -17,7 +17,9 @@ Every reputation entry has a category and an optional written reason.
 
 ## Reputation categories
 
-### Positive (+1)
+Vote weights are configurable by administrators with `rep.weights.positive` and `rep.weights.negative`. The defaults below apply to new votes; existing votes retain their saved values.
+
+### Positive (default +1)
 
 | Category | Intended use |
 | --- | --- |
@@ -26,7 +28,7 @@ Every reputation entry has a category and an optional written reason.
 | **Trustworthy** | Kept promises and acted reliably |
 | **Good Stall** | Ran a fair/reliable market stall |
 
-### Negative (-2)
+### Negative (default -2)
 
 | Category | Intended use |
 | --- | --- |
@@ -65,13 +67,13 @@ Other player commands:
 
 ## Reputation effects
 
-Only teleport cooldown changes, warzone glow, and stalking are enabled by default. Cashback has been removed. Administrators can add or remove rules for overall reputation and for each category independently.
+Only teleport warmup changes, warzone glow, and stalking are enabled by default. Cashback has been removed. Administrators can add or remove rules for overall reputation and for each category independently.
 
-### Teleport cooldown
+### Teleport warmup
 
-These multipliers require the EnthusiaTeleport integration. They change cooldown, with no default warmup change.
+These multipliers require the EnthusiaTeleport integration. They change the countdown before teleporting. Teleport cooldown remains unchanged.
 
-| Score threshold | Cooldown multiplier |
+| Score threshold | Warmup multiplier |
 | ---: | ---: |
 | +5 | 83.33% |
 | +10 | 75% |
@@ -81,7 +83,7 @@ These multipliers require the EnthusiaTeleport integration. They change cooldown
 | -15 | 160% |
 | -25 | 200% |
 
-The strongest penalty wins over a reward, and multipliers do not stack. Each category evaluates these thresholds independently using its own score. For example, an overall score of +30 with -10 Spawn Killed still causes glow and a 140% teleport cooldown.
+The strongest penalty wins over a reward, and multipliers do not stack. Each category evaluates these thresholds independently using its own score. For example, an overall score of +30 with -10 Spawn Killed still causes glow and a 140% teleport warmup.
 
 ### Glow and stalking
 

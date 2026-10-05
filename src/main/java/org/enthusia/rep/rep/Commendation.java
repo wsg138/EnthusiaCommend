@@ -74,12 +74,18 @@ public class Commendation {
 
     public synchronized int applyUpdate(boolean newPositive, RepCategory newCategory, String newReasonText,
                                         long newLastEditedAt, String newIpHash) {
+        return applyUpdate(newPositive, newCategory, newReasonText, newLastEditedAt, newIpHash,
+                newPositive ? 1 : -2);
+    }
+
+    public synchronized int applyUpdate(boolean newPositive, RepCategory newCategory, String newReasonText,
+                                        long newLastEditedAt, String newIpHash, int configuredWeight) {
         int oldValue = scoreValue;
         boolean polarityChanged = positive != newPositive;
         RepCategory normalizedCategory = newCategory == null
                 ? (newPositive ? RepCategory.WAS_KIND : RepCategory.SCAMMED)
                 : newCategory.migratedCategory();
-        int newValue = polarityChanged ? normalizedCategory.defaultScoreValue() : oldValue;
+        int newValue = polarityChanged ? configuredWeight : oldValue;
         positive = newPositive;
         category = normalizedCategory;
         reasonText = newReasonText == null ? "" : newReasonText;

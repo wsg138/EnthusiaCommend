@@ -36,7 +36,7 @@ class RepAppliedEffectsTest {
                         + "Wind charge cooldown: 5s\n"
                         + "Glow: RED\n"
                         + "Stalkable\n"
-                        + "Teleport cooldown: 140%",
+                        + "Teleport warmup: 140%",
                 effects.describe()
         );
     }

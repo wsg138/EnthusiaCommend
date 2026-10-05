@@ -144,6 +144,31 @@ class RepServicePolicyTest {
     }
 
     @Test
+    void customVoteWeightsSurviveReloadEditRemovalAndRestore() {
+        yaml.set("rep.weights.positive", 3);
+        yaml.set("rep.weights.negative", -5);
+        RepService original = service(initial(TARGET_ADDRESS));
+        assertTrue(vote(original, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).success());
+        assertEquals(3, original.getScore(target));
+        assertTrue(vote(original, giver, false, RepCategory.GRIEFED, GIVER_ADDRESS).success());
+        assertEquals(-5, original.getScore(target));
+        assertEquals(-5, original.getCategoryScore(target, RepCategory.GRIEFED));
+        yaml.set("rep.weights.negative", -1);
+        original.reload(new RepConfig(yaml));
+        assertTrue(vote(original, giver, false, RepCategory.SCAMMED, GIVER_ADDRESS).success());
+        assertEquals(-5, original.getScore(target));
+        RepService restored = service(original.snapshot(PluginDataSnapshot.EMPTY));
+        var removed = restored.removeCommendationLogged(alternate, giver, target, true);
+        assertEquals(0, restored.getScore(target));
+        assertTrue(restored.restoreRemoved(removed.id()));
+        assertEquals(-5, restored.getScore(target));
+        assertTrue(vote(restored, giver, true, RepCategory.WAS_KIND, GIVER_ADDRESS).success());
+        assertEquals(3, restored.getScore(target));
+        assertTrue(vote(restored, giver, false, RepCategory.SCAMMED, GIVER_ADDRESS).success());
+        assertEquals(-1, restored.getScore(target));
+    }
+
+    @Test
     void staffMustRemoveEveryRecentNegativeToClearTarnishedAfterRestart() {
         yaml.set("rep.ipProtection.enabled", false);
         RepService original = service(initial(TARGET_ADDRESS));

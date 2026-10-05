@@ -30,8 +30,8 @@ class RepConfigThresholdTest {
         assertTrue(config.resolveEffects(-20).glow());
         assertTrue(config.resolveEffects(-20).stalkable());
         assertEquals(0, config.resolveEffects(15).potionDurationPercent());
-        assertEquals(2.0 / 3, config.resolveEffects(15).teleportCooldownMultiplier());
-        assertEquals(1.6, config.resolveEffects(-20).teleportCooldownMultiplier());
+        assertEquals(2.0 / 3, config.resolveEffects(15).teleportWarmupMultiplier());
+        assertEquals(1.6, config.resolveEffects(-20).teleportWarmupMultiplier());
     }
 
     @Test
@@ -40,7 +40,7 @@ class RepConfigThresholdTest {
         var effects = config.resolveEffects(50, java.util.Map.of(org.enthusia.rep.rep.RepCategory.SPAWN_KILLED, -12));
         assertTrue(effects.glow());
         assertTrue(effects.stalkable());
-        assertEquals(1.4, effects.teleportCooldownMultiplier());
+        assertEquals(1.4, effects.teleportWarmupMultiplier());
     }
 
     @Test
@@ -56,7 +56,7 @@ class RepConfigThresholdTest {
                 org.enthusia.rep.rep.RepCategory.WAS_KIND, 3));
         assertFalse(effects.glow());
         assertEquals(10, effects.potionDurationPercent());
-        assertEquals(1, effects.teleportCooldownMultiplier());
+        assertEquals(1, effects.teleportWarmupMultiplier());
     }
 
     @Test
