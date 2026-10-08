@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ReputationCorrectionIntentJournalTest {
+    private static final String JOURNAL_FILE = "corrections.yml";
+    private static final String CASE_ID = "CASE-42";
     private static final UUID SUBJECT = UUID.fromString("00000000-0000-0000-0000-000000000221");
     private static final UUID REVIEWER = UUID.fromString("00000000-0000-0000-0000-000000000222");
     private static final UUID OPERATION = UUID.fromString("00000000-0000-0000-0000-000000000223");
@@ -30,10 +32,10 @@ class ReputationCorrectionIntentJournalTest {
 
     @Test
     void preparedIntentSurvivesRestartAndReplaysOriginalTimestamp() {
-        Path file = folder.resolve("corrections.yml");
+        Path file = folder.resolve(JOURNAL_FILE);
         ReputationStateSnapshot before = snapshot(9, List.of(ENTRY));
         ReputationCorrectionIntentJournal store = new ReputationCorrectionIntentJournal(file);
-        var first = store.prepare(OPERATION, REVIEWER, "CASE-42", before,
+        var first = store.prepare(OPERATION, REVIEWER, CASE_ID, before,
                 SUBJECT, before.checksum(), List.of(ENTRY), TIME);
 
         assertEquals(7, first.expectedTotalAfterRemoval());
@@ -44,7 +46,7 @@ class ReputationCorrectionIntentJournalTest {
 
         ReputationCorrectionIntentJournal rebooted = new ReputationCorrectionIntentJournal(file);
         assertEquals(first, rebooted.findOperation(OPERATION).orElseThrow());
-        assertEquals(first, rebooted.prepare(OPERATION, REVIEWER, "CASE-42", before,
+        assertEquals(first, rebooted.prepare(OPERATION, REVIEWER, CASE_ID, before,
                 SUBJECT, before.checksum(), List.of(ENTRY), TIME.plusSeconds(30)));
         assertEquals(TIME, rebooted.findOperation(OPERATION).orElseThrow().preparedAt());
         // Preparing is not a mutation: the provider's original score and entry remain untouched.
@@ -54,23 +56,23 @@ class ReputationCorrectionIntentJournalTest {
 
     @Test
     void sameOperationIdCannotBeRetargetedAcrossCasePlayerOrEntry() {
-        Path file = folder.resolve("corrections.yml");
+        Path file = folder.resolve(JOURNAL_FILE);
         var before = snapshot(9, List.of(ENTRY));
         var store = new ReputationCorrectionIntentJournal(file);
-        store.prepare(OPERATION, REVIEWER, "CASE-42", before,
+        store.prepare(OPERATION, REVIEWER, CASE_ID, before,
                 SUBJECT, before.checksum(), List.of(ENTRY), TIME);
 
         assertThrows(IllegalStateException.class, () -> store.prepare(
                 OPERATION, REVIEWER, "OTHER-CASE", before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertThrows(IllegalStateException.class, () -> store.prepare(
-                OPERATION, GIVER, "CASE-42", before, SUBJECT,
+                OPERATION, GIVER, CASE_ID, before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertThrows(IllegalStateException.class, () -> store.prepare(
-                OPERATION, REVIEWER, "CASE-42", snapshot(10, List.of(ENTRY)), SUBJECT,
+                OPERATION, REVIEWER, CASE_ID, snapshot(10, List.of(ENTRY)), SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertThrows(IllegalStateException.class, () -> store.prepare(
-                OPERATION, REVIEWER, "CASE-42", before, SUBJECT,
+                OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
                 before.checksum(), List.of(), TIME));
         assertEquals(7, new ReputationCorrectionIntentJournal(file)
                 .findOperation(OPERATION).orElseThrow().expectedTotalAfterRemoval());
@@ -78,27 +80,27 @@ class ReputationCorrectionIntentJournalTest {
 
     @Test
     void rejectsUnverifiedForeignAndStaleIntentBeforeDiskWrite() {
-        var store = new ReputationCorrectionIntentJournal(folder.resolve("corrections.yml"));
+        var store = new ReputationCorrectionIntentJournal(folder.resolve(JOURNAL_FILE));
         var before = snapshot(9, List.of(ENTRY));
         assertThrows(IllegalStateException.class, () -> store.prepare(
-                OPERATION, REVIEWER, "CASE-42", before, SUBJECT,
+                OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
                 "0".repeat(64), List.of(ENTRY), TIME));
         assertThrows(IllegalArgumentException.class, () -> store.prepare(
                 OPERATION, REVIEWER, "CASE WITH SPACE", before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertThrows(IllegalArgumentException.class, () -> store.prepare(
-                OPERATION, REVIEWER, "CASE-42", before, GIVER,
+                OPERATION, REVIEWER, CASE_ID, before, GIVER,
                 before.checksum(), List.of(ENTRY), TIME));
         assertTrue(store.findOperation(OPERATION).isEmpty());
-        assertFalse(Files.exists(folder.resolve("corrections.yml")));
+        assertFalse(Files.exists(folder.resolve(JOURNAL_FILE)));
     }
 
     @Test
     void malformedOrTamperedDurableIntentFailsClosedOnRestart() throws Exception {
-        Path file = folder.resolve("corrections.yml");
+        Path file = folder.resolve(JOURNAL_FILE);
         var before = snapshot(9, List.of(ENTRY));
         new ReputationCorrectionIntentJournal(file).prepare(
-                OPERATION, REVIEWER, "CASE-42", before, SUBJECT,
+                OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME);
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.load(file.toFile());
@@ -125,7 +127,7 @@ class ReputationCorrectionIntentJournalTest {
         var before = snapshot(9, List.of(ENTRY));
         var journal = new ReputationCorrectionIntentJournal(file);
         assertThrows(IllegalStateException.class, () -> journal.prepare(
-                OPERATION, REVIEWER, "CASE-42", before, SUBJECT,
+                OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertTrue(journal.findOperation(OPERATION).isEmpty());
     }
