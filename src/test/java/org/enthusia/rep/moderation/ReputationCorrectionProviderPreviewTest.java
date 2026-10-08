@@ -151,7 +151,7 @@ class ReputationCorrectionProviderPreviewTest {
     private static ReputationStateSnapshot expectedBefore(int score, List<Commendation> commendations) {
         List<ReputationEntrySnapshot> entries = commendations.stream()
                 .map(ReputationCorrectionProviderPreviewTest::entry)
-                .sorted(java.util.Comparator.comparing(value -> value.giverId().toString()))
+                .sorted(java.util.Comparator.comparing((ReputationEntrySnapshot value) -> value.giverId().toString()))
                 .toList();
         return new ReputationStateSnapshot(PLAYER, score, entries,
                 ReputationSnapshotFactory.checksum(PLAYER, score, entries));
