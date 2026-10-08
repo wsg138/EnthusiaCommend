@@ -105,33 +105,33 @@ public final class ReputationCorrectionPreflight {
      * weight and version timestamps needed for CAS at commit time.
      */
     public static final class Selection {
-        private final UUID subjectId;
-        private final String expectedChecksum;
-        private final List<ReputationEntrySnapshot> entries;
-        private final int expectedTotalAfterRemoval;
+        private final UUID selectedSubject;
+        private final String observedChecksum;
+        private final List<ReputationEntrySnapshot> selectedEntries;
+        private final int adjustedScore;
 
         private Selection(UUID subjectId, String expectedChecksum,
                 List<ReputationEntrySnapshot> entries, int expectedTotalAfterRemoval) {
-            this.subjectId = Objects.requireNonNull(subjectId, "subjectId");
-            this.expectedChecksum = Objects.requireNonNull(expectedChecksum, "expectedChecksum");
-            this.entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
-            this.expectedTotalAfterRemoval = expectedTotalAfterRemoval;
+            this.selectedSubject = Objects.requireNonNull(subjectId, "subjectId");
+            this.observedChecksum = Objects.requireNonNull(expectedChecksum, "expectedChecksum");
+            this.selectedEntries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+            this.adjustedScore = expectedTotalAfterRemoval;
         }
 
         public UUID subjectId() {
-            return subjectId;
+            return selectedSubject;
         }
 
         public String expectedChecksum() {
-            return expectedChecksum;
+            return observedChecksum;
         }
 
         public List<ReputationEntrySnapshot> entries() {
-            return entries;
+            return selectedEntries;
         }
 
         public int expectedTotalAfterRemoval() {
-            return expectedTotalAfterRemoval;
+            return adjustedScore;
         }
     }
 }
