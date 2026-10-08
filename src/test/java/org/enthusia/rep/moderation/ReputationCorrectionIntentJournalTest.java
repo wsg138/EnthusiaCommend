@@ -132,15 +132,9 @@ class ReputationCorrectionIntentJournalTest {
                 before.checksum(), List.of(ENTRY), TIME);
         String original = Files.readString(file);
         String root = "prepared-intents." + OPERATION;
-        for (String key : List.of("reviewer-id", "expected-total", "prepared-at")) {
-            Files.writeString(file, original);
-            YamlConfiguration yaml = new YamlConfiguration();
-            yaml.load(file.toFile());
-            yaml.set(root + "." + key, null);
-            yaml.save(file.toFile());
-            assertThrows(IllegalStateException.class, () -> new ReputationCorrectionIntentJournal(file),
-                    "Missing " + key + " must not be silently defaulted");
-        }
+        assertRejectedMissingMetadata(file, original, root, "reviewer-id");
+        assertRejectedMissingMetadata(file, original, root, "expected-total");
+        assertRejectedMissingMetadata(file, original, root, "prepared-at");
     }
 
     @Test
@@ -158,6 +152,18 @@ class ReputationCorrectionIntentJournalTest {
                 OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
                 before.checksum(), List.of(ENTRY), TIME));
         assertTrue(journal.findOperation(OPERATION).isEmpty());
+    }
+
+    private static void assertRejectedMissingMetadata(
+            Path file, String original, String root, String key
+    ) throws Exception {
+        Files.writeString(file, original);
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.load(file.toFile());
+        yaml.set(root + "." + key, null);
+        yaml.save(file.toFile());
+        assertThrows(IllegalStateException.class, () -> new ReputationCorrectionIntentJournal(file),
+                "Missing " + key + " must not be silently defaulted");
     }
 
     private static ReputationStateSnapshot snapshot(int totalScore, List<ReputationEntrySnapshot> entries) {
