@@ -67,6 +67,22 @@ class ReputationCorrectionPreflightTest {
     }
 
     @Test
+    void refusesForgedSnapshotsEvenWhenCallerEchoesTheirChecksum() {
+        ReputationStateSnapshot original = snapshot(10, List.of(GOOD));
+        ReputationStateSnapshot alteredScore = new ReputationStateSnapshot(
+                SUBJECT, 11, List.of(GOOD), original.checksum());
+        ReputationStateSnapshot alteredEntry = new ReputationStateSnapshot(
+                SUBJECT, 10, List.of(BAD), original.checksum());
+
+        assertThrows(IllegalStateException.class, () ->
+                ReputationCorrectionPreflight.select(
+                        alteredScore, SUBJECT, alteredScore.checksum(), List.of(GOOD)));
+        assertThrows(IllegalStateException.class, () ->
+                ReputationCorrectionPreflight.select(
+                        alteredEntry, SUBJECT, alteredEntry.checksum(), List.of(BAD)));
+    }
+
+    @Test
     void refusesEmptyDuplicateAndAmbiguousSelections() {
         ReputationStateSnapshot state = snapshot(10, List.of(GOOD));
         assertThrows(IllegalArgumentException.class, () ->
