@@ -115,8 +115,13 @@ class ReputationCorrectionIntentJournalTest {
 
     @Test
     void storageFailureDoesNotAdvertisePreparedIntent() {
-        Path file = folder.resolve("not-a-file");
-        assertTrue(file.toFile().mkdir());
+        Path blockedParent = folder.resolve("file-not-directory");
+        try {
+            Files.writeString(blockedParent, "cannot create a directory beneath a normal file");
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException(exception);
+        }
+        Path file = blockedParent.resolve("corrections.yml");
         var before = snapshot(9, List.of(ENTRY));
         var journal = new ReputationCorrectionIntentJournal(file);
         assertThrows(IllegalStateException.class, () -> journal.prepare(
