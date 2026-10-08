@@ -96,6 +96,14 @@ class ReputationCorrectionPreflightTest {
     }
 
     @Test
+    void acceptsInRangeFinalScoreEvenWhenSelectionOrderWouldOverflowAnInt() {
+        ReputationStateSnapshot state = snapshot(Integer.MAX_VALUE, List.of(BAD, GOOD));
+        var selection = ReputationCorrectionPreflight.select(
+                state, SUBJECT, state.checksum(), List.of(BAD, GOOD));
+        assertEquals(Integer.MAX_VALUE, selection.expectedTotalAfterRemoval());
+    }
+
+    @Test
     void rejectsScoreOverflowInsteadOfWrapping() {
         ReputationStateSnapshot state = snapshot(Integer.MIN_VALUE, List.of(GOOD));
         assertThrows(ArithmeticException.class, () ->
