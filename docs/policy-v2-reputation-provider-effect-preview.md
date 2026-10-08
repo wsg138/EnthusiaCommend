@@ -5,7 +5,7 @@ This read-only change is stacked on exact-entry preflight [#26](https://github.c
 `ReputationCorrectionProviderPreview.plan(intent, providerData)` reads the actual `PluginDataSnapshot` structure (scores, active `Commendation` values and target identity state). It reconstructs the canonical provider state, verifies the full prepared checksum and exact selected entries against current provider data, projects the post-removal score and exact survivors, and calculates the target's tarnish-source forgiveness for selected negative votes.
 
 The preview:
-- Refuses stale independent scores, edited, absent or replaced votes, wrong checksum, mismatched case-bound preparation, and already-changed provider data rather than silently planning a broad removal.
+- Refuses stale independent scores, edited, absent or replaced votes, wrong checksum, inconsistent prepared input, and already-changed provider data rather than silently planning a broad removal.
 - Preserves arbitrary unaffected entries and other-player state. The score is an independent stored value, not assumed to equal the sum of active vote weights.
 - Forgives only the explicitly selected negative givers' tarnish sources in a **projected immutable identity value**. Positive entry removal never forgives negative givers. A legacy tarnished identity with no attribution sources fails closed until the plugin's identity migration/reconciliation is performed.
 - Does **not** modify `RepService` indexes, `PluginDataSnapshot`, `data.yml`, removal history, cooldowns, audit history, effects, permissions, Staff cases or the durable operation journal. It does not prepare a fully persistable after-data file or issue a commit receipt.
