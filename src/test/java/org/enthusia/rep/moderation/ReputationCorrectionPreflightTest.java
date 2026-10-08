@@ -11,13 +11,14 @@ import org.enthusia.rep.api.ReputationStateSnapshot;
 import org.junit.jupiter.api.Test;
 
 class ReputationCorrectionPreflightTest {
+    private static final String HELPFUL_CATEGORY = "HELPFUL";
     private static final UUID SUBJECT = UUID.fromString("00000000-0000-0000-0000-000000000021");
     private static final UUID OTHER = UUID.fromString("00000000-0000-0000-0000-000000000022");
     private static final UUID GIVER_A = UUID.fromString("00000000-0000-0000-0000-000000000031");
     private static final UUID GIVER_B = UUID.fromString("00000000-0000-0000-0000-000000000032");
 
     private static final ReputationEntrySnapshot GOOD = new ReputationEntrySnapshot(
-            GIVER_A, SUBJECT, true, "HELPFUL", 2, 100L, 200L);
+            GIVER_A, SUBJECT, true, HELPFUL_CATEGORY, 2, 100L, 200L);
     private static final ReputationEntrySnapshot BAD = new ReputationEntrySnapshot(
             GIVER_B, SUBJECT, false, "SCAMMED", -2, 300L, 400L);
 
@@ -48,7 +49,7 @@ class ReputationCorrectionPreflightTest {
         assertThrows(IllegalArgumentException.class, () ->
                 ReputationCorrectionPreflight.select(state, OTHER, state.checksum(), List.of(GOOD)));
         ReputationEntrySnapshot foreign = new ReputationEntrySnapshot(
-                GIVER_A, OTHER, true, "HELPFUL", 2, 100L, 200L);
+                GIVER_A, OTHER, true, HELPFUL_CATEGORY, 2, 100L, 200L);
         assertThrows(IllegalArgumentException.class, () ->
                 ReputationCorrectionPreflight.select(state, SUBJECT, state.checksum(), List.of(foreign)));
     }
@@ -59,7 +60,7 @@ class ReputationCorrectionPreflightTest {
         assertThrows(IllegalStateException.class, () ->
                 ReputationCorrectionPreflight.select(state, SUBJECT, "0".repeat(64), List.of(GOOD)));
         ReputationEntrySnapshot edited = new ReputationEntrySnapshot(
-                GIVER_A, SUBJECT, true, "HELPFUL", 2, 100L, 201L);
+                GIVER_A, SUBJECT, true, HELPFUL_CATEGORY, 2, 100L, 201L);
         assertThrows(IllegalStateException.class, () ->
                 ReputationCorrectionPreflight.select(state, SUBJECT, state.checksum(), List.of(edited)));
         assertThrows(IllegalStateException.class, () ->
@@ -90,7 +91,7 @@ class ReputationCorrectionPreflightTest {
         assertThrows(IllegalArgumentException.class, () ->
                 ReputationCorrectionPreflight.select(state, SUBJECT, state.checksum(), List.of(GOOD, GOOD)));
         ReputationStateSnapshot ambiguous = snapshot(10, List.of(GOOD,
-                new ReputationEntrySnapshot(GIVER_A, SUBJECT, true, "HELPFUL", 3, 101L, 202L)));
+                new ReputationEntrySnapshot(GIVER_A, SUBJECT, true, HELPFUL_CATEGORY, 3, 101L, 202L)));
         assertThrows(IllegalStateException.class, () ->
                 ReputationCorrectionPreflight.select(ambiguous, SUBJECT, ambiguous.checksum(), List.of(GOOD)));
     }
