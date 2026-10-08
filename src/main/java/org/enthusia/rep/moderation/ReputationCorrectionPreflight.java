@@ -80,16 +80,34 @@ public final class ReputationCorrectionPreflight {
      * Exact selected snapshots preserve the original giver, polarity, category,
      * weight and version timestamps needed for CAS at commit time.
      */
-    public record Selection(
-            UUID subjectId,
-            String expectedChecksum,
-            List<ReputationEntrySnapshot> entries,
-            int expectedTotalAfterRemoval
-    ) {
-        public Selection {
-            Objects.requireNonNull(subjectId, "subjectId");
-            Objects.requireNonNull(expectedChecksum, "expectedChecksum");
-            entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+    public static final class Selection {
+        private final UUID subjectId;
+        private final String expectedChecksum;
+        private final List<ReputationEntrySnapshot> entries;
+        private final int expectedTotalAfterRemoval;
+
+        private Selection(UUID subjectId, String expectedChecksum,
+                List<ReputationEntrySnapshot> entries, int expectedTotalAfterRemoval) {
+            this.subjectId = Objects.requireNonNull(subjectId, "subjectId");
+            this.expectedChecksum = Objects.requireNonNull(expectedChecksum, "expectedChecksum");
+            this.entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+            this.expectedTotalAfterRemoval = expectedTotalAfterRemoval;
+        }
+
+        public UUID subjectId() {
+            return subjectId;
+        }
+
+        public String expectedChecksum() {
+            return expectedChecksum;
+        }
+
+        public List<ReputationEntrySnapshot> entries() {
+            return entries;
+        }
+
+        public int expectedTotalAfterRemoval() {
+            return expectedTotalAfterRemoval;
         }
     }
 }
