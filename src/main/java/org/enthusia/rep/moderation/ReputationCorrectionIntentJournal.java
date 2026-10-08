@@ -158,11 +158,10 @@ public final class ReputationCorrectionIntentJournal {
         }
         YamlConfiguration yaml = readYaml(file);
         ConfigurationSection intents = yaml.getConfigurationSection(INTENTS);
-        if (yaml.contains(INTENTS) && intents == null) {
-            throw new IllegalStateException("Correction intent journal has invalid root");
-        }
+        // A missing file is a fresh journal; an existing rootless file can be a
+        // truncated journal and must never be treated as an empty history.
         if (intents == null) {
-            return Map.of();
+            throw new IllegalStateException("Existing correction intent journal lacks its required root");
         }
         if (intents.getKeys(false).size() > MAX_PREPARED) {
             throw new IllegalStateException("Correction intent journal exceeds permitted capacity");
@@ -199,6 +198,14 @@ public final class ReputationCorrectionIntentJournal {
             UUID subjectId = UUID.fromString(section.getString(SUBJECT_ID));
             String checksum = section.getString("expected-checksum");
             var selection = ReputationCorrectionPreflight.select(before, subjectId, checksum, exact);
+            // Bukkit's getInt/getLong return zero for missing keys. Zero can be
+            // a valid post-correction score, so explicit, typed presence checks
+            // are needed to avoid accepting truncated metadata on replay.
+            if (!section.isString("reviewer-id")
+                    || !(section.get("expected-total") instanceof Number)
+                    || !(section.get("prepared-at") instanceof Number)) {
+                throw new IllegalStateException("Correction intent is missing required typed metadata");
+            }
             Prepared intent = new Prepared(operationId, UUID.fromString(section.getString("reviewer-id")),
                     checkedCase(section.getString("case-id")), subjectId, checksum,
                     before, selection.entries(), section.getInt("expected-total"),
