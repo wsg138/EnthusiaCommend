@@ -46,6 +46,10 @@ public final class ReputationCorrectionPreflight {
         if (!current.checksum().equals(expectedChecksum)) {
             throw new IllegalStateException("Reputation snapshot changed before correction preflight");
         }
+        if (!current.checksum().equals(ReputationSnapshotFactory.checksum(
+                current.playerId(), current.totalScore(), current.entries()))) {
+            throw new IllegalStateException("Provider reputation snapshot checksum is inconsistent");
+        }
 
         // EnthusiaCommend holds at most one active commendation per giver/target pair.
         // A corrupt or ambiguous snapshot must never choose an arbitrary entry.
