@@ -19,6 +19,7 @@ import org.enthusia.rep.api.ReputationStateSnapshot;
  * serialization/commit boundary; passing preflight alone is never an
  * authorization, a durable receipt, or proof of correction.</p>
  */
+@SuppressWarnings("PMD.UseConcurrentHashMap") // Indexes are method-local and never shared concurrently.
 public final class ReputationCorrectionPreflight {
     private static final int MAX_SELECTED_ENTRIES = 64;
 
@@ -37,6 +38,16 @@ public final class ReputationCorrectionPreflight {
         List<ReputationEntrySnapshot> requested = List.copyOf(
                 Objects.requireNonNull(requestedEntries, "requestedEntries")
         );
+        verifySnapshot(current, subjectId, expectedChecksum, requested);
+        Map<UUID, ReputationEntrySnapshot> byGiver = indexEntries(current, subjectId);
+        long adjustedTotal = adjustedTotal(current.totalScore(), requested, byGiver, subjectId);
+        return new Selection(subjectId, expectedChecksum, requested, Math.toIntExact(adjustedTotal));
+    }
+
+    private static void verifySnapshot(
+            ReputationStateSnapshot current, UUID subjectId, String expectedChecksum,
+            List<ReputationEntrySnapshot> requested
+    ) {
         if (!current.playerId().equals(subjectId)) {
             throw new IllegalArgumentException("Correction subject does not match snapshot subject");
         }
@@ -50,9 +61,13 @@ public final class ReputationCorrectionPreflight {
                 current.playerId(), current.totalScore(), current.entries()))) {
             throw new IllegalStateException("Provider reputation snapshot checksum is inconsistent");
         }
+    }
 
-        // EnthusiaCommend holds at most one active commendation per giver/target pair.
-        // A corrupt or ambiguous snapshot must never choose an arbitrary entry.
+    private static Map<UUID, ReputationEntrySnapshot> indexEntries(
+            ReputationStateSnapshot current, UUID subjectId
+    ) {
+        // One active commendation is permitted for any giver/target pair;
+        // reject a corrupt provider snapshot instead of choosing an arbitrary vote.
         Map<UUID, ReputationEntrySnapshot> byGiver = new HashMap<>();
         for (ReputationEntrySnapshot entry : current.entries()) {
             if (!entry.targetId().equals(subjectId)
@@ -60,9 +75,15 @@ public final class ReputationCorrectionPreflight {
                 throw new IllegalStateException("Provider reputation snapshot has ambiguous entries");
             }
         }
+        return byGiver;
+    }
 
+    private static long adjustedTotal(
+            int originalTotal, List<ReputationEntrySnapshot> requested,
+            Map<UUID, ReputationEntrySnapshot> byGiver, UUID subjectId
+    ) {
         Set<UUID> selectedGivers = new HashSet<>();
-        long adjustedTotal = current.totalScore();
+        long result = originalTotal;
         for (ReputationEntrySnapshot selected : requested) {
             if (!selected.targetId().equals(subjectId)) {
                 throw new IllegalArgumentException("Selected reputation entry belongs to another player");
@@ -73,10 +94,9 @@ public final class ReputationCorrectionPreflight {
             if (!selected.equals(byGiver.get(selected.giverId()))) {
                 throw new IllegalStateException("Selected reputation entry is absent or has changed");
             }
-            adjustedTotal -= selected.scoreValue();
+            result -= selected.scoreValue();
         }
-
-        return new Selection(subjectId, expectedChecksum, requested, Math.toIntExact(adjustedTotal));
+        return result;
     }
 
     /**
