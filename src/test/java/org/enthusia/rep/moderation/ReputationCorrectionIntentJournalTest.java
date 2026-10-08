@@ -116,6 +116,34 @@ class ReputationCorrectionIntentJournalTest {
     }
 
     @Test
+    void existingRootlessJournalCannotBeSilentlyReinitialized() throws Exception {
+        Path file = folder.resolve(JOURNAL_FILE);
+        Files.writeString(file, "# journal was truncated; original operations are unknown\n");
+        assertThrows(IllegalStateException.class, () -> new ReputationCorrectionIntentJournal(file));
+        assertEquals("# journal was truncated; original operations are unknown\n", Files.readString(file));
+    }
+
+    @Test
+    void missingPreparedMetadataFailsClosedEvenWhenExpectedScoreWouldBeZero() throws Exception {
+        Path file = folder.resolve(JOURNAL_FILE);
+        var before = snapshot(2, List.of(ENTRY)); // expected total after selecting ENTRY is exactly zero.
+        new ReputationCorrectionIntentJournal(file).prepare(
+                OPERATION, REVIEWER, CASE_ID, before, SUBJECT,
+                before.checksum(), List.of(ENTRY), TIME);
+        String original = Files.readString(file);
+        String root = "prepared-intents." + OPERATION;
+        for (String key : List.of("reviewer-id", "expected-total", "prepared-at")) {
+            Files.writeString(file, original);
+            YamlConfiguration yaml = new YamlConfiguration();
+            yaml.load(file.toFile());
+            yaml.set(root + "." + key, null);
+            yaml.save(file.toFile());
+            assertThrows(IllegalStateException.class, () -> new ReputationCorrectionIntentJournal(file),
+                    "Missing " + key + " must not be silently defaulted");
+        }
+    }
+
+    @Test
     void storageFailureDoesNotAdvertisePreparedIntent() {
         Path blockedParent = folder.resolve("file-not-directory");
         try {
