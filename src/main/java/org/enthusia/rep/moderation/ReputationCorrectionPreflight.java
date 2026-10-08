@@ -62,7 +62,7 @@ public final class ReputationCorrectionPreflight {
         }
 
         Set<UUID> selectedGivers = new HashSet<>();
-        int adjustedTotal = current.totalScore();
+        long adjustedTotal = current.totalScore();
         for (ReputationEntrySnapshot selected : requested) {
             if (!selected.targetId().equals(subjectId)) {
                 throw new IllegalArgumentException("Selected reputation entry belongs to another player");
@@ -73,10 +73,10 @@ public final class ReputationCorrectionPreflight {
             if (!selected.equals(byGiver.get(selected.giverId()))) {
                 throw new IllegalStateException("Selected reputation entry is absent or has changed");
             }
-            adjustedTotal = Math.subtractExact(adjustedTotal, selected.scoreValue());
+            adjustedTotal -= selected.scoreValue();
         }
 
-        return new Selection(subjectId, expectedChecksum, requested, adjustedTotal);
+        return new Selection(subjectId, expectedChecksum, requested, Math.toIntExact(adjustedTotal));
     }
 
     /**
