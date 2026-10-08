@@ -34,6 +34,7 @@ public final class ReputationCorrectionIntentJournal {
     private static final String INTENTS = "prepared-intents";
     private final Path file;
     private final Map<UUID, Prepared> prepared;
+    private boolean storageUncertain;
 
     public ReputationCorrectionIntentJournal(Path file) {
         this.file = Objects.requireNonNull(file, "file");
@@ -50,6 +51,9 @@ public final class ReputationCorrectionIntentJournal {
             List<ReputationEntrySnapshot> exactEntries,
             Instant requestedAt
     ) {
+        if (storageUncertain) {
+            throw new IllegalStateException("Correction intent storage requires operator reconciliation");
+        }
         Objects.requireNonNull(operationId, "operationId");
         Objects.requireNonNull(reviewerId, "reviewerId");
         Objects.requireNonNull(observed, "observed");
@@ -81,12 +85,30 @@ public final class ReputationCorrectionIntentJournal {
                 selection.expectedTotalAfterRemoval(), requestedAt);
         Map<UUID, Prepared> next = new LinkedHashMap<>(prepared);
         next.put(operationId, candidate);
-        save(file, next);
+        try {
+            save(file, next);
+        } catch (RuntimeException failure) {
+            // The replace may have succeeded before directory fsync failed. The
+            // disk image is authoritative; never allow this process to recycle
+            // the operation ID against an out-of-date in-memory journal.
+            try {
+                Map<UUID, Prepared> persisted = load(file);
+                prepared.clear();
+                prepared.putAll(persisted);
+            } catch (RuntimeException unreadable) {
+                storageUncertain = true;
+                failure.addSuppressed(unreadable);
+            }
+            throw failure;
+        }
         prepared.put(operationId, candidate); // Never advertise an unpersisted intent.
         return candidate;
     }
 
     public synchronized Optional<Prepared> findOperation(UUID operationId) {
+        if (storageUncertain) {
+            throw new IllegalStateException("Correction intent storage requires operator reconciliation");
+        }
         return Optional.ofNullable(prepared.get(Objects.requireNonNull(operationId, "operationId")));
     }
 
