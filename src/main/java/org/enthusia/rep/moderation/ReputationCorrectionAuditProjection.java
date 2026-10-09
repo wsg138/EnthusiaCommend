@@ -81,7 +81,7 @@ public final class ReputationCorrectionAuditProjection {
             changes.add(new ReputationChangeRecord(
                     "p2-change-" + stableId(prepared.operationId(), selected.giverId(), "change"),
                     occurredAt.toEpochMilli(), prepared.subjectId(), prepared.reviewerId(),
-                    null, -selected.scoreValue(), ReputationChangeAction.REMOVE,
+                    null, Math.negateExact(selected.scoreValue()), ReputationChangeAction.REMOVE,
                     ReputationChangeSource.ADMIN_CORRECTION, ReputationChangeOutcome.SUCCEEDED,
                     "Policy v2 case " + prepared.caseId(), full.getCategory(), runningTotal, nextTotal));
             runningTotal = nextTotal;
