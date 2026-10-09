@@ -27,6 +27,7 @@ import org.enthusia.rep.storage.PluginDataSnapshot;
  * proof that a correction was ever executed.</p>
  */
 public final class ReputationCorrectionAuditProjection {
+    private static final long NO_COOLDOWN_MILLIS = 0L;
     private ReputationCorrectionAuditProjection() {
     }
 
@@ -39,7 +40,7 @@ public final class ReputationCorrectionAuditProjection {
         Objects.requireNonNull(prepared, "prepared");
         Objects.requireNonNull(currentData, "currentData");
         Objects.requireNonNull(occurredAt, "occurredAt");
-        if (removalCooldownMillis < 0L || occurredAt.isBefore(prepared.preparedAt())) {
+        if (removalCooldownMillis < NO_COOLDOWN_MILLIS || occurredAt.isBefore(prepared.preparedAt())) {
             throw new IllegalArgumentException("Correction timing or cooldown policy is invalid");
         }
 
@@ -106,7 +107,7 @@ public final class ReputationCorrectionAuditProjection {
                         .filter(entry -> !entry.targetId().equals(prepared.subjectId())
                                 || !selectedGivers.contains(entry.giverId()))
                         .toList());
-        if (removalCooldownMillis > 0L) {
+        if (removalCooldownMillis > NO_COOLDOWN_MILLIS) {
             for (UUID giver : selectedGivers.stream()
                     .sorted(java.util.Comparator.comparing(UUID::toString)).toList()) {
                 updated.add(new PluginDataSnapshot.RemovalCooldownEntry(
