@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
 import org.junit.jupiter.api.Test;
@@ -115,17 +115,20 @@ class CorrectionCommitMetadataTest {
         assertThrows(IllegalArgumentException.class, () -> metadata(List.of(foreign)));
         assertThrows(IllegalArgumentException.class, () -> metadata(List.of()));
 
-        var tooMany = new ArrayList<ReputationEntrySnapshot>();
-        for (int i = 0; i < 101; i++) {
-            tooMany.add(new ReputationEntrySnapshot(new UUID(0L, i + 1),
-                    SUBJECT, true, "WAS_KIND", 1, 1L, 2L));
-        }
+        var tooMany = IntStream.range(0, 101)
+                .mapToObj(index -> syntheticVote(index + 1))
+                .toList();
         assertThrows(IllegalArgumentException.class, () -> metadata(tooMany));
 
         assertThrows(IllegalArgumentException.class, () ->
                 new CorrectionCommitMetadata(OPERATION, "CASE-901", 7L, REVIEWER, SUBJECT,
                         PREPARED_DIGEST, BEFORE_DIGEST, BEFORE_DIGEST, 19L,
                         1000L, originals));
+    }
+
+    private static ReputationEntrySnapshot syntheticVote(int index) {
+        return new ReputationEntrySnapshot(new UUID(0L, index),
+                SUBJECT, true, "WAS_KIND", 1, 1L, 2L);
     }
 
     private static CorrectionCommitMetadata sample() {
