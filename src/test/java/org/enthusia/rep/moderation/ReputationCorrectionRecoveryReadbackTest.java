@@ -82,6 +82,28 @@ class ReputationCorrectionRecoveryReadbackTest {
     }
 
     @Test
+    void projectedAfterPreservesSurvivorOrderAndRejectsReorderedObservation() {
+        var first = new ReputationEntrySnapshot(
+                UUID.fromString("00000000-0000-0000-0000-000000000310"), PLAYER,
+                true, "HELPFUL", 1, 10L, 20L);
+        var before = snapshot(17, List.of(first, REMOVE, RETAIN));
+        var intent = prepare(before, List.of(REMOVE));
+        var expected = snapshot(15, List.of(first, RETAIN));
+
+        var exact = ReputationCorrectionRecoveryReadback.inspect(intent, expected);
+        assertEquals(ReputationCorrectionRecoveryReadback.Outcome.EXPECTED_DATA_ONLY_NO_RECEIPT,
+                exact.outcome());
+        assertEquals(List.of(first, RETAIN), exact.expectedAfter().entries());
+        assertEquals(expected.checksum(), exact.expectedAfter().checksum());
+
+        // A valid recomputed checksum alone is not enough to match the exact
+        // serialized provider ordering; do not infer a committed correction.
+        var reordered = snapshot(15, List.of(RETAIN, first));
+        assertEquals(ReputationCorrectionRecoveryReadback.Outcome.CONFLICT_REQUIRES_RECONCILIATION,
+                ReputationCorrectionRecoveryReadback.inspect(intent, reordered).outcome());
+    }
+
+    @Test
     void forgedOrForeignObservedSnapshotCannotCountAsRecoveryEvidence() {
         var before = snapshot(13, List.of(REMOVE, RETAIN));
         var intent = prepare(before, List.of(REMOVE));
