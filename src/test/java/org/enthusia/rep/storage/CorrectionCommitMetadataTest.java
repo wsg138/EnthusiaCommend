@@ -1,6 +1,7 @@
 package org.enthusia.rep.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +38,18 @@ class CorrectionCommitMetadataTest {
         assertEquals(SECOND_GIVER, restored.removedEntries().getLast().giverId());
         assertEquals(map, restored.toMap());
         assertTrue(restored.toMap().containsKey("preparedFingerprint"));
+    }
+
+    @Test
+    void nestedPrimaryYamlSectionPreservesAllTypedReceiptMetadata() throws Exception {
+        var yaml = new YamlConfiguration();
+        yaml.createSection("correction", sample().toMap());
+        var encoded = yaml.saveToString();
+        var decoded = new YamlConfiguration();
+        decoded.loadFromString(encoded);
+        var nested = decoded.getConfigurationSection("correction");
+        assertNotNull(nested);
+        assertEquals(sample(), CorrectionCommitMetadata.fromMap(nested.getValues(false)));
     }
 
     @Test
