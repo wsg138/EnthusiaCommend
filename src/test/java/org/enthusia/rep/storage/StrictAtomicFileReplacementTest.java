@@ -18,6 +18,7 @@ import org.junit.jupiter.api.condition.OS;
 
 @EnabledOnOs(OS.LINUX) // Strict directory-channel fsync must be supported.
 class StrictAtomicFileReplacementTest {
+    private static final String DATA_FILE = "data.yml";
     private static final byte[] ORIGINAL = "original-snapshot".getBytes(StandardCharsets.UTF_8);
     private static final byte[] REPLACEMENT = "replacement-with-receipt".getBytes(StandardCharsets.UTF_8);
 
@@ -26,7 +27,7 @@ class StrictAtomicFileReplacementTest {
 
     @Test
     void replacesOneCompleteFileAndRemovesAllStagingData() throws IOException {
-        Path primary = directory.resolve("data.yml");
+        Path primary = directory.resolve(DATA_FILE);
         Files.write(primary, ORIGINAL);
 
         StrictAtomicFileReplacement.replace(primary, REPLACEMENT);
@@ -37,7 +38,7 @@ class StrictAtomicFileReplacementTest {
 
     @Test
     void failedTemporaryWriteOrFsyncCannotModifyPrimary() throws IOException {
-        Path primary = directory.resolve("data.yml");
+        Path primary = directory.resolve(DATA_FILE);
         for (var checkpoint : new StrictAtomicFileReplacement.Checkpoint[] {
                 StrictAtomicFileReplacement.Checkpoint.BEFORE_TEMP_WRITE,
                 StrictAtomicFileReplacement.Checkpoint.AFTER_TEMP_FSYNC
@@ -56,13 +57,13 @@ class StrictAtomicFileReplacementTest {
 
     @Test
     void unsupportedAtomicMoveMustNotFallBackToNonAtomicOverwrite() throws IOException {
-        Path primary = directory.resolve("data.yml");
+        Path primary = directory.resolve(DATA_FILE);
         Files.write(primary, ORIGINAL);
 
         assertThrows(AtomicMoveNotSupportedException.class, () ->
                 StrictAtomicFileReplacement.replace(primary, REPLACEMENT, reached -> {
                     if (reached == StrictAtomicFileReplacement.Checkpoint.AFTER_TEMP_FSYNC) {
-                        throw new AtomicMoveNotSupportedException("temporary", "data.yml",
+                        throw new AtomicMoveNotSupportedException("temporary", DATA_FILE,
                                 "Injected unavailable atomic move");
                     }
                 }));
@@ -72,7 +73,7 @@ class StrictAtomicFileReplacementTest {
 
     @Test
     void postRenameFailureCannotBeTreatedAsGuaranteedRollback() throws IOException {
-        Path primary = directory.resolve("data.yml");
+        Path primary = directory.resolve(DATA_FILE);
         Files.write(primary, ORIGINAL);
 
         assertThrows(IOException.class, () ->
