@@ -63,12 +63,17 @@ public final class ReputationCorrectionPrimaryDataProjection {
                 before.removedEntries().stream().map(RepService.RemovedRep::copy).toList(),
                 before.stalkEntries(),
                 before.reputationChanges(),
-                before.suspiciousCases().stream().map(RepService.SuspiciousRepCase::copy).toList(),
+                before.suspiciousCases().stream().map(ReputationCorrectionPrimaryDataProjection::copySuspicious).toList(),
                 before.removalCooldowns(),
                 before.repTradingAlertPreferences(),
                 identities
         );
         return new Projection(preview, before, projected);
+    }
+
+    private static RepService.SuspiciousRepCase copySuspicious(RepService.SuspiciousRepCase entry) {
+        return new RepService.SuspiciousRepCase(entry.getTarget(), entry.type(), entry.key(),
+                entry.givers(), entry.getCreatedAt(), entry.isResolved(), entry.detail());
     }
 
     private static PluginDataSnapshot copyOf(PluginDataSnapshot data) {
@@ -78,7 +83,7 @@ public final class ReputationCorrectionPrimaryDataProjection {
                 data.removedEntries().stream().map(RepService.RemovedRep::copy).toList(),
                 data.stalkEntries(),
                 data.reputationChanges(),
-                data.suspiciousCases().stream().map(RepService.SuspiciousRepCase::copy).toList(),
+                data.suspiciousCases().stream().map(ReputationCorrectionPrimaryDataProjection::copySuspicious).toList(),
                 data.removalCooldowns(),
                 data.repTradingAlertPreferences(),
                 data.identities()
