@@ -2,7 +2,7 @@
 
 **Status:** Design proposal only. No execution endpoint, production activation, or authoritative commit receipt is implemented by this document.
 **Scope:** EnthusiaCommend exact-entry corrections for a Staff Policy v2 case.
-**Dependencies:** Read-only preflight PR #26, prepared-intent journal PR #27, readback comparator PR #28 (stacked, unmerged). Confirm current branch ancestry before implementation.
+**Dependencies:** Read-only preflight PR #26, prepared-intent journal PR #27, readback comparator PR #28, and primary-data offline preview PR #30 (stacked, unmerged). Confirm current branch ancestry before implementation.
 
 ## Executive decision
 
@@ -21,7 +21,7 @@ This design requires changes to the existing data model, persistence contract, m
 - `OrderedSnapshotWriter.saveIfNewer` serializes saves and refuses an older sequence after a newer sequence is accepted. This guarantee must be retained, including its behavior after a newer save fails.
 - `YamlPluginDataStore` currently writes a temporary `data.yml`, then moves it into place, with an unsupported-atomic-move fallback. No explicit temporary-file and parent-directory durability barrier is shown in this path.
 - Existing `ReputationModerationStore` writes `moderation-state.yml` separately from primary reputation `data.yml`.
-- `ReputationCorrectionIntentJournal.Prepared` does not represent a committed correction; `ReputationCorrectionRecoveryReadback` can only classify matching observed snapshots, not identify the actor or transaction responsible.
+- PR #30's `ReputationCorrectionProviderPreview.plan` checks actual persisted score and selected commendations against the prepared before-state, and projects some identity/tarnish effects, but does not mutate or persist a candidate. It does not bind identity state to a prepared operation, so commit-time full-state CAS is still required.\n- `ReputationCorrectionIntentJournal.Prepared` does not represent a committed correction; `ReputationCorrectionRecoveryReadback` can only classify matching observed snapshots, not identify the actor or transaction responsible.
 
 These are architectural constraints, not proof that a live correction race or data loss has occurred.
 
@@ -133,7 +133,7 @@ A data after-state matching the projection **without** a provider-issued committ
 
 ## Staged delivery plan
 
-1. **Read-only milestone (current):** Complete independent review of PR #28 and reconcile stacked PR #26 → #27 → #28 ancestry. Keep all three non-mutating.
+1. **Read-only milestone (current):** Complete independent review of PR #28 and PR #30 and reconcile stacked PR #26 → #27 → #28 → #30 ancestry. Keep all three non-mutating.
 2. **Persistence groundwork PR:** Strict primary file read/validation, durable atomic replacement capability check, data generation and ledger schema with migration tests. Do **not** expose a correction method.
 3. **Serialization groundwork PR:** Add one coherent snapshot/mutation boundary and queued-autosave sequence fencing. Test normal votes/edits unchanged.
 4. **Candidate/receipt PR:** Pure copy-on-write correction projection, full derived state validation, idempotent ledger and adversarial crash tests. Still no externally callable destructive endpoint.
