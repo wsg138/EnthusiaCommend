@@ -18,11 +18,12 @@ import java.util.UUID;
  */
 public record CorrectionLedgerState(long currentGeneration, List<CorrectionCommitMetadata> entries) {
     private static final int MAX_RECORDS = 4096;
+    private static final long INITIAL_GENERATION = 0L;
     private static final String GENERATION = "generation";
     private static final String CORRECTIONS = "corrections";
 
     public CorrectionLedgerState {
-        if (currentGeneration < 0L) {
+        if (currentGeneration < INITIAL_GENERATION) {
             throw new IllegalArgumentException("Primary generation cannot be negative");
         }
         entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
@@ -30,7 +31,7 @@ public record CorrectionLedgerState(long currentGeneration, List<CorrectionCommi
             throw new IllegalArgumentException("Correction ledger exceeds its safe capacity");
         }
         Set<UUID> operationIds = new HashSet<>();
-        long latest = 0L;
+        long latest = INITIAL_GENERATION;
         for (CorrectionCommitMetadata entry : entries) {
             if (!operationIds.add(entry.operationId())
                     || entry.dataGeneration() <= latest
@@ -42,7 +43,7 @@ public record CorrectionLedgerState(long currentGeneration, List<CorrectionCommi
     }
 
     public static CorrectionLedgerState empty() {
-        return new CorrectionLedgerState(0L, List.of());
+        return new CorrectionLedgerState(INITIAL_GENERATION, List.of());
     }
 
     /**
@@ -71,6 +72,8 @@ public record CorrectionLedgerState(long currentGeneration, List<CorrectionCommi
         return new CorrectionLedgerState(nextGeneration, copied);
     }
 
+    // Local ordered YAML snapshot assembly, never shared as concurrent mutable state.
+    @SuppressWarnings("PMD.UseConcurrentHashMap")
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(GENERATION, currentGeneration);
