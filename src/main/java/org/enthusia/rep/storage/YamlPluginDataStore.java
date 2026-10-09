@@ -11,9 +11,13 @@ import org.enthusia.rep.rep.RepService;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -364,12 +368,36 @@ public final class YamlPluginDataStore implements PluginDataStore {
         File temporary = new File(parent, file.getName() + ".tmp");
         try {
             config.save(temporary);
+            forceTemporaryFile(temporary);
             replaceDataFile(temporary);
+            forceParentDirectory(file.toPath().getParent());
             return true;
         } catch (IOException exception) {
             logger.log(Level.WARNING, "Failed to save data.yml.", exception);
             cleanTemporaryFile(temporary);
             return false;
+        }
+    }
+
+    private static void forceTemporaryFile(File temporary) throws IOException {
+        // YAML save/close alone does not guarantee bytes reached durable storage.
+        try (FileChannel channel = FileChannel.open(temporary.toPath(), StandardOpenOption.WRITE)) {
+            channel.force(true);
+        }
+    }
+
+    private static void forceParentDirectory(Path parent) throws IOException {
+        if (parent == null) {
+            return;
+        }
+        try (FileChannel directory = FileChannel.open(parent, StandardOpenOption.READ)) {
+            directory.force(true);
+        } catch (AccessDeniedException unsupportedOnWindows) {
+            // The Windows default filesystem provider rejects directory channels.
+            // Follow the same compatibility boundary as the existing moderation journal.
+            if (File.separatorChar != '\\' || !Files.isDirectory(parent)) {
+                throw unsupportedOnWindows;
+            }
         }
     }
 
