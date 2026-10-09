@@ -30,7 +30,7 @@ class ReputationCorrectionAuditProjectionTest {
     private static final UUID C = UUID.fromString("00000000-0000-0000-0000-000000000713");
     private static final UUID REVIEWER = UUID.fromString("00000000-0000-0000-0000-000000000714");
     private static final UUID OPERATION = UUID.fromString("00000000-0000-0000-0000-000000000715");
-    private static final Instant PREPARED = Instant.parse("2026-10-08T22:00:00Z");
+    private static final Instant PREPARED_AT = Instant.parse("2026-10-08T22:00:00Z");
     private static final Instant CORRECTED = Instant.parse("2026-10-08T22:30:00Z");
 
     @Test
@@ -78,13 +78,28 @@ class ReputationCorrectionAuditProjectionTest {
                 new PluginDataSnapshot.RemovalCooldownEntry(A, SUBJECT, CORRECTED.toEpochMilli())));
         assertTrue(projected.removalCooldowns().contains(
                 new PluginDataSnapshot.RemovalCooldownEntry(B, SUBJECT, CORRECTED.toEpochMilli())));
+        assertOriginalDataUnchanged(data, identity, projected);
+        assertDeterministicProjection(prepared, data, result);
+    }
+
+    private static void assertOriginalDataUnchanged(
+            PluginDataSnapshot data,
+            RepIdentityState identity,
+            PluginDataSnapshot projected
+    ) {
         assertEquals(data.repTradingAlertPreferences(), projected.repTradingAlertPreferences());
         assertEquals(10, data.scores().get(SUBJECT));
         assertEquals(3, data.commendations().size());
         assertEquals(1, data.removedEntries().size());
         assertEquals(2, data.removalCooldowns().size());
         assertEquals(identity, data.identities().get(SUBJECT));
+    }
 
+    private static void assertDeterministicProjection(
+            ReputationCorrectionIntentJournal.Prepared prepared,
+            PluginDataSnapshot data,
+            ReputationCorrectionAuditProjection.Projection result
+    ) {
         var repeated = ReputationCorrectionAuditProjection.plan(prepared, data, CORRECTED, 100L);
         assertEquals(result.changeHistoryAdded(), repeated.changeHistoryAdded());
         assertEquals(result.removalHistoryAdded().getFirst().id(),
@@ -119,7 +134,7 @@ class ReputationCorrectionAuditProjectionTest {
                         new PluginDataSnapshot(Map.of(SUBJECT, 11), List.of(good),
                                 List.of(), List.of(), List.of(), List.of()), CORRECTED, 0L));
         assertThrows(IllegalArgumentException.class, () ->
-                ReputationCorrectionAuditProjection.plan(intent, data, PREPARED.minusSeconds(1), 0L));
+                ReputationCorrectionAuditProjection.plan(intent, data, PREPARED_AT.minusSeconds(1), 0L));
         assertThrows(IllegalArgumentException.class, () ->
                 ReputationCorrectionAuditProjection.plan(intent, data, CORRECTED, -1L));
 
@@ -144,7 +159,7 @@ class ReputationCorrectionAuditProjectionTest {
                 snapshot, SUBJECT, snapshot.checksum(), exact).expectedTotalAfterRemoval();
         return new ReputationCorrectionIntentJournal.Prepared(
                 OPERATION, REVIEWER, "CASE-701", SUBJECT, snapshot.checksum(),
-                snapshot, exact, expected, PREPARED);
+                snapshot, exact, expected, PREPARED_AT);
     }
 
     private static ReputationEntrySnapshot entry(Commendation value) {
