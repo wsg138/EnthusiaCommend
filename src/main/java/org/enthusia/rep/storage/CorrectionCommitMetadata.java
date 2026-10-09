@@ -73,6 +73,8 @@ public record CorrectionCommitMetadata(
      * YAML-compatible record value intended for a future *primary* data file.
      * A copy of this map in a sidecar file is never a commit receipt.
      */
+    // Local YAML assembly map; insertion order is intentional and no concurrent sharing occurs.
+    @SuppressWarnings("PMD.UseConcurrentHashMap")
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("schema", SCHEMA_VERSION);
@@ -117,6 +119,8 @@ public record CorrectionCommitMetadata(
                 integer(source, "committedAt"), parsed);
     }
 
+    // Per-entry ordered YAML assembly; thread-safe map replacement would lose ordering.
+    @SuppressWarnings("PMD.UseConcurrentHashMap")
     private static Map<String, Object> entryMap(ReputationEntrySnapshot entry) {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("giver", entry.giverId().toString());
