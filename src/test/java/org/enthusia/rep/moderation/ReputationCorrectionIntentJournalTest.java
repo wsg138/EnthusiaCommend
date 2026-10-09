@@ -154,6 +154,30 @@ class ReputationCorrectionIntentJournalTest {
         assertTrue(journal.findOperation(OPERATION).isEmpty());
     }
 
+    @Test
+    void failedRewritePreservesExistingPreparedIntentAndRefusesNewOperation() throws Exception {
+        Path file = folder.resolve(JOURNAL_FILE);
+        var before = snapshot(9, List.of(ENTRY));
+        var journal = new ReputationCorrectionIntentJournal(file);
+        var original = journal.prepare(OPERATION, REVIEWER, CASE_ID, before,
+                SUBJECT, before.checksum(), List.of(ENTRY), TIME);
+        String persisted = Files.readString(file);
+        // A directory at the staging path deterministically refuses a rewrite.
+        // The original journal must survive without advertising an unpersisted operation.
+        Files.createDirectory(folder.resolve(JOURNAL_FILE + ".tmp"));
+        UUID secondOperation = UUID.fromString("00000000-0000-0000-0000-000000000225");
+        assertThrows(IllegalStateException.class, () -> journal.prepare(
+                secondOperation, REVIEWER, CASE_ID, before, SUBJECT,
+                before.checksum(), List.of(ENTRY), TIME.plusSeconds(1)));
+        assertEquals(persisted, Files.readString(file));
+        assertEquals(original, journal.findOperation(OPERATION).orElseThrow());
+        assertTrue(journal.findOperation(secondOperation).isEmpty());
+
+        var restarted = new ReputationCorrectionIntentJournal(file);
+        assertEquals(original, restarted.findOperation(OPERATION).orElseThrow());
+        assertTrue(restarted.findOperation(secondOperation).isEmpty());
+    }
+
     private static void assertRejectedMissingMetadata(
             Path file, String original, String root, String key
     ) throws Exception {
