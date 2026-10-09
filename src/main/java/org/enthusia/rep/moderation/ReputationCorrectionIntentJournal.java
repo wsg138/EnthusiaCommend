@@ -3,7 +3,6 @@ package org.enthusia.rep.moderation;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.AccessDeniedException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -269,11 +268,9 @@ public final class ReputationCorrectionIntentJournal {
     }
 
     private static void replaceFile(Path temporary, Path file) throws IOException {
-        try {
-            Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // A PREPARED journal may gate future exact-entry corrections.
+        // Never risk partially replacing it if the filesystem cannot move atomically.
+        Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static void forceDirectory(Path directory) throws IOException {
