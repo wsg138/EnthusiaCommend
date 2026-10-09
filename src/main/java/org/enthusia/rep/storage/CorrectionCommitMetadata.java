@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.enthusia.rep.api.ReputationEntrySnapshot;
 
 /**
@@ -33,6 +34,8 @@ public record CorrectionCommitMetadata(
 ) {
     private static final int SCHEMA_VERSION = 1;
     private static final int MAX_ENTRIES = 100;
+    private static final Pattern CASE_ID_PATTERN = Pattern.compile("[A-Za-z0-9_.:-]+");
+    private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> FIELDS = Set.of(
             "schema", "operation", "case", "caseRevision", "reviewer", "subject",
             "preparedFingerprint", "beforeChecksum", "afterChecksum", "generation",
@@ -170,14 +173,14 @@ public record CorrectionCommitMetadata(
 
     private static String validateCase(String caseId) {
         if (caseId == null || caseId.isBlank() || caseId.length() > 64
-                || !caseId.matches("[A-Za-z0-9_.:-]+")) {
+                || !CASE_ID_PATTERN.matcher(caseId).matches()) {
             throw new IllegalArgumentException("Correction case identifier is invalid");
         }
         return caseId;
     }
 
     private static String digest(String input, String field) {
-        if (input == null || !input.matches("[0-9a-f]{64}")) {
+        if (input == null || !SHA256_PATTERN.matcher(input).matches()) {
             throw new IllegalArgumentException("Invalid SHA-256 " + field);
         }
         return input;
