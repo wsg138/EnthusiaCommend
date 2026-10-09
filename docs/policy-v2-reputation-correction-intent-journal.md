@@ -6,12 +6,12 @@ The new `ReputationCorrectionIntentJournal` is **not registered as an API**, not
 
 ## Implemented read/write guarantees
 
-- Durable per-operation UUID journal via Bukkit YAML snapshot, temporary file + fsync + replace + directory sync, isolated from the plugin's current live data files.
+- Durable per-operation UUID journal via Bukkit YAML snapshot, temporary file + fsync + **atomic-only replacement** + directory sync, isolated from the plugin's current live data files. If `ATOMIC_MOVE` is unsupported, it refuses to write rather than fall back to a non-atomic replacement; this is a deliberately strict filesystem requirement.
 - Each prepared record pins reviewer UUID, case ID, canonical player UUID, original SHA-256 reputation checksum and full provider snapshot, exact selected entry data, expected post-removal score and first prepare timestamp.
 - `prepare` runs the exact-entry preflight and persists the journal before returning. An I/O error does not insert the record into memory. `findOperation` and restart loading support original-ID recovery.
 - Same operation ID + identical payload replays the original record without changing its timestamp. Reuse with a different actor, case, target, score/entries/checksum fails closed. Intent history is not automatically evicted or silently replaced; reaching capacity blocks new work.
 - Journal loading independently validates the snapshot checksum and selected entry set using the same preflight, then rechecks the persisted expected total. Corruption or unexpected fields cannot silently produce a correction.
-- Tests cover restart replay, stable original timestamp, forged input, operation ID collisions, changed stored score or expected result, and write failure with no advertised intent.
+- Tests cover restart replay, stable original timestamp, forged input, operation ID collisions, changed stored score or expected result, and write failure with no advertised intent. The atomic-move-unavailable path must remain fail-closed in deployment-specific filesystem testing.
 
 ## Critical missing work
 
