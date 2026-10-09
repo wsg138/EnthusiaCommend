@@ -12,7 +12,7 @@ The result can only be:
 | `EXPECTED_DATA_ONLY_NO_RECEIPT` | Complete observed data matches the projected after-state | **No**: another actor or partially committed work could have produced it |
 | `CONFLICT_REQUIRES_RECONCILIATION` | Neither complete snapshot matches; someone must investigate | **No** |
 
-Missing/wrong player, inconsistent observed checksum, forged prepared checksum or forged expected score reject with errors rather than claim an outcome. The comparator does not inspect secondary indexes, removed-entry audit logs, primary-data-file persistence, case authorization, or a mutation journal, so even an exact data match **cannot provide a successful-remedy receipt**.
+The comparison intentionally requires **exact entry ordering**: an observed list with the same entries in another order (and a properly recomputed checksum) is a conservative conflict, not proof of completion. The normal provider snapshot factory sorts entries canonically. A regression test covers survivors on both sides of a removed entry and the reordered-observation case.\n\nMissing/wrong player, inconsistent observed checksum, forged prepared checksum or forged expected score reject with errors rather than claim an outcome. The comparator does not inspect secondary indexes, removed-entry audit logs, primary-data-file persistence, case authorization, or a mutation journal, so even an exact data match **cannot provide a successful-remedy receipt**.
 
 ## What must exist before execution
 
@@ -23,3 +23,5 @@ Missing/wrong player, inconsistent observed checksum, forged prepared checksum o
 5. Failure injection tests for every crash point, stale data, duplicate replay, tampering, drift, concurrent votes, refusal, and missing storage before any live workflow may use the API.
 
 Do **not** treat this PR or the two prerequisite PRs as permission to merge to production, enable Policy v2 or issue live corrections.
+
+A staged [atomic commit and recovery design](https://github.com/wsg138/EnthusiaCommend/pull/31) tracks the separate primary data/receipt storage and startup safeguards. This readback PR remains non-mutating.
