@@ -33,6 +33,8 @@ public final class YamlPluginDataStore implements PluginDataStore {
 
     private final File file;
     private final Logger logger;
+    private final Object dataLock = new Object();
+    private YamlConfiguration evidenceSource;
 
     public YamlPluginDataStore(CommendPlugin plugin) {
         this(plugin.getDataFolder(), plugin.getLogger());
@@ -45,11 +47,19 @@ public final class YamlPluginDataStore implements PluginDataStore {
 
     @Override
     public PluginDataSnapshot load() {
+        synchronized (dataLock) {
+            return loadLocked();
+        }
+    }
+
+    private PluginDataSnapshot loadLocked() {
         if (!file.exists()) {
+            evidenceSource = new YamlConfiguration();
             return PluginDataSnapshot.EMPTY;
         }
 
         YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+        evidenceSource = config;
         int sourceVersion = config.getInt("dataVersion", 0);
         PluginDataSnapshot snapshot = new PluginDataSnapshot(
                 loadScores(config),
@@ -62,7 +72,7 @@ public final class YamlPluginDataStore implements PluginDataStore {
                 loadAlertPreferences(config),
                 loadIdentities(config)
         );
-        if (sourceVersion < DATA_VERSION && !save(snapshot)) {
+        if ((sourceVersion < DATA_VERSION || !config.isConfigurationSection("advancementEvidence")) && !save(snapshot)) {
             logger.warning("Loaded legacy reputation data but could not persist the data-version migration.");
         }
         return snapshot;
@@ -275,8 +285,18 @@ public final class YamlPluginDataStore implements PluginDataStore {
 
     @Override
     public boolean save(PluginDataSnapshot snapshot) {
+        synchronized (dataLock) {
+            return saveLocked(snapshot);
+        }
+    }
+
+    private boolean saveLocked(PluginDataSnapshot snapshot) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("dataVersion", DATA_VERSION);
+        if (evidenceSource == null) {
+            evidenceSource = file.exists() ? YamlConfiguration.loadConfiguration(file) : new YamlConfiguration();
+        }
+        AdvancementEvidenceWriter.write(config, evidenceSource.getConfigurationSection("advancementEvidence"), snapshot);
         writeIdentities(config, snapshot.identities());
         writeScores(config, snapshot.scores());
         writeCommendations(config, snapshot.commendations());
@@ -288,7 +308,9 @@ public final class YamlPluginDataStore implements PluginDataStore {
         config.set("removalCooldowns", serializeRemovalCooldowns(snapshot.removalCooldowns()));
         writeAlertPreferences(config, snapshot.repTradingAlertPreferences());
         writeStalkEntries(config, snapshot.stalkEntries());
-        return saveConfiguration(config);
+        boolean saved = saveConfiguration(config);
+        if (saved) evidenceSource = config;
+        return saved;
     }
 
     private void writeScores(YamlConfiguration config, Map<UUID, Integer> scores) {
