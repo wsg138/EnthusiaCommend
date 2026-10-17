@@ -159,6 +159,30 @@ class YamlPluginDataStoreTest {
     }
 
     @Test
+    void secondSaveReplacesCompletePrimarySnapshotAndLeavesNoTempFile() throws Exception {
+        var store = new YamlPluginDataStore(temporaryDirectory.toFile(), testLogger());
+        UUID first = UUID.fromString("00000000-0000-0000-0000-000000000601");
+        UUID second = UUID.fromString("00000000-0000-0000-0000-000000000602");
+
+        var oldData = new PluginDataSnapshot(
+                Map.of(first, 15), List.of(), List.of(), List.of(), List.of(), List.of());
+        var newData = new PluginDataSnapshot(
+                Map.of(second, -4), List.of(), List.of(), List.of(), List.of(), List.of());
+
+        assertTrue(store.save(oldData));
+        assertEquals(oldData.scores(), store.load().scores());
+        assertTrue(store.save(newData));
+        assertEquals(newData.scores(), store.load().scores());
+        assertFalse(Files.exists(temporaryDirectory.resolve(DATA_FILE_NAME + ".tmp")));
+
+        var persistedYaml = new YamlConfiguration();
+        persistedYaml.load(temporaryDirectory.resolve(DATA_FILE_NAME).toFile());
+        assertEquals(9, persistedYaml.getInt("dataVersion"));
+        assertFalse(persistedYaml.contains("players." + first + ".score"));
+        assertEquals(-4, persistedYaml.getInt("players." + second + ".score"));
+    }
+
+    @Test
     void reportsSaveFailureWhenDataFolderIsBlocked() throws Exception {
         Path blockedDataFolder = temporaryDirectory.resolve("blocked-data-folder");
         Files.writeString(blockedDataFolder, "not a directory");
